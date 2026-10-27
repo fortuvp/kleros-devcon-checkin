@@ -3,6 +3,7 @@
 Visitors scan the booth QR, check in on their phone, confirm their Kleros blog subscription, and get a personalised "Picked for you" screen with their merch tier. More steps unlock better merch: Teal for checking in, Purple for joining the Kleros Telegram and following Kleros on X and LinkedIn, Gold for also getting the Kleros 101 quiz right. Staff hand over merch by the colour on the screen. Every check-in lands in a Google Sheet, matched to a Kleros use case with a priority and a suggested next step.
 
 - **Site:** static HTML/JS in `site/`, no build step. Goes live at **https://devcon.kleros.io** (same URL every Devcon; the printed QR codes point there).
+- **Game:** **https://devcon.kleros.io/curate/** (`site/curate/`) is a 60-second Kleros Curate game and a second way up the same merch ladder. Static like the rest: no backend, nothing sent anywhere. See [Curate game (/curate)](#curate-game-curate).
 - **Backend:** Google Apps Script web app in `apps-script/`, writing to a Google Sheet in the weiwei@kleros.io Drive.
 - **Preview:** https://kleros-devcon.pages.dev (temporary copy on Wei Wei's Cloudflare account, for review only).
 
@@ -26,17 +27,26 @@ Short version: [`docs/DEPLOY.md`](docs/DEPLOY.md). `bash scripts/package.sh` bui
 | `site/config.js` | Backend URL, edition/city, privacy contact, blog URL, merch tiers, Telegram bot and follow links, Community Hubs card |
 | `site/quiz.js` | The three Kleros 101 questions, with why each answer is right or wrong |
 | `site/assets/merch/` | Merch thumbnails for the tiers (from the Web3Merch mock-ups) |
-| `site/_headers`, `site/robots.txt` | No-cache for `config.js`/`matching.js`/`quiz.js`, dashboard kept out of search engines |
+| `site/curate/index.html` | Curate game page (`/curate/`): markup, styles and templates; loads `/config.js` and the scripts below |
+| `site/curate/settings.js` | Every game knob: clock, windows, points, tier thresholds, the check-in rule, sold-out tiers and substitutes ([stock runbook](#curate-game-curate)) |
+| `site/curate/decks.js` | The entries: wallet lists (Tokens, Websites, Contract labels) and the Mumbai city list, the practice cards and the per-client copy |
+| `site/curate/rules.js` | Pure game rules: deck order, challenge windows, judging, points, tiers (also run by `scripts/curate-check.js`) |
+| `site/curate/objects.js` | The 3D-looking items (coins, shields, contract tags, landmarks) painted on a 2D canvas; loads `gl.js` |
+| `site/curate/gl.js` | Optional in-house WebGL renderer for the same items (no library), loaded after first paint; never fetched with `?lite=1`, Save-Data, low-memory phones or no WebGL |
+| `site/curate/rewards.js` | Merch ladder, report, ticket, staff stamp and counted shifts; the only game code that reads the check-in or writes storage |
+| `site/curate/game.js` | Game engine: brief, practice, shift, swipes, buttons and keys, toasts, pause, relaxed timing |
+| `site/_headers`, `site/robots.txt` | No-cache for `config.js`/`matching.js`/`quiz.js` and the `site/curate/` scripts, dashboard kept out of search engines |
 | `apps-script/Code.gs` | Backend: check-ins, Sheet tabs and views, research-agent API, blog gate, merch tiers, Telegram bot |
 | `apps-script/Matching.gs` | Copy of `site/matching.js` for the backend (kept in sync by the bundle script) |
 | `scripts/apps-script-bundle.sh` | Prints the backend as the single file that lives in the Apps Script editor |
 | `scripts/package.sh` | Builds `dist/kleros-devcon-deploy.zip`: Netlify-ready site, backend file, deploy guide |
+| `scripts/curate-check.js` | Checks the game's decks and rules and lints `site/curate/*.js` for ES5 (Node, no dependencies); `--sim` reruns the tier calibration |
 | `docs/DEPLOY.md` | Step-by-step deploy: Netlify, domain, backend, keys |
-| `qr/` | Booth QR generator (`make_qr.py`) and the print-ready codes |
+| `qr/` | Booth QR generator (`make_qr.py`) and the print-ready codes: `devcon-kleros-qr-*` for the check-in, `curate-kleros-qr-*` for the game (see [Booth QR codes](#booth-qr-codes)) |
 | `docs/RESEARCH_AGENT.md` | Playbook for the agents that research leads |
 | `docs/telegram-bot-avatar.png` | @KlerosDevconBot's profile picture (the gold Kleros Juror seal from the tattoo sheet) |
 
-Run locally: `python3 -m http.server -d site 8000`. Note `config.js` points at the **live** backend; set `endpoint: ''` for demo mode (check-ins stay on the device, no emails sent).
+Run locally: `python3 -m http.server -d site 8000`. Note `config.js` points at the **live** backend; set `endpoint: ''` for demo mode (check-ins stay on the device, no emails sent). The game is at http://localhost:8000/curate/: it loads the same `config.js` (for the merch names and pictures) but never posts to the backend.
 
 ## How a check-in works
 
@@ -44,7 +54,7 @@ Run locally: `python3 -m http.server -d site 8000`. Note `config.js` points at t
 2. **Saved.** The check-in is queued on the phone and posted to the backend; it leaves the queue only when the backend confirms the save (retries are safe, the backend dedupes on a client id). `keepalive` lets it finish if the visitor closes the page.
 3. **Blog sign-up (only if they ticked the box).** The page asks Ghost (blog.kleros.io) to send its own "Complete your sign up" email. Ghost only creates the subscriber once they tap *Confirm signup*. Visitors who leave the box unticked skip steps 3–4 and go straight to the final screen.
 4. **Confirm your email.** The page polls the backend every 4 s (immediately when the visitor returns from their mail app). Ghost's webhook marks **Newsletter = Confirmed** in the Sheet (*Yes* = ticked, not confirmed yet; *No* = box left unticked). With the wait off, the screen still stays up 15 s before moving on.
-5. **Final screen.** Only then: a ticket in their tier's colour (reward, name, code and a ticking clock, so a screenshot is easy to spot), the level-up steps, Kleros 101, then "Picked for you": their best-fit Kleros area (with why, and their own words quoted back), another area they picked, a tip for their role, the other headline areas, the Community Hubs card and links. All links go to docs.kleros.io, ai.kleros.io or the Kleros Telegram (Booth Guidelines: no token pages).
+5. **Final screen.** Only then: a ticket in their tier's colour (reward, name, code and a ticking clock, so a screenshot is easy to spot), the level-up steps, Kleros 101, a **Play Curate** card that opens the game at `/curate/` (hidden on a `?kiosk=1` tablet), then "Picked for you": their best-fit Kleros area (with why, and their own words quoted back), another area they picked, a tip for their role, the other headline areas, the Community Hubs card and links. All links go to docs.kleros.io, ai.kleros.io or the Kleros Telegram (Booth Guidelines: no token pages).
 6. **Level up.** Join the Kleros Telegram (checked by @KlerosDevconBot), tap Follow on X and LinkedIn (counted on tap) → Purple. Plus all three Kleros 101 questions right → Gold. A wrong answer is crossed out with the reason, and they pick again.
 7. **One check-in per person.** Reopening the page on the same phone shows the same screen, tier and progress. A second check-in with an email (or Telegram account) that already reached the final screen shows **Already claimed** instead of a tier. "Check in someone else" only exists on a staff tablet opened with `?kiosk=1` (Teal only: the tablet resets after a few seconds).
 
@@ -112,6 +122,8 @@ One item per person, from their tier. PoH charms (50) and PoH tees (50) are left
 
 Purple and Gold are easy to reach (the quiz can't be failed), so most visitors will aim for them. Split the stock per day (about 25 kurtas and 50 Purple items a day over the four days) and give the tier below when today's runs out.
 
+**One item per person, across both routes.** The check-in and the [Curate game](#curate-game-curate) climb the same ladder and share the same stock. A visitor gets one item, from the higher of their two tiers: the game's ticket already shows the higher one, and a Gold game ticket always carries the check-in's K- code. PoH tees and charms can stand in for a tier that runs out: `substitutes` in `site/curate/settings.js` swaps that tier's reward text and pictures in the game (see the stock runbook below).
+
 **Telegram check.** The page links to `t.me/KlerosDevconBot?start=<client id>`. The visitor taps Start; the backend reads the bot's messages (`getUpdates`) whenever a waiting page polls and every minute from a trigger, asks Telegram whether that account is in the group (`getChatMember`), saves the result and replies in the chat (with a "Join the Kleros group" button if they aren't in yet). One Telegram account unlocks one check-in.
 
 Setup, once:
@@ -123,6 +135,73 @@ Setup, once:
 Bot profile (name, description, picture `docs/telegram-bot-avatar.png`) is set in @BotFather.
 
 **Already claimed.** The first check-in of an email to reach the final screen gets the merch (Sheet: *Claim = Claimed*). A later check-in with the same email, from another phone or browser, gets *Already claimed* and no tier; so does a check-in whose Telegram account already unlocked another one. Reopening the page on the same phone is the same check-in, so a visitor who confirms now and comes back for merch later keeps their tier.
+
+### Curate game (/curate)
+
+https://devcon.kleros.io/curate/ teaches Kleros Curate by doing it, and is a second way up the merch ladder. Visitors reach it from the **Play Curate** card on their final screen or from its own QR poster. It is plain static files in `site/curate/`, sharing `/config.js` (merch names and pictures) and `/assets/` with the check-in.
+
+**How to play.** A fictional client hired you to keep its list clean: a **Wallet app** (Tokens, Websites and Contract labels lists; the default) or a **City guide app** (Mumbai sights, for visitors who aren't into crypto). Fakers put down a deposit to sneak entries in.
+
+- One **shift** is 60 s and up to 20 entries, 8 of them fake.
+- Swipe left (or *← Challenge*) to challenge a fake: you win the faker's deposit as your bounty. Swipe right (or *Let it through →*) to let a good entry through.
+- Tapping a line marks it as evidence (+25 when it is the faulty line). It never decides the entry.
+- Each entry has a short challenge window (7 s, then 5.5 s, then 4.5 s from Rush hour at 40 s). When it runs out, the entry is listed, fake or not.
+- The first shift per client on a phone starts with two untimed practice cards. *Relaxed timing* gives 90 s with no per-entry countdown.
+- Keyboard: ← or A challenges, → or D lets through, 1–3 mark evidence, Esc or P pauses.
+
+| Outcome | Points |
+|---|---|
+| Fake challenged | +100, plus 25 with the right evidence line |
+| Good entry let through | +25 (+10 when its window ran out) |
+| Good entry challenged | −75 (client trust −5) |
+| Fake listed | −75 (client trust −15) |
+| Every 5 right in a row | +50 |
+| All 20 decided early with 2 mistakes or fewer (standard timing only) | +5 per second left |
+
+Client trust only drives the report's headline; it never ends a shift. The final score is never below 0.
+
+**Score → tier.** Names, rewards and pictures come from `config.js` `merch` by position (`free`, then `tiers[0..2]`); thresholds and rules live in `site/curate/settings.js`.
+
+| Tier | Game route | Check-in route (unchanged) | Merch (today's `config.js`) |
+|---|---|---|---|
+| Everyone | Finish a shift | Visit the booth | Stickers and metallic tattoos |
+| Teal | 450 points | Check in | Kleros flip-flops |
+| Purple | 950 points | + Telegram, X and LinkedIn | Copper bottle or gamcha |
+| Gold | 1,450 points **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
+
+The thresholds come from a simulation of player profiles (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Letting everything through, challenging everything or doing nothing never reaches Teal. Each phone gets **3 counted shifts per day**; a shift counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted shift. Later shifts say *Practice shift: not counted today*.
+
+**Gold needs a check-in.** A Gold score needs a confirmed check-in on the same phone (`checkinNeededFrom: 3`), read from the check-in's own storage with the same confirmation rule as the check-in page. Until then the ticket shows Purple with a gold strip linking to `/`; coming back to `/curate/` after checking in upgrades it. So every Gold ticket carries a K- code the merch desk can dedupe. Teal and Purple need no check-in ("scan and play"); `checkinNeededFrom: 1` makes every tier above Everyone need one.
+
+**The ticket** looks like the check-in ticket: tier colour, sheen, pulsing live dot, ticking clock and today's date. Tapping it turns it over (shift, stats and codes on the back). The code is the check-in's **K-** code when the visitor checked in on this phone, otherwise a game **C-** code. The ticket shows the higher of the game and check-in tiers, and a check-in marked *Already claimed* shows *Merch goes with your first check-in* instead of a tier.
+
+**Staff card** (also printed and laminated for the booth):
+
+1. Check that the clock ticks and the date is today. Ask them to tap the ticket: it turns over. A frozen clock means a screenshot, so no merch.
+2. Read the colour **and** the tier name. One item per person.
+3. If the code starts with **K-**, search it on the merch desk (devcon.kleros.io/admin) first. If it says Merch given or Already claimed, no merch. Otherwise hand over and tick Merch given. A desk handout never shows on the visitor's phone.
+4. Hold the code for 2 s and tap Mark collected.
+
+Mark collected greys the ticket out on that phone for the rest of Devcon (Undo for 5 s). Keyboard users get a *Mark as collected* button on the back of the ticket.
+
+**Stock runbook.** The game shares the check-in's stock. The levers are in `site/curate/settings.js`:
+
+| Situation | Change |
+|---|---|
+| More than half of today's ~25 kurtas gone by 14:00 | `tiers[3]` 1450 → 1550 |
+| Kurtas out for the day | `soldOut: ['gold']`, or `substitutes.gold` = PoH tee |
+| Flip-flops or bottles running low | Raise `tiers[1]`/`tiers[2]` by 100, or `checkinNeededFrom: 1` |
+| Next morning | Revert |
+
+Edit `site/curate/settings.js` and deploy. The `no-cache` header (`site/_headers`) means phones pick the change up on their next load. A sold-out tier drops game scores to the next open tier, and the ticket says so (*Kleros kurtas are gone for today, so your Gold score gets a copper bottle or gamcha.*). A substitute is `{ reward, img: [...] }`, for example `substitutes.gold = { reward: 'PoH tee', img: ['assets/merch/tee.jpg'] }`. These levers change the game only, not the check-in tiers.
+
+**Storage: `kleros_devcon_curate`.** Everything the game keeps is in this one `localStorage` key on the phone: chosen client, relaxed timing, practice done, the entries seen last shift, today's counted shifts and best run, the last 12 runs, and Collected. On a new day the counted shifts and best run reset; Collected stays. The game reads the check-in's `kleros_devcon_self` and never writes it. When storage is blocked the game still works, and the ticket says it won't be kept. A private tab, cleared site data or a second phone starts the counted shifts and Collected afresh; Gold stays safe because the desk dedupes its K- code.
+
+**Kiosk mode.** `/curate/?kiosk=1` on a booth tablet, the same flag as the check-in: practice every time (skippable), no storage read or write at all, tier capped at Teal (`kioskMaxTier`), no staff stamp, header link or back link, and *Next curator* resets the game 20 s after the ticket opens (or after 60 s idle on the report). The check-in's kiosk tablet hides the Play Curate card, because it resets after 12 s.
+
+**No backend.** No Apps Script change, no Sheet tab and no request to the backend: game scores are not in the Sheet or the dashboard. The only outside requests are the Google Fonts the check-in already uses. `?lite=1` forces the static 2D items (no WebGL), which is also the automatic fallback.
+
+**Checks.** Run `node scripts/curate-check.js` after editing `decks.js`, `rules.js` or `settings.js`. It validates the decks (unique ids, every fake has its fix and a short why, no links or markup), builds 2,000 shifts per client to check the deck order rules, and lints `site/curate/*.js` for ES5. `node scripts/curate-check.js --sim` also reruns the tier calibration and prints the tier shares; it fails if lazy play ever reaches Teal or the shares drift more than 4 points from the ones above.
 
 ## The Sheet
 
@@ -142,19 +221,31 @@ After changing it: redeploy the site and the backend, then Sheet menu *Kleros �
 |---|---|
 | Check-ins, Sheet edits, team notes, research | Instantly; the dashboard re-reads every minute |
 | `site/` | On the next Netlify deploy (a push, once the repo is connected) |
+| `site/curate/settings.js` (stock levers) | On the next deploy; phones pick it up on their next load (`no-cache`) |
 | `apps-script/` | Only after pasting the bundle and deploying a new version |
 
 ## New Devcon year
 
 1. `site/config.js`: `edition`, `city`, `event`, Community Hubs.
 2. `site/matching.js`: move `focus: true` to that year's pipelines; adjust keywords.
-3. A fresh Sheet (new Apps Script project, "From scratch") or keep one and filter on **Event**.
-4. Redeploy. The QR codes stay the same.
+3. `site/curate/decks.js`: the game's content is per edition. Replace the Mumbai city list (sights, practice cards and the city client's copy) with the new host city's, re-check every wallet entry (domains, tickers, contract labels), then run `node scripts/curate-check.js --sim`.
+4. A fresh Sheet (new Apps Script project, "From scratch") or keep one and filter on **Event**.
+5. Redeploy. The QR codes stay the same.
 
 ## Booth QR codes
 
 `python3 qr/make_qr.py` regenerates the booth poster (6×8 in, plus an A4 PNG and print-ready PDF), square sticker and plain PNG/SVG for https://devcon.kleros.io, and checks each one scans (OpenCV and ZXing; needs `qrcode[pil]`, `opencv-python-headless`, `zxing-cpp`). Keep the finder-eye corners small (`EYE_R`) so every scanner finds the code.
 
+The Curate game has its own poster set, written beside the check-in one without touching it (keep the trailing slash in the address):
+
+```bash
+python3 qr/make_qr.py https://devcon.kleros.io/curate/ --name=curate-kleros-qr --headline="Play Kleros Curate" --perk="Catch the fakes in 60 s, win merch"
+```
+
+It writes `curate-kleros-qr-poster.png`, `curate-kleros-qr-poster-a4.png` and `.pdf`, `curate-kleros-qr-square.png`, `curate-kleros-qr-plain.png` and `curate-kleros-qr-plain.svg` (QR version 4 at ECC H), and runs the same scan check. `--name=` sets the file prefix (lower-case letters, digits and `-`), `--headline=` and `--perk=` the two top lines. Without these flags the script writes the check-in set exactly as before. The game posters aren't in the repo yet: generate them on a machine with the Python packages above, and never regenerate the check-in posters just for this.
+
 ## Privacy
 
 The page carries its own privacy notice (controller: Cooperative Kleros; purposes include public-profile research; deletion on request). The blog box is never pre-ticked.
+
+The Curate game stores only on the phone. Scores, counted shifts and the ticket stay in the browser's `kleros_devcon_curate` key and are never sent anywhere; there is no form, no sign-up and no analytics. It reads the check-in saved on the same phone (name, K- code, tier) to show it on the ticket, and never changes it. Its fine print says so: "Your game data stays on this phone."

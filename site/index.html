@@ -131,6 +131,12 @@
   .team-cta small { display: block; margin-top: 2px; font-size: 12.5px; color: #4a4170; }
   .team-cta i { font-style: normal; font-size: 20px; color: #4d00b4; }
   .team-cta:hover { background: #fff; }
+  /* "Play Curate": a dark lit-edge card, unlike the paper Connect button. */
+  .game-cta { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 0 14px; padding: 14px 18px; border-radius: 16px; color: var(--text); text-decoration: none;
+    border: 1.5px solid transparent; background: linear-gradient(180deg, #2c1266, #150437) padding-box, linear-gradient(120deg, #c084ff, #27cdfe) border-box; }
+  .game-cta b { display: block; font: 700 16px Urbanist, Inter, sans-serif; }
+  .game-cta small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+  .game-cta i { font-style: normal; font-size: 20px; color: #27cdfe; }
   .lanes li + li::before { content: "◆"; color: var(--gold); font-size: 7px; margin: 0 9px; vertical-align: 2px; }
 
   .card {
@@ -693,6 +699,8 @@
         <p id="q-done-text"></p>
       </div>
     </section>
+
+    <a class="game-cta" id="game-cta" href="/curate/"><span><b>Play Curate</b><small>Catch the fakes in 60 s. Better score, better merch.</small></span><i aria-hidden="true">→</i></a>
 
     <div class="match blog" id="blog" hidden>
       <div class="kicker">Kleros blog</div>
@@ -1438,6 +1446,7 @@
   $('again').onclick = reset;
   // One check-in per phone: only a booth tablet (?kiosk=1) gets "Check in someone else".
   if (!KIOSK) $('again').hidden = true;
+  if (KIOSK) $('game-cta').hidden = true;   // a booth tablet resets after 12 s
 
   // Confirmation gate: the final screen only appears once the visitor has done every required step and
   // confirmed their Kleros blog subscription (the link in Ghost's own email). Ghost reports it to the backend

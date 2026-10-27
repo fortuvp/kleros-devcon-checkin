@@ -4,6 +4,20 @@
   Cache-Control: no-cache
 /quiz.js
   Cache-Control: no-cache
+/curate/settings.js
+  Cache-Control: no-cache
+/curate/decks.js
+  Cache-Control: no-cache
+/curate/rules.js
+  Cache-Control: no-cache
+/curate/objects.js
+  Cache-Control: no-cache
+/curate/gl.js
+  Cache-Control: no-cache
+/curate/rewards.js
+  Cache-Control: no-cache
+/curate/game.js
+  Cache-Control: no-cache
 /admin
   X-Robots-Tag: noindex
 /admin.html

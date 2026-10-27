@@ -7,10 +7,18 @@ mark, Urbanist + Space Mono, and a crisp violet-to-blue QR with the Kleros mark 
     python3 qr/make_qr.py --qr-art=path.png    # use a designed QR image instead of drawing one
                                                # (it must scan to the address; the self-check fails otherwise)
 
+A second poster set (the Curate game) uses three more flags. Without them the output is the check-in set, unchanged:
+    --name=curate-kleros-qr                    # file prefix instead of devcon-kleros-qr (a-z, 0-9 and - only)
+    --headline="Play Kleros Curate"            # top line instead of "Check in with Kleros"
+    --perk="Catch the fakes in 60 s, win merch"   # pill line instead of "Claim your limited-edition merch"
+
+    python3 qr/make_qr.py https://devcon.kleros.io/curate/ --name=curate-kleros-qr \\
+        --headline="Play Kleros Curate" --perk="Catch the fakes in 60 s, win merch"
+
 The footer line is read from the site (<div class="tagline"> in site/index.html), so the poster always says
 what the site says: rerun this script after changing it.
 
-Writes into qr/:
+Writes into qr/ (with --name=, that prefix replaces devcon-kleros-qr in every file name):
   devcon-kleros-qr-poster.png   1800x2400 portrait card (6x8 in at 300 dpi) for a table stand
   devcon-kleros-qr-poster-a4.png/.pdf   the same poster on A4 (2480x3508 at 300 dpi), PDF ready to print
   devcon-kleros-qr-square.png   1500x1500 sticker / social square
@@ -32,6 +40,10 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 URL = ARGS[0] if ARGS else "https://devcon.kleros.io"
 QR_ART = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--qr-art=")), "")
+# File prefix, so a second poster set (the Curate game) never overwrites the check-in posters.
+NAME = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--name=")), "devcon-kleros-qr")
+if not re.fullmatch(r"[a-z0-9-]+", NAME):   # a bare prefix: no paths, spaces or dots
+    sys.exit("bad --name")
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "..", "site", "assets")   # the flat Kleros mark, shared with the site
 FONTS = os.path.join(HERE, "fonts")
@@ -47,8 +59,8 @@ INK_A, INK_B = (77, 0, 180), (40, 72, 206)
 # scanners (OpenCV among them) stop finding them past ~0.5, so keep these small.
 EYE_R = (0.45, 0.22, 0.32)
 
-HEADLINE = "Check in with Kleros"
-PERK = "Claim your limited-edition merch"
+HEADLINE = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--headline=")), "Check in with Kleros")
+PERK = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--perk=")), "Claim your limited-edition merch")
 DOMAIN = re.sub(r"^https?://", "", URL).rstrip("/")
 
 
@@ -555,7 +567,7 @@ def square():
 def plain():
     img = Image.new("RGBA", (2000, 2000), WHITE + (255,))
     img.alpha_composite(qr_image(1700), (150, 150))   # 150px white margin as quiet zone
-    write_svg(os.path.join(HERE, "devcon-kleros-qr-plain.svg"))
+    write_svg(os.path.join(HERE, NAME + "-plain.svg"))
     return img.convert("RGB")
 
 
@@ -645,7 +657,7 @@ def self_check(paths):
 if __name__ == "__main__":
     out = []
     for name, fn in (("poster", poster), ("poster-a4", lambda: poster(2480, 3508)), ("square", square), ("plain", plain)):
-        p = os.path.join(HERE, f"devcon-kleros-qr-{name}.png")
+        p = os.path.join(HERE, f"{NAME}-{name}.png")
         im = fn()
         im.save(p, dpi=(300, 300))
         if name == "poster-a4":
