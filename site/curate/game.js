@@ -32,6 +32,13 @@
   function rw(fn, a, b) { var r = Rw(); return r ? r[fn](a, b) : null; }
   // Restarts a one-shot CSS animation class.
   function bump(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+  function focusEl(el) { if (!el) return; try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
+  // Parks focus on a heading or region that is not a control (tabindex -1, no ring), so it never drops to <body>.
+  function park(id) {
+    var el = $(id);
+    if (el && !el.hasAttribute('tabindex')) { el.setAttribute('tabindex', '-1'); el.style.outline = 'none'; }
+    focusEl(el);
+  }
   var timers = [];
   function later(fn, ms) { var t = setTimeout(fn, ms); timers.push(t); return t; }
   function clearTimers() { while (timers.length) clearTimeout(timers.pop()); }
@@ -46,6 +53,8 @@
   var raf = 0, drag = null, press = null, flying = null, keyboard = false;
   var pStep = 0, pT0 = 0, pHinted = false;
   var heroDeck = '', chalArrow = '', sayT = 0;
+  var announcedTier = 0;     // highest tier toasted this shift: re-crossing a threshold stays quiet
+  var focusFirst = false;    // focus the next card that lands (after Start), so focus never sits on <body>
 
   // ---- Views and announcements ----
   var VIEWS = { brief: 'brief', play: 'play', report: 'report', ticket: 'ticketv' };
@@ -90,11 +99,13 @@
     // The hero keeps its SVG placeholder when objects.js is missing.
     if (O() && heroDeck !== deckId && $('hero-objs')) { O().hero($('hero-objs'), deck.hero); heroDeck = deckId; }
   }
-  function goBrief() {
+  // focus: when the control that led here is gone (report, pause overlay, kiosk reset).
+  function goBrief(focus) {
     mode = 'brief';
     renderBrief();
     rw('refreshBrief');
     showView('brief');
+    if (focus) park('brief-title');
   }
   function switchDeck() {
     setDeck(deckId === 'wallet' ? 'mumbai' : 'wallet');
@@ -210,7 +221,7 @@
     ob('state', top._obj, 'pending');
     if (!flying) ob('live', top._obj);
     setChalLabel(top);
-    if (keyboard && !explainOpen) top.focus();
+    if ((keyboard || focusFirst) && !explainOpen) { focusFirst = false; focusEl(top); }
   }
 
   // ---- Evidence ----
@@ -258,7 +269,7 @@
   // ---- Toasts ----
   // t = { tone: good|bad|info|tier, title, line, fix: [label, was, is], jurors, thumb, ms, quiet }
   function toast(t) {
-    var box = $('toasts'), el, f, j, i;
+    var box = $('toasts'), el, f, j, i, c;
     if (!box) return;
     el = clone('tpl-toast');
     el.setAttribute('data-tone', t.tone || 'info');
@@ -277,6 +288,11 @@
     if (t.quiet) el.setAttribute('aria-hidden', 'true');
     box.insertBefore(el, box.firstChild);
     while (box.children.length > 2) box.removeChild(box.lastChild);
+    // Two tall toasts can reach the top card's third row on a tall phone: drop the older one. The card's
+    // bottom comes from layout (a dragged card is rotated); #toasts is a static child of .dock, so rects.
+    c = cards[0];
+    c = c ? $('stack').getBoundingClientRect().top + c.offsetTop + c.offsetHeight - 18 : 0;
+    while (c && box.children.length > 1 && box.getBoundingClientRect().top < c) box.removeChild(box.lastChild);
     if (t.jurors) {
       j = slot(el, 'jurors'); j.hidden = false;
       for (i = 0; i < 3; i++) (function (dot, d) { setTimeout(function () { dot.classList.add('on'); }, d); })(j.children[i], 60 * (i + 1));
@@ -291,7 +307,8 @@
       case 'catch':
         t = { tone: 'good', jurors: true, ms: 1300,
               title: 'Rejected · Jurors 3–0 · ' + signed(P.catch) + ' bounty' + (o.evidence === 'sharp' ? ' · ' + signed(P.evidence) + ' sharp evidence' : '') };
-        if (o.evidence === 'wrong') { lab = labelOf(item, item.bad); t.line = 'The problem was the ' + lab.charAt(0).toLowerCase() + lab.slice(1) + '.'; t.ms = 2600; }
+        // The label is quoted, so any label reads (‘What it does’ cannot be lower-cased into the sentence).
+        if (o.evidence === 'wrong') { lab = labelOf(item, item.bad); t.line = 'The problem was the “' + lab + '” line.'; t.ms = 2600; }
         return t;
       case 'listed': return { tone: 'good', ms: 1300, title: 'Listed · ' + signed(P.letThrough) };
       case 'autoListed': return { tone: 'good', ms: 1300, title: 'No challenge in time · Listed · ' + signed(P.autoListed) };
@@ -330,7 +347,10 @@
     r = ruling(o, item); r.quiet = true;
     toast(r); say(r.title);
     if (res.streakBonus) toast({ tone: 'good', ms: 1300, title: 'Clean streak ×' + score.streak + ' · ' + signed(res.streakBonus) });
-    if (res.tierTo > res.tierFrom && !(KIOSK && res.tierTo > S.kioskMaxTier)) tierToast(res.tierTo);
+    if (res.tierTo > announcedTier) {
+      if (!(KIOSK && res.tierTo > S.kioskMaxTier)) tierToast(res.tierTo);
+      announcedTier = res.tierTo;
+    }
     hudScore(score.raw, o.trust < 0);
     if (!o.correct) { graceNext = true; buzz([20, 40, 20]); } else if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o, action === 'timeout');
@@ -469,15 +489,18 @@
     hudClock.s = -1;
     txt('client-name', deck.client);
     showView('play');
+    focusFirst = true;   // Start is gone: the first card that lands takes focus
     if (forcePractice || !practised()) startPractice(); else beginShift();
   }
   function beginShift() {
     freshPlay();
     mode = 'banner';
+    // The banner has no control: focus waits on #play, then moves to the first card when it lands.
+    park('play'); focusFirst = true;
     show('practice-bar', false); show('coach', false);
     run = R.buildRun(deckId, rw('lastIds', deckId) || []).items; idx = 0;
     rw('saveLastIds', deckId, run.map(function (x) { return x.id; }));
-    score = R.newScore(); info = null; elapsed = 0; graceNext = false;
+    score = R.newScore(); announcedTier = 0; info = null; elapsed = 0; graceNext = false;
     said30 = said10 = rushed = false;
     hudScore(0); hudClock(total * 1000);
     preloadThumbs();
@@ -492,11 +515,13 @@
   }
   // by: time | done | quit. The card on screen at time-out is discarded: not reviewed, not a leak.
   function endShift(by) {
-    var left, fb;
+    var left, fb, d = drag;
     if (mode !== 'shift') return;
     left = Math.max(0, total * 1000 - elapsed);
+    // The discarded card drops its drag pose and stamp, so nothing suggests the move counted. Before mode
+    // changes, so the chip gets its normal window text back.
+    if (d) { drag = null; if (d.on) springBack(d.card); else edges(0, 0); }
     mode = 'ended'; clockOn = false;
-    if (drag) { drag = null; edges(0, 0); }
     fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
     hudScore(score.raw);
     if (by === 'done') {
@@ -519,7 +544,7 @@
     freshPlay();
     mode = 'ended';
     say('Shift over. ' + fmt(s.final) + ' points.');
-    if (Rw()) Rw().finishShift(sum); else goBrief();
+    if (Rw()) Rw().finishShift(sum); else goBrief(true);
   }
   // Kiosk "next curator", and a clean slate for debugging: back to the brief with fresh state.
   function reset() {
@@ -527,7 +552,7 @@
     mode = 'brief'; score = null; info = null; run = []; idx = 0;
     if (KIOSK) { relaxed = false; setDeck('wallet'); } else loadPrefs();
     heroDeck = '';
-    goBrief();
+    goBrief(true);
   }
 
   // ---- Loop ----
@@ -583,6 +608,8 @@
   function onMove(e) {
     var d = drag, t = now();
     if (!d || e.pointerId !== d.id) return;
+    // A mouse/pen press whose release we never saw (it ended off #stack): hover moves must not drag.
+    if (e.pointerType !== 'touch' && !e.buttons) { drag = null; if (d.on) springBack(d.card); return; }
     d.dx = e.clientX - d.x0; d.dy = e.clientY - d.y0;
     if (Math.abs(d.dx) > 8 || Math.abs(d.dy) > 8) press.moved = true;
     d.buf.push([t, e.clientX]);
@@ -674,14 +701,20 @@
     var k = e.key, top = cards[0], rows;
     if (e.ctrlKey || e.metaKey || e.altKey || !/^(practice|between|banner|shift)$/.test(mode)) return;
     if ($('err') && !$('err').hidden) return;
-    if (explainOpen) {
-      if (k === 'Enter' || k === 'Escape') { e.preventDefault(); closeExplain(); }
-      else if (k === 'Tab') { e.preventDefault(); $('explain-ok').focus(); }
+    // A held key acts once: no decision bursts, no pause/resume flicker, no evidence flicker.
+    if (e.repeat && k !== 'Tab') {
+      if (/^(ArrowLeft|ArrowRight|Escape|Enter|Spacebar|[ aAdDpP])$/.test(k)) e.preventDefault();
       return;
     }
+    // The pause overlay sits above #explain, so it takes the keys first; resume() hands focus back to Got it.
     if (paused) {
       if (k === ' ' || k === 'Spacebar' || k === 'Escape') { e.preventDefault(); resume(); }
       else if (k === 'Tab') trapTab(e, [$('resume'), $('end-shift')]);
+      return;
+    }
+    if (explainOpen) {
+      if (k === 'Enter' || k === 'Escape') { e.preventDefault(); closeExplain(); }
+      else if (k === 'Tab') { e.preventDefault(); $('explain-ok').focus(); }
       return;
     }
     if (k === 'Escape' || k === 'p' || k === 'P') { e.preventDefault(); keyboard = true; pause(); return; }
@@ -702,11 +735,11 @@
   function on(id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); }
   function wire() {
     var st = $('stack');
-    on('start', function () { startFlow(false); });
-    on('practice-again', function () { startFlow(true); });
+    on('start', function (e) { keyboard = e.detail === 0; startFlow(false); });
+    on('practice-again', function (e) { keyboard = e.detail === 0; startFlow(true); });
     on('deck-switch', function () { switchDeck(); goBrief(); });
     on('relaxed', toggleRelaxed);
-    on('skip-practice', function () { if (mode === 'practice') endPractice(false); });
+    on('skip-practice', function (e) { keyboard = e.detail === 0; if (mode === 'practice') endPractice(false); });
     on('b-chal', function (e) { keyboard = e.detail === 0; decide('challenge'); });
     on('b-keep', function (e) { keyboard = e.detail === 0; decide('letThrough'); });
     on('pause', function (e) { keyboard = e.detail === 0; pause(); });
@@ -714,15 +747,17 @@
     on('end-shift', endFromPause);
     on('explain-ok', closeExplain);
     on('err-reload', function () { location.reload(); });
-    on('again', function () { if (KIOSK) reset(); else startFlow(false); });
-    on('rep-switch', function () { switchDeck(); goBrief(); });
-    on('t-again', function () { startFlow(false); });
+    on('again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
+    on('rep-switch', function () { switchDeck(); goBrief(true); });
+    on('t-again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
     if (st) {
       st.addEventListener('pointerdown', onDown);
       st.addEventListener('pointermove', onMove);
       st.addEventListener('pointerup', onUp);
       st.addEventListener('pointercancel', onCancel);
-      st.addEventListener('lostpointercapture', onCancel);
+      // Only #stack's own capture loss counts: a touch's implicit capture on the child is handed over when the
+      // drag captures on #stack, and that handoff fires lostpointercapture at the child (it bubbles here).
+      st.addEventListener('lostpointercapture', function (e) { if (e.target === st) onCancel(e); });
       st.addEventListener('click', onClick);
     }
     document.addEventListener('keydown', onKey);
@@ -759,7 +794,7 @@
     show('paused', false);
     ob('resume');
     if (mode === 'shift') endShift('quit');
-    else { freshPlay(); goBrief(); }
+    else { freshPlay(); goBrief(true); }
   }
   // Relaxed mode: after a mistake the next card stays hidden and the clock waits until Got it.
   function openExplain(r) {

@@ -5,7 +5,7 @@
 (function () {
   // ---- Lists ----
   var WALLET = {
-    sites: { name: 'Websites', policy: 'Policy: the app’s official website only. No lookalikes.',
+    sites: { name: 'Websites', policy: 'Policy: official website, every line true. No lookalikes.',
              fields: [['app', 'App'], ['site', 'Website'], ['does', 'What it does']] },
     tokens: { name: 'Tokens', policy: 'Policy: coin, name and ticker must be the same token. No ads.',
               fields: [['coin', 'Coin'], ['name', 'Name'], ['ticker', 'Ticker']], objField: 'coin' },
@@ -240,7 +240,11 @@
         quotes: ['“Visitors found every sight. Same time tomorrow?”',
                  '“A couple of wrong sights slipped in. We filed removal requests.”',
                  '“Visitors went to the wrong places. We’re pausing the list.”'],
-        quoteBy: 'City guide app (fictional client)'
+        quoteBy: 'City guide app (fictional client)',
+        // Report payoff by the same trust bands; rewards.js appends the bounty sentence. The wallet uses its default.
+        payoffs: ['{client} kept {trust}% of visitors’ trust, so they keep using it and it keeps earning.',
+                  '{client} kept {trust}% of visitors’ trust. Each wrong sight that got listed cost it visitors.',
+                  '{client} lost visitors’ trust (down to {trust}%): wrong sights reached them, and it stops earning until the list is clean.']
       },
       hero: [{ shape: 'arch', color: '#e8c79a' }, { shape: 'bridge', color: '#9fb4d8' }, { shape: 'dome', color: '#f1ecff' }],
       lists: MUMBAI,

@@ -175,7 +175,8 @@
     for (i = 0; i < S.length; i += 2) p.push((S[i] - 50) / 50, ((mid ? 50 : 100) - S[i + 1]) / 50);
     return p;
   }
-  var STEEL = [.78, .8, .88, 0], DARK = [.102, .027, .239, 0], GOLD = [.788, .635, .353, 0];
+  // Plinth colours sit a little under the static ones (top #2e1866 to #1a073d, lip around #a58344): warm light lifts them
+  var STEEL = [.78, .8, .88, 0], DARK = [.07, .022, .17, 0], GOLD = [.6, .48, .24, 0];
 
   // Rotate a Geo’s positions and normals in place (yaw about y, then pitch about x).
   function turn(g, a, b) {
@@ -217,10 +218,14 @@
       for (i = 0; i < q.length; i++) q[i] *= .85;
       g = new Geo(); g2 = new Geo();
       extrude(g, q, .18, .02, { cap: WHITE, side: [.62, .6, .66, 1] });
-      for (i = 0; i < g.v.length; i += STRIDE) g.v[i + 1] += .001;
+      for (i = 0; i < g.v.length; i += STRIDE) {   // lit from the top, like the static face gradient (1.12 to .8)
+        var vk = .8 + .32 * g.v[i + 1] / 1.7;
+        g.v[i + 8] *= vk; g.v[i + 9] *= vk; g.v[i + 10] *= vk;
+        g.v[i + 1] += .001;
+      }
       lathe(g2, [[0, 0], [.95, 0], [1, -.04], [1, -.13], [.94, -.17], [0, -.17]], 48, { axis: 'y',
         col: function (k) { return k > 0 && k < 4 ? GOLD : DARK; } });
-      parts.push({ g: g, metal: .25 }, { g: g2, metal: .1, rim: .25 });
+      parts.push({ g: g, metal: .25, rim: .3, warm: 1 }, { g: g2, metal: .1, rim: .25, warm: 1 });
     }
     var geos = [];
     for (i = 0; i < parts.length; i++) geos.push(parts[i].g);
@@ -238,9 +243,11 @@
   ].join('\n');
   // Lambert + hemisphere ambient + Blinn + a procedural softbox for metals + a Fresnel rim tinted by the Curate
   // status (iridescent when uRimMix is 0) + dissolve. highp only where the GPU has it: the reeding needs it.
+  // uWarm = 1 for landmarks: neutral ambient, rim scaled by surface lightness and a luminance-only exposure curve,
+  // so sandstone stays sandstone (per-channel exposure and violet ambient turned it grey-lavender).
   var FS = [
     '#ifdef GL_FRAGMENT_PRECISION_HIGH', 'precision highp float;', '#else', 'precision mediump float;', '#endif',
-    'uniform vec3 uTint,uRim;uniform float uRimK,uRimMix,uMetal,uTexOn,uDis,uAlpha,uMode,uT;',
+    'uniform vec3 uTint,uRim;uniform float uRimK,uRimMix,uMetal,uTexOn,uDis,uAlpha,uMode,uT,uWarm;',
     'uniform sampler2D uTex;',
     'varying vec3 vW,vN,vO,vT;varying vec2 vU,vF;varying vec4 vC;',
     'float hash(vec3 p){return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453);}',
@@ -256,15 +263,18 @@
     ' float ins=step(length(vU-.5),.5);',
     ' base=mix(base,tx.rgb,tx.a*vF.x*uTexOn*ins);',
     ' float d=max(dot(n,l),0.);',
-    ' vec3 amb=mix(vec3(.059,.039,.18),vec3(.227,.165,.478),.5+.5*n.y);',
+    ' float hy=.5+.5*n.y;',
+    ' vec3 amb=mix(mix(vec3(.059,.039,.18),vec3(.227,.165,.478),hy),mix(vec3(.09,.08,.08),vec3(.30,.28,.26),hy),uWarm);',
     ' float sp=pow(max(dot(n,normalize(l+v)),0.),mix(18.,64.,uMetal))*mix(.3,1.,uMetal);',
     ' float box=smoothstep(.85,.98,dot(reflect(-v,n),normalize(vec3(-.4,.7,.6))))*2.*uMetal;',
-    ' vec3 c=base*(amb*1.2+d*(1.05-.45*uMetal)+.3*max(dot(n,v),0.))+(sp+box)*mix(vec3(1.),base+.2,uMetal*.6);',
+    ' vec3 c=base*(amb*1.2+d*(1.05-.45*uMetal)+mix(.3,.22,uWarm)*max(dot(n,v),0.))+(sp+box)*mix(vec3(1.),base+.2,uMetal*.6);',
     ' float f=pow(1.-max(dot(n,v),0.),2.5);',
     ' vec3 iri=mix(vec3(.753,.518,1.),vec3(.153,.804,.996),.5+.5*sin(f*6.+uT*.6));',
-    ' c+=f*mix(iri,uRim,uRimMix)*1.3*uRimK;',
+    // warm: the idle iridescence stays faint, a status rim comes back to about full strength so it still reads
+    ' c+=f*mix(iri,uRim,uRimMix)*1.3*uRimK*mix(1.,(.15+.85*dot(base,vec3(.299,.587,.114)))*(1.+2.*uRimMix),uWarm);',
     ' if(uDis>0.&&hs<uDis+.07)c=mix(vec3(1.,.15,.1),vec3(1.,.7,.25),(hs-uDis)/.07)*1.4;',
-    ' c=c/(c+.6)*1.25;',
+    ' float L=dot(c,vec3(.299,.587,.114));',   // warm: near-linear with a soft shoulder, on luminance only
+    ' c=mix(c/(c+.6)*1.25,min(c*4./(L+3.),vec3(1.)),uWarm);',
     ' gl_FragColor=vec4(c*uAlpha,uAlpha);',
     '}'
   ].join('\n');
@@ -294,7 +304,7 @@
     gl.useProgram(prog);
     var i, names = ['aP', 'aN', 'aU', 'aC', 'aF'];
     for (i = 0; i < names.length; i++) A[names[i]] = gl.getAttribLocation(prog, names[i]);
-    names = ['uM', 'uVP', 'uNM', 'uTint', 'uRim', 'uRimK', 'uRimMix', 'uMetal', 'uTexOn', 'uDis', 'uAlpha', 'uMode', 'uT', 'uTex'];
+    names = ['uM', 'uVP', 'uNM', 'uTint', 'uRim', 'uRimK', 'uRimMix', 'uMetal', 'uTexOn', 'uDis', 'uAlpha', 'uMode', 'uT', 'uTex', 'uWarm'];
     for (i = 0; i < names.length; i++) U[names[i]] = gl.getUniformLocation(prog, names[i]);
     for (i in A) if (A[i] >= 0) gl.enableVertexAttribArray(A[i]);
     // Shadow quad on the floor plane, uv 0..1 for the radial falloff.
@@ -397,21 +407,30 @@
       canvas.width = bw; canvas.height = bh; cw = w; ch = h;
       VP = mul(persp(30 * D2R, w / h, .1, 20), view);
       // World units per CSS pixel at the object’s depth. Sizes match the static paint, so the cross-fade does not jump.
-      var px = 2 * 4.2 * Math.tan(15 * D2R) / h, hs = Math.min(h * 1.02, w / 2.7), i;
-      unit = objs.length > 1 ? .39 * hs * px : .385 * Math.min(w, h) * px;
-      for (i = 0; i < objs.length; i++) {
-        objs[i].x = objs.length > 1 ? (i - 1) * .86 * hs * px : 0;
-        objs[i].k = objs.length > 1 && i !== 1 ? .8 : 1;
+      var px = 2 * 4.2 * Math.tan(15 * D2R) / h, hb = heroBox(w, h), n = objs.length, i, sd;
+      unit = n > 1 ? .39 * hb.s * px : .385 * Math.min(w, h) * px;
+      for (i = 0; i < n; i++) {
+        sd = n > 1 && i !== 1;
+        objs[i].x = n > 1 ? (i - 1) * hb.dx * px : 0;
+        objs[i].y = sd ? -hb.dy * px : 0;
+        objs[i].k = sd ? hb.k : 1;
+        objs[i].roll = n > 1 ? (1 - i) * hb.r : 0;   // the static fan leans the side items out
       }
     }
     return true;
+  }
+  // The hero fan in CSS px from objects.js; the old layout covers a stale cached objects.js without _heroBox.
+  function heroBox(w, h) {
+    if (CO && CO._heroBox) return CO._heroBox(w, h);
+    var s = Math.min(h * 1.02, w / 2.7);
+    return { s: s, dx: .86 * s, dy: .06 * s, k: .8, r: .16 };
   }
   function inst(spec, i, n) {
     spec = spec || {};
     var used = [], k;
     for (k = 0; k < objs.length; k++) used.push(objs[k].tex);
     var m = meshFor(spec.shape || 'coin');
-    return { mesh: m, tex: texFor(spec, used), tint: rgb(spec.color), x: 0, k: 1, fan: n > 1 ? (i - 1) * 18 * D2R : 0,
+    return { mesh: m, tex: texFor(spec, used), tint: rgb(spec.color), x: 0, y: 0, k: 1, roll: 0, fan: n > 1 ? (i - 1) * 18 * D2R : 0,
       ph: i * 2.1, s: reduced ? 1 : .85, sv: 0, th: reduced || !m.pivot ? 0 : .22, tv: 0 };
   }
   function setState(s, instant) {
@@ -501,7 +520,9 @@
 
   function draw(t) {
     if (!VP || !objs.length) return;
-    var i, j, o, p, M, R, Mp, sc, sw = swayOn && !reduced, w = 2 * PI * t / 6000, yaw, pitch;
+    // The hero is a showcase: a slower, wider sway than a card (still no full spins)
+    var i, j, o, p, M, R, Mp, sc, sw = swayOn && !reduced, hero = objs.length > 1, yaw, pitch;
+    var w = 2 * PI * t / (hero ? 8000 : 6000), ya = (hero ? 16 : 12) * D2R;
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.uniformMatrix4fv(U.uVP, false, VP);
@@ -513,7 +534,7 @@
     gl.uniform1f(U.uAlpha, fx.alpha * (1 - fx.dis));
     for (i = 0; i < objs.length; i++) {
       o = objs[i]; sc = unit * o.k * o.s;
-      gl.uniformMatrix4fv(U.uM, false, mul(trans(o.x, o.mesh.floor * sc - .03, 0), scale(sc * 1.05, 1, sc * .7)));
+      gl.uniformMatrix4fv(U.uM, false, mul(trans(o.x, o.y + o.mesh.floor * sc - .03, 0), scale(sc * 1.05, 1, sc * .7)));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     gl.depthMask(true);
@@ -524,10 +545,11 @@
     gl.activeTexture(gl.TEXTURE0);
     for (i = 0; i < objs.length; i++) {
       o = objs[i]; sc = unit * o.k * o.s;
-      yaw = o.fan + cur.y + fx.shake + (sw ? 12 * D2R * Math.sin(w + o.ph) : 0);
+      yaw = o.fan + cur.y + fx.shake + (sw ? ya * Math.sin(w + o.ph) : 0);
       pitch = cur.p + (sw ? 5 * D2R * Math.cos(w * .8 + o.ph) : 0);
       R = mul(rotY(yaw), rotX(pitch));
-      M = mul(trans(o.x, 0, 0), mul(scale(sc, sc, sc), R));
+      if (o.roll) R = mul(rotZ(o.roll), R);
+      M = mul(trans(o.x, o.y, 0), mul(scale(sc, sc, sc), R));
       gl.uniform3fv(U.uTint, o.tint);
       gl.bindTexture(gl.TEXTURE_2D, o.tex || whiteTex);
       for (j = 0; j < o.mesh.parts.length; j++) {
@@ -539,6 +561,7 @@
         gl.uniformMatrix4fv(U.uM, false, Mp);
         gl.uniform1f(U.uMetal, p.metal || 0);
         gl.uniform1f(U.uRimK, p.rim || 1);
+        gl.uniform1f(U.uWarm, p.warm || 0);
         gl.uniform1f(U.uTexOn, p.tex && o.tex ? 1 : 0);
         gl.uniform1f(U.uMode, p.lines ? 2 : 0);
         bindAttrs(p.vbo);
@@ -568,16 +591,17 @@
     if (busy || !sw || !(frameN & 1)) draw(t);
     if (busy || sw) raf = requestAnimationFrame(loop); else last = lastTs = 0;
   }
-  // Median frame interval over 45 frames: > 22 ms drops to DPR 1 without sway; still > 30 ms gives up on GL.
+  // Median frame interval over 45 frames: > 22 ms drops to DPR 1 without sway; still > 30 ms gives up on GL,
+  // unless the cadence is a steady ~33 ms: that is a browser cap (iOS Low Power Mode, thermal), not a slow GPU.
   function watchdog(ts) {
     var d = lastTs ? ts - lastTs : 0;
     lastTs = ts;
     if (d > 0 && d < 250) ivals.push(d);
     if (ivals.length < 45) return false;
-    var m = ivals.slice().sort(function (a, b) { return a - b; })[22];
+    var s = ivals.slice().sort(function (a, b) { return a - b; }), m = s[22], capped = m < 36 && s[33] - s[11] < 4;
     ivals = [];
     if (level === 0 && m > 22) { level = 1; dprCap = 1; swayOn = false; cw = 0; }
-    else if (level === 1 && m > 30) { fail('slow'); return true; }
+    else if (level === 1 && m > 30 && !capped) { fail('slow'); return true; }
     return false;
   }
 

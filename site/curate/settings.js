@@ -15,7 +15,7 @@ window.CURATE_SETTINGS = {
   kioskMaxTier: 1, kioskResetMs: 20000, kioskIdleMs: 60000,
   staffHoldMs: 2000, undoMs: 5000,
   soldOut: [],                               // e.g. ['gold'] for the rest of the day
-  substitutes: { teal: null, purple: null, gold: null },   // { reward, img: [paths] }
+  substitutes: { teal: null, purple: null, gold: null },   // { reward, short, img: [paths] }; short reads in a sentence
   ranks: ['Trainee curator', 'Curator', 'Senior curator', 'Head curator'],
   // Used only when config.js has no merch block with 3 tiers. An exact copy of config.js merch today.
   fallbackMerch: {

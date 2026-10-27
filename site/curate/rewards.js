@@ -48,8 +48,9 @@
     var t = i === 0 ? (MERCH.free || (S.fallbackMerch || {}).free || {}) : (MERCH.tiers[i - 1] || {});
     var sub = i > 0 && S.substitutes ? S.substitutes[NAMES[i]] : null;
     var reward = (sub && sub.reward) || t.reward || '';
+    // Only the free tier’s plain noun is lower-cased: tier rewards carry brand names (Kleros, PoH).
     return { key: NAMES[i], name: i === 0 ? 'Everyone' : (t.name || NAMES[i]), reward: reward,
-             short: (sub && (sub.short || lowerFirst(sub.reward))) || t.short || lowerFirst(reward),
+             short: (sub && (sub.short || sub.reward)) || t.short || (i === 0 ? lowerFirst(reward) : reward),
              img: [].concat((sub && sub.img) || t.img || []).map(abs), min: TIERS[i] || 0 };
   }
   // A sold-out tier keeps its name and threshold but hands out the next open tier’s reward.
@@ -102,6 +103,12 @@
     if (KIOSK || !st) return;
     if (store(KEY, st) !== true) blocked = true;
   }
+  // Another tab, or this page back from the bfcache, may have written since this page last read. Every entry
+  // point re-reads storage and saves in the same task, so a stale copy never overwrites newer shifts or a stamp.
+  function sync() {
+    if (KIOSK || blocked) { if (!st) load(); return; }   // kiosk and blocked browsers: the memory copy is the truth
+    load();
+  }
   // A new local day: counted shifts and today’s best start again; collected, prefs and lastIds stay.
   function rollDay() {
     var t = today();
@@ -120,21 +127,21 @@
 
   // ---- Prefs and counted shifts ----
   function getPref(k) {
-    if (!st) load();
+    sync();
     if (k.indexOf('practiced.') === 0) return KIOSK ? false : !!st.practiced[k.slice(10)];   // kiosk: practice every time
     return st[k];
   }
   function setPref(k, v) {
-    if (!st) load();
+    sync();
     if (k.indexOf('practiced.') === 0) st.practiced[k.slice(10)] = !!v;
     else if (k === 'deck' || k === 'relaxed') st[k] = v;
     save();
   }
-  function lastIds(deckId) { if (!st) load(); return (st.lastIds[deckId] || []).slice(); }
-  function saveLastIds(deckId, ids) { if (!st) load(); st.lastIds[deckId] = [].concat(ids || []); save(); }
+  function lastIds(deckId) { sync(); return (st.lastIds[deckId] || []).slice(); }
+  function saveLastIds(deckId, ids) { sync(); st.lastIds[deckId] = [].concat(ids || []); save(); }
   // A booth tablet counts every visitor’s shift in memory; the reset wipes it for the next one.
   function canCount() {
-    if (!st) load();
+    sync();
     if (KIOSK) return { counted: true, left: 1, reason: 'kiosk' };
     rollDay();
     if (st.collected) return { counted: false, left: 0, reason: 'collected' };
@@ -144,6 +151,7 @@
   // Called when the clock starts, so quitting does not refund the shift.
   function startShift(deckId) {
     var c = canCount(), r = { counted: c.counted, shiftNo: 0, code: null };
+    if (KIOSK) { st.best = null; st.runs = []; }   // one kiosk shift is one visitor: never show an earlier best
     st.deck = deckId || st.deck;
     if (c.counted) { st.counted++; r.shiftNo = st.counted; r.code = code(); }
     save();
@@ -152,7 +160,8 @@
 
   // ---- Brief: header link, welcome chip, ladder ----
   function renderHeader() {
-    var a = vis('hdr-link', !KIOSK), me;
+    var a = vis('hdr-link', !KIOSK), logo = $('hdr-logo'), me;
+    if (logo && KIOSK) logo.removeAttribute('href');   // a booth tablet never opens the check-in page, by key either
     if (!a || KIOSK) return;
     me = read('kleros_devcon_self');
     a.href = '/';
@@ -163,6 +172,7 @@
     var m = model(), ci = m.ci, best = st.best, line = '', go = '', n;
     if (!KIOSK) {
       if (st.collected) line = 'Merch collected. Play for fun.';
+      else if (ci && ci.claimed) line = 'You already checked in at the booth, so your merch goes with that check-in. Play for fun.';
       else if (best && m.state === 'live' && m.t > 0) { line = 'Your ' + baseTier(m.t).name + ' ticket is ready ·'; go = 'Show staff →'; }
       else if (best) { line = 'Your best today: ' + fmt(best.final) + ' pts ·'; go = 'Show ticket →'; }
       else if (st.counted >= PER_DAY) line = fmt(PER_DAY) + ' of ' + fmt(PER_DAY) + ' shifts counted today. Play for fun, or come back tomorrow.';
@@ -177,8 +187,9 @@
   }
   function ladderHow(i) {
     var info = tierInfo(i);
-    if (info.soldOut) return 'Gone for today: scores here get ' + lowerFirst(info.reward);
+    if (info.soldOut) return 'Gone for today: scores here get ' + info.short;
     if (i === 0) return 'Finish a shift';
+    if (KIOSK && i > kioskCap()) return fmt(TIERS[i]) + ' points · on your own phone';
     return fmt(TIERS[i]) + ' points' + (i >= NEED ? ' + check in on this phone' : '');
   }
   function renderLadder() {
@@ -188,7 +199,7 @@
       for (i = 0; i < 4; i++) {
         info = tierInfo(i);
         li = tpl.content.firstElementChild.cloneNode(true);
-        li.className = 't-' + NAMES[i];
+        li.className = 't-' + NAMES[i] + (KIOSK && i > kioskCap() ? ' is-locked' : '');   // out of the tablet’s reach
         thumbs(li.querySelector('[data-s="thumbs"]'), info.img);
         s = li.querySelector('[data-s="name"]'); if (s) s.textContent = info.name;
         s = li.querySelector('[data-s="reward"]'); if (s) s.textContent = info.reward;
@@ -203,27 +214,31 @@
     stopTicket();
     clearTimeout(idleTimer);
     if (KIOSK) st = null;   // a booth tablet: every return to the brief is the next visitor
-    if (!st) load();
+    sync();
     renderHeader(); renderWelcome(); renderLadder();
   }
 
   // ---- Report ----
   var cuRaf = 0, idleTimer = 0;
   var BEST_KEYS = ['at', 'deck', 'final', 'raw', 'caught', 'fakesSeen', 'listed', 'goodsSeen', 'evidence', 'wrong',
-                   'leaks', 'trust', 'reviewed', 'shiftNo', 'code'];
+                   'leaks', 'trust', 'reviewed', 'shiftNo', 'code', 'tier'];
+  // The tier under the thresholds in force when the shift ended: a mid-day retune never downgrades a ticket.
+  function tierOf(b) { return b.tier != null ? b.tier : tierFor(b.final || 0); }
   function finishShift(sum) {
-    if (!st) load();
+    sync();
     rollDay();
     sum = sum || {};
-    var run = {}, k, old = st.best, nb;
+    var run = {}, k, old = st.best, nb, oldT;
     for (k in sum) if (sum.hasOwnProperty(k)) run[k] = sum[k];
     run.misses = [].concat(sum.misses || []).slice(0, 3);   // keeps the stored object small
     run.day = today();
     run.at = sum.at || Date.now();
+    run.tier = tierFor(run.final || 0);
     st.runs.push(run);
     if (st.runs.length > 12) st.runs = st.runs.slice(-12);
-    // Only counted runs reach the ticket; the best of today wins, ties keep the earlier one.
-    if (sum.counted && (!old || (run.final || 0) > (old.final || 0))) {
+    // Only counted runs reach the ticket; a higher tier, then a higher score, wins; ties keep the earlier one.
+    oldT = old ? tierOf(old) : -1;
+    if (sum.counted && (!old || run.tier > oldT || (run.tier === oldT && (run.final || 0) > (old.final || 0)))) {
       nb = { day: run.day };
       BEST_KEYS.forEach(function (key) { nb[key] = run[key]; });
       if (old && old.shown != null) nb.shown = old.shown;
@@ -264,6 +279,7 @@
       for (i = 0; i < segs.length; i++) {
         var t = +segs[i].getAttribute('data-t');
         segs[i].setAttribute('data-tier', t <= g ? NAMES[t] : 'none');   // reached segments take their tier colour
+        if (KIOSK && t > kioskCap()) segs[i].setAttribute('data-locked', ''); else segs[i].removeAttribute('data-locked');
       }
     }
     if (mk) mk.style.setProperty('--at', String(Math.max(0, markerAt(final)).toFixed(4)));
@@ -287,36 +303,51 @@
       list.appendChild(li);
     });
   }
+  // A stat tile: the figure goes in its <b> when the shell has one; otherwise no-break spaces keep it whole.
+  function stat(id, label, v) {
+    var el = $(id), b = el && el.querySelector('b');
+    if (b) b.textContent = v; else txt(id, label + ' ' + v.replace(/ /g, '\u00a0'));
+  }
+  // The payoff follows the trust band, like the headline and the quote; a deck may bring its own lines.
+  var PAYOFFS = ['{client} kept {trust}% of its users’ trust, so they keep using it and it keeps earning.',
+    '{client} kept {trust}% of its users’ trust. Each fake that got listed cost it users.',
+    '{client} lost its users’ trust (down to {trust}%): fakes reached them, and it stops earning until the list is clean.'];
+  function againText(c) {
+    return KIOSK ? 'Next curator' : c.reason === 'collected' || c.left === 0 ? 'Play again for fun' :
+      'Play again · ' + c.left + ' of ' + PER_DAY + ' counted shifts left today';
+  }
   function renderReport(sum, misses) {
     var d = deckOf(sum.deck), copy = d.copy || {}, trust = sum.trust == null ? 100 : sum.trust,
         band = trust >= 90 ? 0 : trust >= 70 ? 1 : 2, final = sum.final || 0, ci = checkin(),
-        g = tierFor(final), info, next = '', c = canCount(), pending;
+        g0 = tierFor(final), g = g0, info, next = '', c = canCount(), pending;
     if (KIOSK) g = Math.min(g, kioskCap());
     txt('rep-kicker', 'Shift report · ' + d.client + (sum.counted ? '' : ' · Practice shift: not counted today'));
     txt('rep-title', ['Clean list. Users are safe.', 'Mostly clean. A few fakes slipped in.', 'Leaky list. Users got scammed.'][band]);
     txt('rep-sub', fmt(sum.reviewed) + ' of ' + fmt(sum.entries || S.entries || 20) + ' entries reviewed');
-    txt('rep-caught', 'Fakes caught ' + fmt(sum.caught) + ' of ' + fmt(sum.fakesSeen));
-    txt('rep-listed', 'Good entries listed ' + fmt(sum.listed) + ' of ' + fmt(sum.goodsSeen));
-    txt('rep-evidence', 'Sharp evidence ' + fmt(sum.evidence));
-    txt('rep-wrong', 'Wrong challenges ' + fmt(sum.wrong));
+    stat('rep-caught', 'Fakes caught', fmt(sum.caught) + ' of ' + fmt(sum.fakesSeen));
+    stat('rep-listed', 'Good entries listed', fmt(sum.listed) + ' of ' + fmt(sum.goodsSeen));
+    stat('rep-evidence', 'Sharp evidence', fmt(sum.evidence));
+    stat('rep-wrong', 'Wrong challenges', fmt(sum.wrong));
     txt('rep-quote', (copy.quotes || [])[band] || '');
     txt('rep-quote-by', copy.quoteBy || '');
-    txt('rep-payoff', d.client + ' kept ' + trust + '% of its users’ trust, so they kept using it, and it kept earning. ' +
-        'Your bounties came from the fakers’ deposits.');
+    txt('rep-payoff', ((copy.payoffs || [])[band] || PAYOFFS[band]).replace('{client}', d.client).replace('{trust}', trust) +
+        (sum.caught > 0 ? ' Your bounties came from the fakers’ deposits.' : ' Catch a fake and its deposit becomes your bounty.'));
     renderMeter(final, g);
     info = tierInfo(g);
     if (g < 3 && !(KIOSK && g >= (kioskCap()))) {
       next = ' ' + fmt(TIERS[g + 1] - final) + ' points to ' + baseTier(g + 1).name + '.';
     }
-    txt('rep-tier-line', tierTitle(g) + ' · ' + info.reward + '.' + next);
-    thumbs($('rep-thumbs'), info.img);
+    // The marker stays at the real score, so say why a kiosk score above the cap gets the cap’s reward.
+    if (KIOSK && g0 > g) next = ' The booth tablet tops out at ' + baseTier(g).name + '. Play on your own phone for ' + kioskAbove() + '.';
+    // A duplicate check-in already holds this person's one item, so the score names no reward.
+    txt('rep-tier-line', ci && ci.claimed ? 'Merch goes with your first check-in. Play for fun.' : tierTitle(g) + ' · ' + info.reward + '.' + next);
+    thumbs($('rep-thumbs'), ci && ci.claimed ? [] : info.img);
     // The strip shows only when this counted shift earned a gated tier that a check-in would unlock.
-    pending = sum.counted && !KIOSK && g >= NEED && !(ci && ci.ok) && !st.collected && !isSoldOut(g) ? g : 0;
+    pending = sum.counted && !KIOSK && g >= NEED && !(ci && (ci.ok || ci.claimed)) && !st.collected && !isSoldOut(g) ? g : 0;
     renderGold('rep-gold', 'rep-gold-go', pending, ci);
     renderMisses([].concat(misses || sum.misses || []));
     txt('to-ticket', 'Show my merch ticket');
-    txt('again', KIOSK ? 'Next curator' : c.reason === 'collected' || c.left === 0 ? 'Play again for fun' :
-        'Play again · ' + c.left + ' of ' + PER_DAY + ' counted shifts left today');
+    txt('again', againText(c));
     txt('rep-switch', copy.repSwitch || '');
     txt('rep-fine', 'Points are for booth merch, not real money. Real challenge windows last days; here you get seconds.' +
         (MERCH.note ? ' ' + MERCH.note + '.' : ''));
@@ -339,14 +370,14 @@
     return null;
   }
   function model() {
-    if (!st) load();
+    sync();
     rollDay();
     var ci = checkin(), best = st.best, m = { state: 'live', ci: ci, best: best, t: 0, g: 0, pending: 0,
       source: 'game', soldFrom: -1, code: '' }, g, c, t;
     if (st.collected) { m.state = 'collected'; m.t = st.collected.tier || 0; m.code = st.collected.code || ''; return m; }
     if (ci && ci.claimed) { m.state = 'dup'; return m; }
     if (!best || best.day !== today()) { m.state = 'expired'; m.best = best || lastCountedRun(); return m; }
-    g = tierFor(best.final);
+    g = tierOf(best);
     m.g = g;
     if (g >= NEED && !(ci && ci.ok)) { m.pending = g; g = NEED - 1; }
     c = ci && ci.ok ? ci.tier : 0;
@@ -357,6 +388,8 @@
     if (m.pending && isSoldOut(m.pending)) m.pending = 0;   // no point checking in for a tier that is gone today
     if (KIOSK) m.pending = 0;
     m.t = t;
+    // The check-in ticket (same K- code) already covers this: one item per person, so no second claimable ticket.
+    if (c > 0 && t <= c) { m.state = 'checkin'; return m; }
     m.code = ci && ci.ok ? ci.ticket : best.code;
     return m;
   }
@@ -377,27 +410,28 @@
 
   // ---- Ticket render ----
   var current = null;
+  function kioskAbove() {
+    var a = [], i;
+    for (i = kioskCap() + 1; i < 4; i++) a.push(baseTier(i).name);
+    return a.join(' and ');
+  }
   function hintFor(m) {
-    var above = [], i;
-    if (KIOSK) {
-      for (i = kioskCap() + 1; i < 4; i++) above.push(baseTier(i).name);
-      return 'Booth tablet: play on your own phone for ' + above.join(' and ') + '.';
-    }
-    if (m.t === 0) return 'Show this screen at the booth for ' + lowerFirst(tierInfo(0).reward) + '. Score ' +
+    if (KIOSK) return 'Booth tablet: play on your own phone for ' + kioskAbove() + '.';
+    if (m.t === 0) return 'Show this screen at the booth for ' + tierInfo(0).short + '. Score ' +
       fmt(TIERS[1]) + ' for ' + tierInfo(1).short + '.';
     return 'Show this screen at the booth to claim your merch';
   }
   function noteFor(m) {
     var from;
     if (blocked) return 'This browser won’t keep your ticket if you close it.';
-    if (m.soldFrom > 0) {
+    if (m.soldFrom > 0) {   // no generated plural: rewards read 'Copper bottle or gamcha', 'Kleros flip-flops'
       from = baseTier(m.soldFrom);
-      return from.reward + 's are gone for today, so your ' + from.name + ' score gets ' + tierInfo(m.t).short + '.';
+      return from.reward + ': gone for today. Your ' + from.name + ' score gets ' + tierInfo(m.t).short + '.';
     }
     return m.source === 'checkin' ? 'From your check-in' : 'From your shift';
   }
   function renderBack(m) {
-    var b = m.best, ci = m.ci, live = m.state === 'live', staff = live && !KIOSK;
+    var b = m.best, ci = m.ci, live = m.state === 'live', staff = live && !KIOSK && m.t > 0;   // Everyone: nothing to stamp
     txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Shift ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' today · ') +
         'Played ' + hhmm(b.at) + ' · ' + deckOf(b.deck).client);
     txt('tb-stats', !b ? '' : fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes · ' +
@@ -414,6 +448,7 @@
     current = m;
     if (tk) {
       tk.setAttribute('data-tier', live ? NAMES[m.t] : m.state === 'expired' ? 'expired' : 'claimed');
+      if (tk.classList.contains('flipped')) unfocusFace(tk);
       tk.classList.remove('flipped');
       if (!tk.hasAttribute('tabindex')) tk.setAttribute('tabindex', '0');
     }
@@ -428,7 +463,14 @@
       txt('t-note', noteFor(m));
     } else if (m.state === 'collected') {
       txt('t-tier', 'Collected · ' + tierTitle(m.t) + ' · ' + hhmm(st.collected.at));
-      txt('t-reward', info.reward); txt('t-hint', thanks); txt('t-note', '');
+      txt('t-reward', info.reward);
+      // A game handout never shows on the check-in desk, so say it before they check in for another item.
+      txt('t-hint', ci && ci.ok ? thanks : 'Thanks for curating. One item per person, check-in included. Play again for fun.');
+      txt('t-note', '');
+    } else if (m.state === 'checkin') {
+      txt('t-tier', 'Your merch comes with your check-in ticket');
+      txt('t-reward', 'One item per person: show your check-in ticket at the booth.');
+      txt('t-hint', thanks); txt('t-note', '');
     } else if (m.state === 'dup') {
       txt('t-tier', 'Merch goes with your first check-in');
       txt('t-reward', 'This email or Telegram account already checked in at the booth, so its merch belongs to that ' +
@@ -440,7 +482,7 @@
     }
     vis('t-note', !!($('t-note') || {}).textContent);
     // The check-in name only when its gate passes; otherwise a rank earned by the score.
-    who = ci && ci.ok && ci.name ? ci.name : (S.ranks || [])[b ? tierFor(b.final) : 0] || '';
+    who = ci && ci.ok && ci.name ? ci.name : (S.ranks || [])[b ? tierOf(b) : 0] || '';
     txt('t-who', who);
     txt('t-org', b ? fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes caught' : '');
     ck = vis('t-code', live);
@@ -453,6 +495,7 @@
       back.textContent = ci ? 'Back to your check-in ticket →' : 'Check in with Kleros →';
     }
     vis('t-next', KIOSK);
+    txt('t-again', KIOSK ? 'Next curator' : 'Play again');   // matches #again on the report
     // A tier that went up since this ticket was last shown (say, after checking in) gets the bump.
     if (live && b && b.shown !== m.t) {
       if (tk && b.shown != null && m.t > b.shown) {
@@ -466,7 +509,7 @@
 
   // ---- Ticket mechanics: clock, flip, hold, staff sheet, undo, kiosk ----
   var clockTimer = 0, renderedDay = '', nextLeft = 0, undoTimer = 0, staffPrev = null, staffFor = null;
-  var hold = { on: false, t0: 0, raf: 0 }, suppressFlip = false;
+  var hold = { on: false, t0: 0, raf: 0 }, suppressFlip = false, holdEndAt = -1e9, myStamp = null;
   function now() { return window.performance && performance.now ? performance.now() : Date.now(); }
   // The clock keeps ticking under reduced motion: it is the live proof against screenshots.
   function tickClock() {
@@ -496,11 +539,13 @@
     if (staffFor) closeStaff(false);
   }
   function showTicket() {
-    if (!st) load();
+    sync();
     clearTimeout(idleTimer);
     stopTicket();
     renderTicket();
     UI.show('ticket');
+    var tk = $('ticket');   // the button that led here is gone, so focus never drops to <body>
+    if (tk) { try { tk.focus({ preventScroll: true }); } catch (e) { tk.focus(); } }
     renderedDay = today();
     nextLeft = Math.round((S.kioskResetMs || 20000) / 1000);
     if (KIOSK) txt('t-next', 'Next curator in ' + nextLeft + ' s');
@@ -512,12 +557,18 @@
     st = null;   // the next visitor starts clean
     UI.reset();
   }
+  // The face turning away is hidden from focus (CSS visibility), so focus inside it moves to the ticket.
+  function unfocusFace(tk) { var a = document.activeElement; if (a && a !== tk && tk.contains(a)) tk.focus(); }
   function flip() {
     var tk = $('ticket');
-    if (tk) tk.classList.toggle('flipped');
+    if (tk) { unfocusFace(tk); tk.classList.toggle('flipped'); }
   }
+  // Only the click that follows the hold’s release is swallowed: a long-press with no click (Android) or a
+  // click that lands on the staff sheet must not eat the next real tap.
   function onTicketClick(e) {
-    if (suppressFlip) { suppressFlip = false; return; }
+    var s = suppressFlip;
+    suppressFlip = false;
+    if (s && now() - holdEndAt < 600) return;
     if (e.target && e.target.closest && e.target.closest('a,button')) return;
     flip();
   }
@@ -530,7 +581,7 @@
   function holdStart(e) {
     var el = $('t-code');
     suppressFlip = false;
-    if (!el || KIOSK || !current || current.state !== 'live' || (e.button && e.button > 0)) return;
+    if (!el || KIOSK || !current || current.state !== 'live' || !(current.t > 0) || (e.button && e.button > 0)) return;
     hold.on = true; hold.t0 = now();
     el.classList.add('holding');
     try { el.setPointerCapture(e.pointerId); } catch (err) { /* older browsers: pointerleave still cancels */ }
@@ -552,21 +603,31 @@
     hold.raf = 0;
     if (el) { el.classList.remove('holding'); el.style.setProperty('--hold', '0'); }
   }
+  // The finger lifts: the click that follows (if any) must not turn the ticket over.
+  function holdEnd() {
+    if (suppressFlip) holdEndAt = now();
+    cancelHold();
+  }
   // ---- Staff sheet and undo ----
   function openStaff() {
-    var m = model(), info;
-    if (KIOSK || m.state !== 'live') return;
+    var m = model(), info, p;
+    if (KIOSK) return;
+    if (m.state !== 'live') { renderTicket(); return; }   // another tab stamped it or it changed: show that instead
+    if (!(m.t > 0)) return;   // Everyone: stickers are free, and a stamp would stop later shifts from counting
     info = tierInfo(m.t);
     staffFor = { tier: m.t, code: m.code };
     staffPrev = document.activeElement;
     txt('staff-title', 'Mark as collected?');
     txt('staff-body', 'Staff only. Hand over one ' + baseTier(m.t).name + ' item: ' + info.reward +
         '. This greys out the ticket on this phone for the rest of Devcon.');
-    // vis() returns the element even when hiding it, so test the check-in itself.
-    if (vis('staff-desk', !!(m.ci && m.ci.ok)) && m.ci && m.ci.ok) {
-      txt('staff-desk', 'First search ' + m.ci.ticket + ' on the merch desk. If Merch given is already ticked, ' +
-          'no second item. Otherwise tick it.');
-    }
+    // One item per person across both routes. A game handout never reaches the merch desk, so say it here.
+    p = m.pending ? baseTier(m.pending) : null;
+    vis('staff-desk', true);
+    txt('staff-desk', m.ci && m.ci.ok ?
+      'First search ' + m.ci.ticket + ' on the merch desk. If Merch given is ticked, or they already got merch ' +
+        'with their check-in ticket, no second item (one item per person). Otherwise tick it.' :
+      (p ? 'This score reaches ' + p.name + ': ask if they want to check in first for ' + p.short + '. ' : '') +
+        'No check-in on this phone, so this is their one item: no second item if they check in later.');
     txt('staff-ok', 'Mark collected'); txt('staff-cancel', 'Cancel');
     vis('staff', true);
     if ($('staff-ok')) $('staff-ok').focus();
@@ -574,12 +635,16 @@
   function closeStaff(restore) {
     vis('staff', false);
     staffFor = null;
+    suppressFlip = false;
     if (restore !== false && staffPrev && staffPrev.focus) { try { staffPrev.focus(); } catch (e) { /* gone */ } }
     staffPrev = null;
   }
   function confirmStaff() {
     if (!staffFor) return;
+    // Re-read first: another tab may have stamped it already, and that stamp must stay as it is.
+    if (model().state !== 'live') { closeStaff(false); renderTicket(); return; }
     st.collected = { at: Date.now(), tier: staffFor.tier, code: staffFor.code };
+    myStamp = st.collected;
     save();
     closeStaff(false);
     renderTicket();
@@ -593,8 +658,13 @@
   function undoCollect() {
     clearTimeout(undoTimer);
     vis('undo', false);
-    if (!st || !st.collected) return;
+    sync();
+    // Undo only the stamp this page wrote, never one another tab wrote since.
+    if (!st.collected || !myStamp || st.collected.at !== myStamp.at || st.collected.code !== myStamp.code) {
+      myStamp = null; renderTicket(); return;
+    }
     st.collected = null;
+    myStamp = null;
     save();
     renderTicket();
     UI.say('Collected mark undone');
@@ -625,9 +695,9 @@
     on('ticket', 'click', onTicketClick);
     on('ticket', 'keydown', onTicketKey);
     on('t-code', 'pointerdown', holdStart);
-    on('t-code', 'pointerup', cancelHold);
-    on('t-code', 'pointercancel', cancelHold);
-    on('t-code', 'lostpointercapture', cancelHold);
+    on('t-code', 'pointerup', holdEnd);
+    on('t-code', 'pointercancel', holdEnd);
+    on('t-code', 'lostpointercapture', holdEnd);
     on('t-code', 'contextmenu', function (e) { e.preventDefault(); });   // long-press menus would break the hold
     on('tb-staff-btn', 'click', function (e) { e.stopPropagation(); openStaff(); });
     on('staff-ok', 'click', confirmStaff);
@@ -638,13 +708,28 @@
       var r = $('report');
       if (KIOSK && r && !r.hidden) armIdle();
     });
-    // Back from checking in (another tab or the back button): re-read the check-in and upgrade in place.
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden) return;
-      var v = $('ticketv'), b = $('brief');
-      if (v && !v.hidden) renderTicket();
-      else if (b && !b.hidden) { renderHeader(); renderWelcome(); }
+    // Back from checking in, from another tab or from the bfcache: re-read and upgrade in place.
+    document.addEventListener('visibilitychange', redraw);
+    window.addEventListener('pageshow', function (e) { if (e.persisted) redraw(); });   // frozen pages miss 'storage'
+    window.addEventListener('storage', function (e) {
+      if (!KIOSK && (e.key === KEY || e.key === 'kleros_devcon_self' || e.key === null)) redraw();
     });
+  }
+  // What the ticket shows; an unchanged ticket is left alone, so a flipped ticket or an open sheet stays put.
+  function sig(m) {
+    return [m.state, m.t, m.code, m.pending, m.soldFrom, m.best && m.best.at, m.ci && m.ci.name].join('|');
+  }
+  function redraw() {
+    var v = $('ticketv'), b = $('brief'), r = $('report'), m;
+    if (document.hidden) return;   // a hidden tab catches up when shown, so two tabs never write in turn
+    if (v && !v.hidden) {
+      m = model();   // model(), canCount() and renderWelcome() each re-read storage first
+      if (current && sig(m) === sig(current)) return;
+      cancelHold();
+      if (staffFor) closeStaff(false);
+      renderTicket();
+    } else if (b && !b.hidden) { renderHeader(); renderWelcome(); }
+    else if (r && !r.hidden) txt('again', againText(canCount()));
   }
   function init(ui) {
     var noop = function () {};
@@ -659,7 +744,7 @@
     init: init, kiosk: KIOSK,
     getPref: getPref, setPref: setPref,
     lastIds: lastIds, saveLastIds: saveLastIds,
-    tierInfo: tierInfo, canCount: canCount,
+    tierInfo: tierInfo, canCount: canCount, model: model,   // model: read by scripts/curate-check.js
     startShift: startShift, finishShift: finishShift,
     showTicket: showTicket, refreshBrief: refreshBrief
   };

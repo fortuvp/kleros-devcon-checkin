@@ -85,6 +85,19 @@ function strings(v, at, fn) {
   if (v && typeof v === 'object') for (k in v) if (Object.prototype.hasOwnProperty.call(v, k)) strings(v[k], at + '.' + k, fn);
 }
 var COUNTS = [];   // per list: [deck, list, good, fake, card tells], printed in the summary
+// #policy is one line (nowrap, ellipsis): no policy may be longer than the Tokens one, 61 characters.
+var POLICY_MAX = 61;
+// The wrong-evidence toast line, exactly as game.js ruling() builds it from a field label.
+var EV_LINE = '\'The problem was the “\' + lab + \'” line.\'';
+function evLine(lab) { return 'The problem was the “' + lab + '” line.'; }
+var EV_LINES = [];
+// Every field label must read inside that sentence: no quotes or end punctuation, short enough for a toast.
+function checkLabel(where, lab) {
+  var line = evLine(lab);
+  if (/[“”"‘’'.,:;!?]$|[“”"]/.test(lab)) fail(where + ': label ' + lab + ' breaks ' + line);
+  if (line.length > 80) fail(where + ': ' + line + ' is ' + line.length + ' characters (max 80)');
+  if (EV_LINES.indexOf(line) < 0) EV_LINES.push(line);
+}
 function checkItem(deck, it, ids, practice) {
   var where = deck.id + (practice ? '.practice ' : ' ') + (it && it.id), list, keys, k;
   if (!it || typeof it.id !== 'string' || !it.id) return fail(deck.id + ': an item has no id');
@@ -129,12 +142,17 @@ function checkSchema() {
         if (typeof c[k] !== 'string' || !c[k]) fail(dk + ': copy.' + k + ' is missing');
       });
       if (!c.quotes || c.quotes.length !== 3) fail(dk + ': copy.quotes needs 3 lines (trust ≥ 90, 70–89, < 70)');
+      if (c.payoffs && (c.payoffs.length !== 3 || c.payoffs.some(function (x) { return x.indexOf('{trust}') < 0; }))) {
+        fail(dk + ': copy.payoffs needs 3 lines (trust ≥ 90, 70–89, < 70), each with {trust}');
+      }
       if (!deck.hero || deck.hero.length !== 3) fail(dk + ': hero needs 3 specs');
       else deck.hero.forEach(function (o, i) { okObj(o, dk + ' hero[' + i + ']'); });
       for (lk in deck.lists) {
         li = deck.lists[lk];
         if (!li.name || !li.policy || !li.fields || li.fields.length !== 3) fail(dk + '.' + lk + ': name, policy and 3 fields needed');
         if (li.objField && !li.fields.some(function (f) { return f[0] === li.objField; })) fail(dk + '.' + lk + ': objField is not a field');
+        if (li.policy && li.policy.length > POLICY_MAX) fail(dk + '.' + lk + ': policy is ' + li.policy.length + ' characters (max ' + POLICY_MAX + ')');
+        (li.fields || []).forEach(function (f) { checkLabel(dk + '.' + lk, f[1]); });
         per[lk] = [0, 0, 0];
       }
       if (deck.easy && !deck.lists[deck.easy]) fail(dk + ': easy list ' + deck.easy + ' does not exist');
@@ -163,6 +181,11 @@ function checkSchema() {
   COUNTS.forEach(function (c) {
     console.log('  ' + pad(c[0] + '.' + c[1], 16) + lpad(c[2], 3) + ' good ' + lpad(c[3], 3) + ' fake  (' + c[4] + ' card tells)');
   });
+  // The sentence lives in game.js: make sure it is still the one rendered here.
+  try {
+    if (fs.readFileSync(path.join(DIR, 'game.js'), 'utf8').indexOf(EV_LINE) < 0) warn('game.js: the wrong-evidence line is no longer ' + EV_LINE + '; update evLine() here');
+  } catch (e) { warn('game.js could not be read: ' + e.message); }
+  console.log('Wrong-evidence lines\n  ' + EV_LINES.join('\n  '));
 }
 
 // ---- Dealing ----
@@ -297,12 +320,18 @@ function checkLint() {
 }
 
 // ---- Sizes ----
-// §8.1 budgets in bytes: [raw, gzip] (0 = no limit). P1’s own files fail when over; the rest only warn.
+// Budgets in bytes: [raw, gzip] (0 = no limit). P1’s own files fail when over; the rest only warn.
+// Revised after the first review round: §8.1’s numbers were set before the build and every file but P1’s
+// outgrew them, so the check only warned. Each budget is now the measured size plus about 10%, and the eager
+// total (everything but the lazy gl.js) is held under 60 KB gz. Unminified on purpose: no build step, and the
+// source stays readable. Raise a budget only with a reason, and keep the eager total under 60 KB gz.
+var KB = 1024;
 var BUDGETS = {
-  'settings.js': [3072, 0, true], 'decks.js': [24576, 7168, true], 'rules.js': [7168, 0, true],
-  'objects.js': [16384, 5120], 'gl.js': [36864, 12288], 'game.js': [32768, 10240], 'rewards.js': [18432, 6144],
-  'index.html': [32768, 8192]
+  'settings.js': [3 * KB, 0, true], 'decks.js': [24 * KB, 7 * KB, true], 'rules.js': [8 * KB, 0, true],
+  'objects.js': [23 * KB, 9 * KB], 'gl.js': [38 * KB, 14 * KB], 'game.js': [44 * KB, 14.5 * KB],
+  'rewards.js': [41 * KB, 13.5 * KB], 'index.html': [61 * KB, 17 * KB]
 };
+var TOTAL = [196 * KB, 60 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
 function checkSizes() {
   var total = 0, totalGz = 0;
   console.log('Sizes (raw / gzip, budget)');
@@ -313,12 +342,146 @@ function checkSizes() {
     raw = buf.length; gz = zlib.gzipSync(buf, { level: 9 }).length;
     if (f !== 'gl.js') { total += raw; totalGz += gz; }
     over = (b[0] && raw > b[0]) || (b[1] && gz > b[1]);
-    console.log('  ' + pad(f, 12) + lpad(raw, 6) + ' / ' + lpad(gz, 5) + '   ≤ ' + (b[0] / 1024) + ' KB' +
-      (b[1] ? ' / ' + (b[1] / 1024) + ' KB gz' : '') + (over ? '   OVER' : ''));
-    if (over) (b[2] ? fail : warn)('site/curate/' + f + ' is over its §8.1 budget');
+    console.log('  ' + pad(f, 12) + lpad(raw, 6) + ' / ' + lpad(gz, 5) + '   ≤ ' + (b[0] / KB) + ' KB' +
+      (b[1] ? ' / ' + (b[1] / KB) + ' KB gz' : '') + (over ? '   OVER' : ''));
+    if (over) (b[2] ? fail : warn)('site/curate/' + f + ' is over its budget');
   });
-  console.log('  ' + pad('total', 12) + lpad(total, 6) + ' / ' + lpad(totalGz, 5) + '   ≤ 130 KB / 40 KB gz, before gl.js');
-  if (total > 130 * 1024 || totalGz > 40 * 1024) warn('site/curate is over the §8.1 total budget');
+  console.log('  ' + pad('total', 12) + lpad(total, 6) + ' / ' + lpad(totalGz, 5) + '   ≤ ' + (TOTAL[0] / KB) + ' KB / ' +
+    (TOTAL[1] / KB) + ' KB gz, before gl.js');
+  if (total > TOTAL[0] || totalGz > TOTAL[1]) warn('site/curate is over the total budget (eager files)');
+}
+
+// ---- Rewards ----
+// rewards.js in vm "pages" that share one fake localStorage, like two tabs on one phone. No network, no real DOM:
+// every element is a stub that keeps textContent, hidden and attributes.
+function Store() { this.d = {}; }
+Store.prototype.getItem = function (k) { return Object.prototype.hasOwnProperty.call(this.d, k) ? this.d[k] : null; };
+Store.prototype.setItem = function (k, v) { this.d[k] = String(v); };
+function stubEl() {
+  var attrs = {}, cls = {}, on = {};
+  return { textContent: '', hidden: false, title: '', href: '', open: false, children: [], style: { setProperty: function () {} },
+    setAttribute: function (k, v) { attrs[k] = String(v); }, getAttribute: function (k) { return k in attrs ? attrs[k] : null; },
+    removeAttribute: function (k) { delete attrs[k]; }, hasAttribute: function (k) { return k in attrs; },
+    classList: { add: function (c) { cls[c] = 1; }, remove: function (c) { delete cls[c]; },
+      toggle: function (c) { if (cls[c]) delete cls[c]; else cls[c] = 1; }, contains: function (c) { return !!cls[c]; } },
+    querySelector: function () { return null; }, querySelectorAll: function () { return []; }, contains: function () { return false; },
+    appendChild: function () {}, removeChild: function () {}, focus: function () {}, setPointerCapture: function () {},
+    addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); },
+    click: function () { (on.click || []).forEach(function (fn) { fn({ stopPropagation: function () {}, target: null }); }); } };
+}
+var RW_SRC = ['site/config.js', 'site/curate/settings.js', 'site/curate/decks.js', 'site/curate/rules.js', 'site/curate/rewards.js']
+  .map(function (f) { return [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]; });
+function page(ls, opts) {
+  opts = opts || {};
+  var els = {}, ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
+    document: { hidden: false, activeElement: null, getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
+      createElement: stubEl, addEventListener: function () {} },
+    addEventListener: function () {}, setTimeout: function () { return 0; }, clearTimeout: function () {},
+    setInterval: function () { return 1; }, clearInterval: function () {}, performance: { now: function () { return 0; } },
+    requestAnimationFrame: function () { return 0; }, cancelAnimationFrame: function () {} };
+  ctx.window = ctx;
+  els['hdr-logo'] = stubEl(); els['hdr-logo'].setAttribute('href', '/');   // as in the shell
+  vm.createContext(ctx);
+  RW_SRC.forEach(function (f) {
+    vm.runInContext(f[1], ctx, { filename: f[0] });
+    if (/rules/.test(f[0]) && opts.settings) opts.settings(ctx.CURATE_SETTINGS);
+  });
+  ctx.CurateRewards.init({});
+  ctx.text = function (id) { return els[id] ? els[id].textContent : ''; };
+  ctx.el = function (id) { return ctx.document.getElementById(id); };
+  return ctx;
+}
+// One shift through the public API, as game.js calls it: startShift when the clock starts, then finishShift.
+function playShift(pg, final) {
+  var r = pg.CurateRewards.startShift('wallet');
+  pg.CurateRewards.finishShift({ deck: 'wallet', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6,
+    evidence: 1, wrong: 0, leaks: 1, trust: 85, reviewed: 10, counted: r.counted, shiftNo: r.shiftNo, code: r.code, misses: [] });
+  return r;
+}
+function stamp(pg) { pg.CurateRewards.showTicket(); pg.el('tb-staff-btn').click(); pg.el('staff-ok').click(); }
+function self(tier, merch) {
+  var m = merch || (tier === 3 ? { tg: 'joined', x: 1, li: 1, quiz: 1 } : tier === 2 ? { tg: 'joined', x: 1, li: 1 } : {});
+  return JSON.stringify({ ticket: 'K-ABC123', name: 'Ana', confirmed: true, newsletter: false, merch: m });
+}
+function checkRewards() {
+  var n = 0, ls, a, b, c, kept, m;
+  function ok(cond, msg) { n++; if (!cond) fail('rewards.js: ' + msg); }
+  function stored(l) { return JSON.parse(l.getItem('kleros_devcon_curate')); }
+  // Two tabs: a stale tab neither counts a 4th shift nor drops the other tab's best or stamp.
+  ls = new Store(); a = page(ls); b = page(ls);
+  playShift(a, 600); playShift(a, 1000); playShift(a, 300);
+  ok(!b.CurateRewards.startShift('wallet').counted, 'a stale tab counted a 4th shift');
+  ok(stored(ls).counted === 3 && stored(ls).best.final === 1000, 'a stale tab dropped the other tab’s counted shifts or best');
+  stamp(a);
+  kept = JSON.stringify(stored(ls).collected);
+  ok(stored(ls).collected && stored(ls).collected.tier === 2, 'the staff stamp did not save a Purple collect');
+  b.CurateRewards.startShift('wallet'); b.CurateRewards.showTicket();
+  ok(JSON.stringify(stored(ls).collected) === kept && b.CurateRewards.model().state === 'collected', 'a stale tab lost the stamp');
+  // The check-in ticket already covers a game tier at or below it: no second claimable ticket.
+  ls = new Store(); ls.setItem('kleros_devcon_self', self(3)); c = page(ls); playShift(c, 1600);
+  ok(c.CurateRewards.model().state === 'checkin', 'check-in Gold plus game Gold is still claimable');
+  ls = new Store(); ls.setItem('kleros_devcon_self', self(1)); c = page(ls); playShift(c, 1000);
+  m = c.CurateRewards.model();
+  ok(m.state === 'live' && m.t === 2 && m.code === 'K-ABC123', 'check-in Teal plus game Purple is not a live K- Purple ticket');
+  // Everyone has nothing to stamp, and a later Teal shift still counts.
+  ls = new Store(); c = page(ls); playShift(c, 300); stamp(c);
+  ok(c.el('tb-staff-btn').hidden && !stored(ls).collected, 'an Everyone ticket can be stamped');
+  playShift(c, 600);
+  m = c.CurateRewards.model();
+  ok(m.state === 'live' && m.t === 1, 'a Teal shift after an Everyone ticket is not live Teal');
+  // A mid-day retune never downgrades a ticket, and a lower tier never replaces it.
+  ls = new Store(); playShift(page(ls), 1500);
+  c = page(ls, { settings: function (s) { s.tiers = [0, 450, 950, 1550]; } });
+  ok(c.CurateRewards.model().g === 3, 'raising the Gold threshold downgraded today’s Gold ticket');
+  playShift(c, 1520);
+  ok(stored(ls).best.final === 1500, 'a Purple 1520 replaced a Gold 1500');
+  // Sold-out notes read as plain sentences for every tier.
+  [['teal', 600], ['purple', 1000], ['gold', 1500]].forEach(function (t) {
+    var l = new Store(), p;
+    // Gold needs a confirmed check-in; a Teal check-in alone already covers Teal and Purple sold down to Teal.
+    if (t[0] === 'gold') l.setItem('kleros_devcon_self', JSON.stringify({ ticket: 'K-Z', confirmed: true, merch: {} }));
+    p = page(l, { settings: function (s) { s.soldOut = [t[0]]; } });
+    playShift(p, t[1]); p.CurateRewards.showTicket();
+    ok(/gone for today/.test(p.text('t-note')) && !/ss are|gamchas/.test(p.text('t-note')), 'sold-out note for ' + t[0] + ': ' + p.text('t-note'));
+  });
+  // A duplicate check-in (merch.claimed): the merch already went with it, so the game names no reward.
+  ls = new Store(); ls.setItem('kleros_devcon_self', self(0, { claimed: 'email' })); c = page(ls);
+  ok(/^You already checked in at the booth/.test(c.text('welcome-text')), 'duplicate check-in welcome: ' + c.text('welcome-text'));
+  playShift(c, 1600);
+  ok(c.text('rep-tier-line') === 'Merch goes with your first check-in. Play for fun.', 'duplicate check-in report: ' + c.text('rep-tier-line'));
+  ok(c.el('rep-gold').hidden !== false && c.CurateRewards.model().state === 'dup', 'duplicate check-in is offered a Gold check-in');
+  // Kiosk: one shift is one visitor, capped at kioskMaxTier, and the ticket's button is Next curator.
+  c = page(new Store(), { kiosk: true });
+  playShift(c, 600); playShift(c, 150);
+  m = c.CurateRewards.model();
+  ok(m.t === 0 && m.best.final === 150, 'the next kiosk visitor inherited an earlier best');
+  playShift(c, 1600); c.CurateRewards.showTicket();
+  ok(c.CurateRewards.model().t === S.kioskMaxTier && c.text('t-again') === 'Next curator', 'kiosk cap or Next curator');
+  ok(!c.el('hdr-logo').hasAttribute('href'), 'the kiosk logo keeps a link');
+  console.log('Rewards\n  ' + n + ' ticket and storage cases (two tabs, check-in, Everyone, retune, sold out, duplicate, kiosk)');
+}
+
+// ---- GL watchdog ----
+// The real watchdog() from gl.js, fed synthetic frame timestamps: a steady 30 fps browser cap must keep GL.
+function checkWatchdog() {
+  var src = fs.readFileSync(path.join(DIR, 'gl.js'), 'utf8'), fn = /\n  function watchdog\(ts\) \{[\s\S]*?\n  \}\n/.exec(src), out = [];
+  if (!fn) return warn('gl.js: watchdog() not found, so its regression check did not run');
+  function run(gen) {
+    var ctx = { lastTs: 0, ivals: [], level: 0, dprCap: 2, swayOn: true, cw: 0, failed: '' }, rand = mulberry32(11), t = 1000, i;
+    vm.createContext(ctx);
+    vm.runInContext('function fail(w) { failed = w; }' + fn[0], ctx);
+    for (i = 0; i < 180 && !ctx.failed; i++) { t += gen(rand); if (ctx.watchdog(t)) break; }
+    return ctx.failed ? 'static' : 'level ' + ctx.level;
+  }
+  [['steady 16.7 ms', function () { return 16.7; }, 'level 0'],
+    ['steady 33.3 ms ±0.3 (browser cap)', function (r) { return 33.3 + (r() - 0.5) * 0.6; }, 'level 1'],
+    ['random 16.7 / 33.3 / 50 ms', function (r) { return [16.7, 33.3, 50][Math.floor(r() * 3)]; }, 'static'],
+    ['random 20–70 ms', function (r) { return 20 + 50 * r(); }, 'static']].forEach(function (c) {
+    var got = run(c[1]);
+    if (got !== c[2]) fail('gl.js watchdog: ' + c[0] + ' gives ' + got + ', expected ' + c[2]);
+    out.push(pad(c[0], 34) + got);
+  });
+  console.log('GL watchdog\n  ' + out.join('\n  '));
 }
 
 // ---- Simulation (§2.8) ----
@@ -438,6 +601,8 @@ checkSettings();
 checkSchema();
 checkDealing();
 checkLint();
+try { checkRewards(); } catch (e) { fail('rewards.js: the ticket checks threw ' + e.message); }
+checkWatchdog();
 checkSizes();
 if (SIM) simulate();
 warnings.forEach(function (w) { console.log('warn  ' + w); });

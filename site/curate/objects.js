@@ -247,6 +247,14 @@
     x.restore();
   }
 
+  // The brief hero’s fan in CSS px, shared with gl.js so the static paint and GL line up through the cross-fade.
+  // s is the centre item’s box; the side items sit dx either side, k times smaller, dy lower and rolled by r.
+  // Tight enough that three showcase-sized items (s ≈ 140 px in a 330 px slot) fit without clipping.
+  function heroBox(w, h) {
+    var s = Math.min(h * .98, w / 2.35);
+    return { s: s, dx: .74 * s, dy: .06 * s, k: .82, r: .16 };
+  }
+
   // ---- Paint scheduling ----
   // Paint once the element has a size, again when it changes. offsetWidth ignores drag and stack transforms.
   function paint(el) {
@@ -259,10 +267,10 @@
     if (!x) return;
     x.setTransform(d, 0, 0, d, 0, 0);
     if (o.size === 'hero') {
-      s = Math.min(h * 1.02, w / 2.7);
-      draw(x, o.specs[0], w / 2 - s * .86, h / 2 + s * .06, s * .8, -.16);
-      draw(x, o.specs[2], w / 2 + s * .86, h / 2 + s * .06, s * .8, .16);
-      draw(x, o.specs[1], w / 2, h / 2, s, 0);
+      s = heroBox(w, h);
+      draw(x, o.specs[0], w / 2 - s.dx, h / 2 + s.dy, s.s * s.k, -s.r);
+      draw(x, o.specs[2], w / 2 + s.dx, h / 2 + s.dy, s.s * s.k, s.r);
+      draw(x, o.specs[1], w / 2, h / 2, s.s, 0);
     } else draw(x, o.spec, w / 2, h / 2, Math.min(w, h) * .96, 0);
   }
   var pend = false;
@@ -411,6 +419,7 @@
     resume: function () { paused = false; call('resume'); },
     _emblem: emblem,
     _shapes: SHAPES,
+    _heroBox: heroBox,
     _glReady: function (a) {
       if (api || dead || isLite || !a || !CO._on) return false;
       var ok;

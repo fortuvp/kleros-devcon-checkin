@@ -33,7 +33,7 @@
 }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }   /* component display rules must never override the hidden attribute */
-html { -webkit-text-size-adjust:100%; }
+html { -webkit-text-size-adjust:100%; -webkit-tap-highlight-color:transparent; }   /* inherits: no tap flash on the ticket, the coin slot or summaries */
 body {
   margin:0; min-height:100vh; min-height:100dvh; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--text);
   background:radial-gradient(120% 60% at 50% 110%,rgba(222,79,208,.35),transparent 60%),radial-gradient(90% 50% at 85% 0%,rgba(127,240,224,.10),transparent 60%),linear-gradient(180deg,var(--night) 0%,var(--night-2) 45%,var(--dusk) 100%);
@@ -63,11 +63,11 @@ body:not(.v-brief) .ico-float { display:none; }
 .hdr { display:flex; align-items:center; justify-content:space-between; gap:12px; height:44px; }
 .hdr img { height:26px; width:auto; display:block; }
 #hdr-link { font:600 12.5px Inter,sans-serif; color:var(--teal); text-decoration:none; white-space:nowrap; }
+.is-kiosk #hdr-logo { pointer-events:none; }   /* a booth tablet must never open the check-in page; rewards.js also drops the href */
 h1, h2 { font-family:var(--display); font-weight:700; margin:0; text-wrap:balance; }
 .kicker { font:600 11px Inter,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--gold); }
 .panel { background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.035)); border:1px solid rgba(255,255,255,.12); border-radius:22px; padding:18px 16px 16px; box-shadow:0 30px 80px -30px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06); }
 .num { font-variant-numeric:tabular-nums; }
-a, button { -webkit-tap-highlight-color:transparent; }
 button { font:inherit; color:inherit; touch-action:manipulation; }
 :focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
 /* Primary CTA: check-in gradient with a lit conic edge */
@@ -81,7 +81,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .second { display:block; width:100%; height:48px; border-radius:14px; cursor:pointer; font:600 15px Inter,sans-serif; color:var(--text); background:var(--field); border:1px solid var(--field-line); text-align:center; text-decoration:none; line-height:46px; }
 .ghost { display:block; margin:10px auto 0; background:none; border:0; color:var(--muted); font:500 14px Inter,sans-serif; text-decoration:underline; text-underline-offset:3px; cursor:pointer; padding:8px; text-align:center; }
 .link { color:var(--teal); font-weight:600; text-decoration:none; }
-.fine { color:#9d92c4; font-size:11.5px; line-height:1.5; text-align:center; margin:14px 6px 0; }
+.fine { color:#d0c8ee; font-size:11.5px; line-height:1.5; text-align:center; margin:14px 6px 0; }
 .tagline { text-align:center; margin-top:26px; color:var(--text); font-size:11.5px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; text-wrap:balance; }
 .tagline i { font-style:normal; color:var(--muted); opacity:.6; margin:0 .55em; }
 .tagline b { color:var(--gold); font-weight:700; }
@@ -102,18 +102,19 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .tier-list li { display:grid; grid-template-columns:76px minmax(0,1fr); gap:12px; align-items:center; padding:9px 12px; border-radius:14px; background:var(--field); border:1px solid var(--field-line); }
 .tier-list .thumbs { --th:44px; justify-content:center; }
 .tier-list li.t-free { background:transparent; border-style:dashed; }
+#ladder-list .is-locked { opacity:.55; }   /* kiosk: out of the tablet’s reach */
 .tier-list b { display:block; font-size:14px; font-weight:600; line-height:1.3; }
 .tier-list b em { font-style:normal; color:var(--tc); }
 .tier-list .how { display:block; font-size:12.5px; color:var(--muted); line-height:1.4; margin-top:2px; }
 /* ---- Brief ---- */
 .brief-top { text-align:center; margin-top:6px; }
 #brief h1 { font-size:clamp(30px,9vw,40px); line-height:1.05; letter-spacing:-.02em; margin-top:6px; background:linear-gradient(180deg,#fff 35%,#c7b6ff 115%); -webkit-background-clip:text; background-clip:text; color:transparent; }
-/* Hero: fixed height so nothing shifts when the 3D items replace the placeholder */
-#hero { position:relative; height:clamp(110px,22dvh,170px); margin:10px 0 8px; display:grid; grid-template-columns:auto 1fr auto; grid-template-rows:1fr auto; align-items:center; gap:2px 6px; }
-#hero-objs { grid-column:2; grid-row:1; position:relative; height:100%; min-height:0; background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); }
+/* Hero: fixed height so nothing shifts when the 3D items replace the placeholder; svh so the toolbar never resizes it (vh first for older browsers) */
+#hero { position:relative; height:clamp(110px,22vh,170px); height:clamp(110px,22svh,170px); margin:10px 0 8px; display:grid; grid-template-columns:auto 1fr auto; grid-template-rows:1fr auto; align-items:center; gap:2px 6px; }
+#hero-objs { grid-column:1 / -1; grid-row:1; position:relative; height:100%; min-height:0; background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); }   /* full width: the items are the showcase */
 #hero-objs .gem { position:absolute; left:50%; top:50%; width:72px; height:64px; margin:-32px 0 0 -36px; filter:drop-shadow(0 0 14px rgba(183,123,255,.65)); }
 #hero .state { grid-column:1 / -1; grid-row:2; justify-self:center; }
-.side { grid-row:1; font:700 12.5px Inter,sans-serif; white-space:nowrap; }
+.side { grid-row:1; align-self:start; position:relative; z-index:1; font:700 12.5px Inter,sans-serif; white-space:nowrap; }   /* labels sit in the top corners, over the items' sky */
 .side.l { grid-column:1; color:var(--st-contested); }
 .side.r { grid-column:3; color:var(--st-listed); }
 #welcome { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:4px 10px; margin:0 0 10px; padding:9px 14px; border-radius:14px; background:var(--field); border:1px solid var(--gold-dim); font-size:13.5px; line-height:1.35; text-align:center; }
@@ -123,10 +124,11 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .story svg { width:18px; height:18px; margin-top:1px; fill:none; stroke:var(--gold); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 #payoff { margin:9px 0 12px; font-size:14px; line-height:1.35; color:var(--teal); font-weight:600; text-align:center; text-wrap:balance; }
 .under { margin:8px 0 0; text-align:center; font-size:12px; color:var(--muted); }
+.kiosk-only { display:none; } .is-kiosk .kiosk-only { display:inline; } .is-kiosk .not-kiosk { display:none; }
 .opts { display:flex; flex-direction:column; align-items:center; margin-top:6px; }
 .opts .ghost { margin:0; }
 #relaxed[aria-pressed=true] { color:var(--teal); }
-.opts small { font-size:11.5px; color:#9d92c4; margin-top:-4px; }
+.opts small { font-size:11.5px; color:#d0c8ee; margin-top:-4px; }   /* AA over the pink glow */
 .tiers { margin-top:26px; }
 .tiers h2 { font-size:21px; line-height:1.2; margin:6px 0 12px; }
 .tiers .fine { margin:10px 2px 0; text-align:left; }
@@ -191,9 +193,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .edge { position:fixed; top:0; bottom:0; width:90px; pointer-events:none; opacity:0; z-index:3; }
 #edge-l { left:0; background:linear-gradient(90deg,rgba(255,196,107,.55),transparent); }
 #edge-r { right:0; background:linear-gradient(270deg,rgba(101,220,127,.55),transparent); }
-#coach { display:none; position:absolute; left:8px; right:8px; bottom:4px; z-index:4; margin:0 auto; max-width:420px; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font-size:13.5px; line-height:1.35; text-align:center; }
+#coach { display:none; margin-top:auto; pointer-events:auto; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font-size:13.5px; line-height:1.35; text-align:center; }
 .is-practice #coach { display:block; }
-.is-practice #toasts { bottom:auto; top:4px; }
 #coach:empty { visibility:hidden; }
 #banner { position:absolute; left:0; right:0; width:max-content; max-width:calc(100% - 16px); margin:0 auto; top:calc(40% - 28px); z-index:6; padding:12px 22px; border-radius:16px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font:700 22px var(--display); white-space:nowrap; animation:rise .3s var(--ease); }
 /* ---- Card ---- */
@@ -219,16 +220,20 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .rail { height:4px; border-radius:2px; background:rgba(255,255,255,.08); overflow:hidden; margin:2px 0 0; }
 .rail i { display:block; height:100%; background:linear-gradient(90deg,rgba(108,197,255,.3),#6cc5ff); box-shadow:0 0 10px rgba(108,197,255,.6); transform:scaleX(var(--w,1)); transform-origin:left; }
 .is-relaxed .rail { visibility:hidden; }
-.obj-slot { position:relative; height:clamp(84px,19dvh,190px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
+/* The stage grows into the height left after the HUD, client, card parts, toast dock and buttons (590px), never below 19svh.
+   svh, so the toolbar never resizes it; the earlier lines are fallbacks for older browsers. */
+.obj-slot { position:relative; height:clamp(84px,19vh,190px); height:clamp(84px,19svh,190px);
+  height:clamp(84px,max(19svh,calc(100svh - 590px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),300px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
 .obj-slot[data-f] { cursor:pointer; }
 .obj-slot.is-ev { outline:1.5px solid var(--st-contested); outline-offset:-2px; }
 .obj { position:absolute; inset:0; }
 .rows { list-style:none; margin:0; padding:0; }
 .row { position:relative; display:flex; flex-direction:column; justify-content:center; width:100%; height:44px; padding:0 10px; margin:0; text-align:left; background:none; border:0; border-top:1px solid rgba(255,255,255,.07); border-radius:10px; cursor:pointer; color:var(--text); }
 .r-lab { font:600 11px Inter,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
-.r-val { font:600 16.5px/1.25 Inter,sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:64px; }
-.r-val.mono, .mono .r-val { font:600 15px/1.25 var(--mono); }
-.ev-tag { display:none; position:absolute; right:8px; top:50%; transform:translateY(-50%); padding:3px 7px; border-radius:999px; font:700 11px Inter,sans-serif; color:#1d1050; background:var(--st-contested); }
+.r-val { font:600 16.5px/1.25 Inter,sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.r-val.mono, .mono .r-val { font:600 15px/1.25 var(--mono); font-size:clamp(13px,4vw,15px); }   /* a domain's end stays in view on 320px screens */
+/* The tag sits on the label line, so values use the full width and marking never reflows them */
+.ev-tag { display:none; position:absolute; right:8px; top:4px; padding:1px 6px; border-radius:999px; font:700 10px/14px Inter,sans-serif; color:#1d1050; background:var(--st-contested); }
 .row.is-ev { outline:1.5px solid var(--st-contested); outline-offset:-1.5px; background:rgba(255,196,107,.08); }
 .row.is-ev .ev-tag { display:block; }
 .row.hint { animation:hint 1.2s ease-in-out infinite; }
@@ -242,9 +247,20 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .verdict:empty { display:none; }
 .verdict.v-good, .v-good .verdict { color:var(--st-listed); }
 .verdict.v-bad, .v-bad .verdict { color:var(--st-off); }
+/* Booth tablet: a wider card and a taller stage, so the screen is not half empty */
+@media (min-width:700px) {
+  .is-kiosk #play { grid-template-columns:minmax(0,640px); }
+  .is-kiosk #stack, .is-kiosk .card, .is-kiosk .dock { max-width:600px; }
+  .is-kiosk .acts { max-width:616px; }
+  .is-kiosk .obj-slot { height:clamp(84px,calc(100vh - 560px),520px); height:clamp(84px,calc(100svh - 560px),520px); }
+}
 /* ---- Toasts and overlays ---- */
-/* Toasts sit in the gap above the buttons so the card's state chip stays readable; in practice the coach owns that spot */
-#toasts { position:absolute; left:8px; right:8px; bottom:4px; z-index:5; max-width:420px; margin:0 auto; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+/* Toasts and the practice coach share one dock, so toasts sit in the gap above the buttons, or just above the coach, and the card's state chip stays readable */
+.dock { position:absolute; left:8px; right:8px; bottom:4px; z-index:5; max-width:420px; margin:0 auto; display:flex; flex-direction:column; pointer-events:none; }
+#toasts { display:flex; flex-direction:column; gap:6px; }
+.is-practice .toast:last-child { margin-bottom:6px; }
+/* Short screens: no room above the coach, so practice toasts go to the top of the arena (the dock spans it, the coach stays at the bottom) */
+@media (max-height:639px) { .is-practice .dock { top:4px; } }
 .toast { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--field-line); box-shadow:0 12px 30px -12px rgba(0,0,0,.7); font-size:13px; line-height:1.35; animation:rise .25s var(--ease); --c:var(--st-window); }
 .toast[data-tone=good] { --c:var(--st-listed); } .toast[data-tone=bad] { --c:var(--st-off); } .toast[data-tone=tier] { --c:var(--tc,var(--gold)); }
 .toast[data-tier=free] { --tc:var(--tier-free); } .toast[data-tier=teal] { --tc:var(--tier-teal); } .toast[data-tier=purple] { --tc:var(--tier-purple); } .toast[data-tier=gold] { --tc:var(--tier-gold); }
@@ -254,6 +270,16 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .t-line, .t-fix { display:block; color:var(--muted); }
 .t-fix s { color:var(--st-off); }
 .t-fix span:last-child { color:var(--st-listed); font-weight:600; }
+/* Short screens: the gap above the buttons is small, so toasts shrink to stay off the next card's rows.
+   The fix line repeats the why (the report lists it); rulings are read in full from #say. */
+@media (max-height:700px) {
+  #toasts .t-fix { display:none; }
+  #toasts .t-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+}
+@media (max-height:620px) {
+  #toasts .toast + .toast { display:none; }   /* newest is first: one toast at a time */
+  #toasts .toast { padding:6px 10px; line-height:1.25; }
+}
 .jurors { display:flex; gap:3px; flex:none; }
 .jurors i { width:10px; height:10px; background:rgba(255,255,255,.2); clip-path:polygon(25% 2%,78% 4%,100% 52%,72% 98%,20% 96%,0 42%); animation:jur .2s both; }
 .jurors i:nth-child(2) { animation-delay:60ms; } .jurors i:nth-child(3) { animation-delay:120ms; }
@@ -279,6 +305,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 /* ---- Report ---- */
 #report, #ticketv { margin-top:8px; animation:rise .45s var(--ease); }
 #rep-title { font-size:28px; line-height:1.1; margin:6px 0 14px; outline:none; }
+#play, #brief-title { outline:none; }   /* focus parks here (game.js park()); not controls, so no ring */
 /* The one featured panel: iridescent rim and a single comet pass */
 @property --cv-comet { syntax:'<angle>'; inherits:false; initial-value:0deg; }
 #rep-panel { position:relative; padding:18px 16px 16px; border-radius:22px; border:1.5px solid transparent; text-align:center;
@@ -293,6 +320,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #rep-sub { margin:6px 0 14px; color:var(--muted); font-size:13.5px; }
 .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:left; }
 .stats div { padding:9px 11px; border-radius:12px; background:var(--field); border:1px solid var(--field-line); font-size:13px; line-height:1.35; font-variant-numeric:tabular-nums; }
+.stats b { display:block; font:700 20px/1.1 var(--display); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.stats span { display:block; margin-top:2px; font-size:12px; color:var(--muted); }
 #rep-quote { margin:16px 4px 2px; font:700 17px/1.4 var(--display); text-wrap:balance; }
 #rep-quote-by { margin:0 4px; color:var(--muted); font-size:12.5px; }
 #rep-payoff { margin:12px 4px 0; font-size:14px; line-height:1.5; color:#ddd3ff; }
@@ -301,6 +330,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #rep-meter i { border-radius:4px; background:rgba(255,255,255,.12); --tc:var(--tier-free); }
 #rep-meter i[data-tier] { background:var(--tc); box-shadow:0 0 10px var(--tc); }
 #rep-meter i[data-tier=none] { background:rgba(255,255,255,.12); box-shadow:none; }   /* rewards.js marks unreached segments 'none' */
+#rep-meter i[data-locked] { background:repeating-linear-gradient(135deg,rgba(255,255,255,.12) 0 3px,transparent 3px 6px); box-shadow:none; }   /* above the kiosk cap */
 #rep-marker { position:absolute; top:-5px; left:calc(var(--at,0) * 100%); width:3px; height:18px; margin-left:-1.5px; border-radius:2px; background:#fff; box-shadow:0 0 8px #fff; }
 #rep-meter-labels { display:grid; grid-template-columns:repeat(4,1fr); margin-top:6px; font:600 11px Inter,sans-serif; color:var(--muted); font-variant-numeric:tabular-nums; }
 .tl-row { display:flex; align-items:center; gap:12px; margin-top:12px; }
@@ -335,11 +365,13 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   mask:radial-gradient(circle 11px at 0 50%,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 11px at 100% 50%,#0000 98%,#000) right/51% 100% no-repeat; }
 .ticket-wrap[data-tier=free] .face { border-style:dashed; }
 .face.back { position:absolute; inset:0; transform:rotateY(180deg); display:flex; flex-direction:column; justify-content:center; gap:10px; text-align:center; font-size:14px; line-height:1.45; }
+/* Only the face in view is focusable and read aloud; the other hides once the turn has passed edge-on */
+.ticket-wrap:not(.flipped) .face.back, .ticket-wrap.flipped .face.front { visibility:hidden; transition:visibility 0s .2s; }
 .face .sheen { position:absolute; inset:0; pointer-events:none; background:linear-gradient(105deg,transparent 38%,rgba(255,255,255,.16) 50%,transparent 62%); animation:sheen 3.6s ease-in-out infinite; }
-.t-top { position:relative; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.t-top { position:relative; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }   /* the pills drop to their own row before the kicker wraps */
 .t-top .kicker { color:var(--gold); }
 [data-tier=gold] .t-top .kicker, [data-tier=claimed] .t-top .kicker, [data-tier=expired] .t-top .kicker { color:#fff3d6; }
-.t-meta { display:flex; gap:6px; align-items:center; }
+.t-meta { display:flex; gap:6px; align-items:center; margin-left:auto; }
 #t-date { font:600 12px Inter,sans-serif; padding:5px 9px; border-radius:999px; background:rgba(0,0,0,.22); white-space:nowrap; }
 #t-live { display:inline-flex; align-items:center; gap:6px; font:700 12px/1 var(--mono); font-variant-numeric:tabular-nums; color:#fff; background:rgba(0,0,0,.28); padding:5px 9px; border-radius:999px; white-space:nowrap; }
 #t-live i { width:7px; height:7px; border-radius:50%; background:var(--ok); animation:pulse 1.4s ease-in-out infinite; }
@@ -347,7 +379,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #t-img { --th:60px; --ring:rgba(255,255,255,.75); }
 #t-tier { font:700 12px Inter,sans-serif; letter-spacing:.16em; text-transform:uppercase; }
 #t-reward { font:700 22px/1.2 var(--display); text-wrap:balance; }
-#t-note { position:relative; margin:8px 0 0; text-align:center; font-size:12.5px; color:#f0e6ff; opacity:.9; }
+#t-note { position:relative; margin:8px 0 0; text-align:center; font-size:12.5px; color:#f0e6ff; }
 .face hr { border:0; border-top:1.5px dashed rgba(255,255,255,.35); margin:16px 6px; }
 #t-who { position:relative; font:700 25px/1.15 var(--display); word-break:break-word; }
 #t-org { position:relative; color:#e8dcff; font-size:14px; margin-top:2px; font-variant-numeric:tabular-nums; }
@@ -355,6 +387,10 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #t-code::after { content:""; position:absolute; left:0; right:0; bottom:0; height:3px; border-radius:2px; background:#fff; transform:scaleX(var(--hold,0)); transform-origin:left; opacity:0; }
 #t-code.holding::after { opacity:1; }
 #t-hint { position:relative; font-size:13px; color:#f0e6ff; margin-top:8px; }
+/* Gold and Teal faces are light, so key text sits on dark pills (the #t-date pattern) for AA contrast */
+[data-tier=gold] #t-tier, [data-tier=gold] #t-note, [data-tier=gold] #t-org:not(:empty), [data-tier=gold] #t-hint,
+[data-tier=teal] #t-tier, [data-tier=teal] #t-note, [data-tier=teal] #t-org:not(:empty), [data-tier=teal] #t-hint { width:fit-content; padding:3px 9px; border-radius:12px; background:rgba(0,0,0,.35); }
+[data-tier=gold] #t-note, [data-tier=teal] #t-note { margin-inline:auto; }   /* #t-note is centred */
 [data-tier=claimed] .face, [data-tier=expired] .face { filter:saturate(.3); }
 [data-tier=claimed] .sheen, [data-tier=expired] .sheen, [data-tier=claimed] #t-live, [data-tier=expired] #t-live, [data-tier=claimed] #t-code, [data-tier=expired] #t-code { display:none; }
 [data-tier=claimed] #t-reward, [data-tier=expired] #t-reward { font:500 14.5px/1.45 Inter,sans-serif; color:#e6defd; }
@@ -381,6 +417,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   .ticket-wrap.flipped .face.back { opacity:1; pointer-events:auto; }
   .card.fly-left { transform:translateX(-24px) !important; opacity:0; }
   .card.fly-right { transform:translateX(24px) !important; opacity:0; }
+  .row.hint { background:rgba(255,196,107,.16); outline:1.5px dashed var(--st-contested); outline-offset:-1.5px; }   /* the pulse is off, so the hint row needs a static cue */
 }
 </style>
 </head>
@@ -408,7 +445,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <section id="brief" aria-labelledby="brief-title">
   <div class="brief-top">
     <div class="kicker">Kleros Curate · 60-second shift</div>
-    <h1 id="brief-title">Keep the list clean.</h1>
+    <h1 id="brief-title" tabindex="-1">Keep the list clean.</h1>
   </div>
   <div id="hero" aria-hidden="true">
     <span class="side l">← Challenge</span>
@@ -424,7 +461,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   </ul>
   <p id="payoff">Clean list: safe users, and the app keeps earning.</p>
   <button type="button" class="primary" id="start">Start my shift</button>
-  <p class="under">60 seconds · no sign-up · nothing leaves your phone</p>
+  <p class="under">60 seconds · no sign-up · <span class="not-kiosk">nothing leaves your phone</span><span class="kiosk-only">nothing is saved on this tablet</span></p>
   <noscript><p class="fine" style="color:var(--gold)">Turn on JavaScript to play. You can still check in at devcon.kleros.io.</p></noscript>
   <div class="opts">
     <button type="button" class="ghost" id="deck-switch">Not into crypto? Play the Mumbai city list</button>
@@ -454,7 +491,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <p><a class="link" href="https://docs.kleros.io/products/curate" target="_blank" rel="noopener">Read about Kleros Curate →</a></p>
   </details>
 
-  <div class="tagline">Agentic economy<i>·</i>Verified agents<i>·</i><b>Agentic Court</b></div>
+  <div class="tagline">AI agents<i>·</i>Agent payments<i>·</i><b>Agentic Court</b></div>
   <p class="fine">A game, not real money. No wallet needed. Your game data stays on this phone. Project names show real and fake entries; no partnership implied.</p>
 </section>
 
@@ -465,7 +502,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <div id="rep-panel">
     <div><b id="rep-score">0</b><span class="unit">points</span></div>
     <p id="rep-sub"></p>
-    <div class="stats"><div id="rep-caught"></div><div id="rep-listed"></div><div id="rep-evidence"></div><div id="rep-wrong"></div></div>
+    <div class="stats"><div id="rep-caught"><b></b><span>Fakes caught</span></div><div id="rep-listed"><b></b><span>Good entries listed</span></div><div id="rep-evidence"><b></b><span>Sharp evidence</span></div><div id="rep-wrong"><b></b><span>Wrong challenges</span></div></div>
   </div>
   <blockquote id="rep-quote"></blockquote>
   <p id="rep-quote-by"></p>
@@ -520,7 +557,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 </main>
 
 <!-- ---- Play ---- -->
-<section id="play" hidden aria-label="Curate shift">
+<section id="play" hidden aria-label="Curate shift" tabindex="-1">
   <div class="hud">
     <div class="ring"><svg id="clock" viewBox="0 0 44 44" role="timer" aria-label="Time left"><circle class="trk" cx="22" cy="22" r="19"/><circle id="clock-arc" cx="22" cy="22" r="19" pathLength="100"/></svg><span id="clock-s">60</span></div>
     <div class="score"><b id="score-v">0</b><small>pts</small></div>
@@ -537,8 +574,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   </div>
   <div class="arena">
     <div id="stack"></div>
-    <div id="toasts" role="status" aria-live="polite"></div>
-    <div id="coach" aria-live="polite"></div>
+    <div class="dock"><div id="toasts" role="status" aria-live="polite"></div><div id="coach" aria-live="polite"></div></div>
     <div id="banner" hidden></div>
     <div id="explain" hidden role="dialog" aria-modal="true" aria-labelledby="explain-title">
       <div class="dlg"><h2 id="explain-title"></h2><p id="explain-why"></p><p id="explain-fix"></p><button type="button" class="primary" id="explain-ok">Got it</button></div>
