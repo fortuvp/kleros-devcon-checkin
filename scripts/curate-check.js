@@ -42,7 +42,7 @@ function checkSettings() {
   if (!S) return fail('settings.js: window.CURATE_SETTINGS is missing');
   keys.forEach(function (k) { if (S[k] === undefined) fail('settings.js: missing ' + k); });
   ['catch', 'evidence', 'letThrough', 'autoListed', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus',
-    'perSecondLeft', 'bonusMaxMistakes'].forEach(function (k) {
+    'perSecondLeft', 'bonusMaxMistakes', 'relaxedBonus'].forEach(function (k) {
     if (typeof S.points[k] !== 'number') fail('settings.js: points.' + k + ' is not a number');
   });
   ['leak', 'wrongChallenge'].forEach(function (k) {
@@ -107,12 +107,13 @@ function okSleeve(o, where) {
   if (typeof o.mark !== 'string' || !/^[A-Z0-9]{1,3}$/.test(o.mark)) fail(where + ': sleeve mark ' + o.mark + ' is not 1 to 3 capitals');
 }
 function okObj(o, where) {
-  var allowed = { photo: ['src', 'alt'], flag: ['flag'], sleeve: ['color', 'color2', 'mark'] }, k;
+  var allowed = { photo: ['src', 'alt', 'pos'], flag: ['flag'], sleeve: ['color', 'color2', 'mark'] }, k;
   if (!o || SHAPES.indexOf(o.shape) < 0) return fail(where + ': obj.shape ' + (o && o.shape) + ' not allowed');
   for (k in o) if (k !== 'shape' && allowed[o.shape].indexOf(k) < 0) fail(where + ': obj.' + k + ' not allowed on a ' + o.shape);
   if (o.shape === 'photo') {
     okImg(o.src, where);
     if (typeof o.alt !== 'string' || !o.alt) fail(where + ': a photo needs alt text');
+    if (o.pos !== undefined && !/^\d{1,3}% \d{1,3}%$/.test(o.pos)) fail(where + ': photo pos ' + o.pos + ' is not "x% y%"');
   } else if (o.shape === 'flag') okFlag(o.flag, where);
   else okSleeve(o, where);
 }
@@ -164,7 +165,8 @@ var COUNTRY = {
   India: ['New Delhi', { kind: 'h3wheel', c: ['#ff9933', '#ffffff', '#138808', '#000080'] }, 'Saffron, white, green, navy wheel']
 };
 // Photo file: [name, location, words for the Photo row]. Each checked against the photo itself and its
-// Commons page (Jinshanling is in northern China, Elephanta Island in Mumbai Harbour).
+// Commons page (Jinshanling is in northern China; Elephanta Island lies in Mumbai Harbour, Raigad district,
+// outside Mumbai city).
 var SIGHT = {
   'eiffel': ['Eiffel Tower', 'Paris, France', 'Iron lattice tower'],
   'colosseum': ['Colosseum', 'Rome, Italy', 'Oval arena of stone arches'],
@@ -183,7 +185,7 @@ var SIGHT = {
   'sea-link': ['Bandra–Worli Sea Link', 'Mumbai, India', 'Cable-stayed bridge over the sea'],
   'haji-ali': ['Haji Ali Dargah', 'Mumbai, India', 'White shrine with a dome'],
   'marine-drive': ['Marine Drive', 'Mumbai, India', 'Curving seafront at night'],
-  'elephanta': ['Elephanta Caves', 'Mumbai, India', 'Three-faced stone carving']
+  'elephanta': ['Elephanta Caves', 'Mumbai Harbour, India', 'Three-faced stone carving']
 };
 // Song: [lead artist, year it first came out]. Each checked by hand against the original release (album or
 // single, whichever came first); no covers, no shared or “featuring” credits.
@@ -265,12 +267,13 @@ var POLICY_MAX = 61;
 // Short copy: [path in the deck, max characters]. Title cards and banners must fit a phone line or two.
 var COPY_MAX = [['pick.app', 24], ['pick.need', 42], ['pick.sub', 36], ['copy.mission', 44], ['copy.quoteBy', 34]];
 // The wrong-evidence toast line, exactly as game.js ruling() builds it from a field label.
+// The picture field (objField) has no text row, so its line names the picture instead.
 var EV_LINE = '\'The problem was the “\' + lab + \'” line.\'';
-function evLine(lab) { return 'The problem was the “' + lab + '” line.'; }
+function evLine(lab, pic) { return pic ? 'The problem was the ' + lab.toLowerCase() + '.' : 'The problem was the “' + lab + '” line.'; }
 var EV_LINES = [];
 // Every field label must read inside that sentence: no quotes or end punctuation, short enough for a toast.
-function checkLabel(where, lab) {
-  var line = evLine(lab);
+function checkLabel(where, lab, pic) {
+  var line = evLine(lab, pic);
   if (/[“”"‘’'.,:;!?]$|[“”"]/.test(lab)) fail(where + ': label ' + lab + ' breaks ' + line);
   if (line.length > 80) fail(where + ': ' + line + ' is ' + line.length + ' characters (max 80)');
   if (EV_LINES.indexOf(line) < 0) EV_LINES.push(line);
@@ -353,7 +356,7 @@ function checkSchema() {
         if (!li.name || !li.policy || !li.fields || li.fields.length !== 3) fail(dk + '.' + lk + ': name, policy and 3 fields needed');
         if (li.objField && !li.fields.some(function (f) { return f[0] === li.objField; })) fail(dk + '.' + lk + ': objField is not a field');
         if (li.policy && li.policy.length > POLICY_MAX) fail(dk + '.' + lk + ': policy is ' + li.policy.length + ' characters (max ' + POLICY_MAX + ')');
-        (li.fields || []).forEach(function (f) { checkLabel(dk + '.' + lk, f[1]); });
+        (li.fields || []).forEach(function (f) { checkLabel(dk + '.' + lk, f[1], f[0] === li.objField); });
         per[lk] = [0, 0, 0];
       }
       // One list per app, with the drawn object (if any) as its first field.
@@ -614,15 +617,17 @@ function checkCopy() {
 // ---- Sizes ----
 // Budgets in bytes: [raw, gzip] (0 = no limit). The data files (settings, decks, rules, credits) fail when over;
 // the rest only warn. Each budget is the measured size plus about 10%: set after the first review round, set
-// again for v3 (28 Oct), and for v4 the data files again (three decks, one list each, photo credits).
+// again for v3 (28 Oct), and for v4 the data files (three decks, one list each, photo credits) plus objects.js
+// and gl.js (landmarks, cloth and hero gone, medal back), and game.js +1.5 KB (picker, practice toggle, relaxed
+// finish-bonus toasts) after its comments were trimmed.
 // Unminified on purpose: no build step, and the source stays readable. Raise a budget only with a reason.
-// Photos in site/curate/img are not eager (a card loads its photo when dealt): they are reported apart, each
-// within 60 KiB.
+// Photos in site/curate/img are reported apart, each within 60 KiB, and stay out of the eager total (v4 brief):
+// a card loads its photo when dealt; only the Sightseeing pick card shows one (taj-mahal.jpg) on the title screen.
 var KB = 1024, IMG_MAX = 60 * KB;
 var BUDGETS = {
   'settings.js': [2.4 * KB, 0, true], 'decks.js': [29 * KB, 9 * KB, true], 'rules.js': [8.9 * KB, 0, true],
   'credits.js': [5.75 * KB, 2.25 * KB, true],
-  'objects.js': [38 * KB, 14.5 * KB], 'gl.js': [41.5 * KB, 15.5 * KB], 'game.js': [45 * KB, 15 * KB],
+  'objects.js': [27 * KB, 10.25 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [46.5 * KB, 15.25 * KB],
   'rewards.js': [43.5 * KB, 14.75 * KB], 'index.html': [62.5 * KB, 17.5 * KB]
 };
 var TOTAL = [227 * KB, 75 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
@@ -907,7 +912,8 @@ function fit(all) {
   }
   console.log('  Fit: tiers [0, ' + cut.join(', ') + '] would give about ' + TARGET.standard.join(' / ') + ' %');
 }
-// Lazy strategies must never reach Teal; random fast taps are reported only.
+// Lazy strategies must never reach Teal. Random fast taps are reported only: with 10 entries (10 coin flips)
+// about 7% of rounds reach Teal (v3, 16 entries: 2.6%); see the README calibration notes.
 function simLazy(rand) {
   console.log('\nLazy strategies, standard (' + RUNS + ' rounds each)');
   [['let', 'Verify everything'], ['challenge', 'Challenge everything'], ['idle', 'Idle'],

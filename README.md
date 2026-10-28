@@ -42,7 +42,7 @@ Short version: [`docs/DEPLOY.md`](docs/DEPLOY.md). `bash scripts/package.sh` bui
 | `apps-script/Matching.gs` | Copy of `site/matching.js` for the backend (kept in sync by the bundle script) |
 | `scripts/apps-script-bundle.sh` | Prints the backend as the single file that lives in the Apps Script editor |
 | `scripts/package.sh` | Builds `dist/kleros-devcon-deploy.zip`: Netlify-ready site, backend file, deploy guide |
-| `scripts/curate-check.js` | Checks the game's decks and rules and lints `site/curate/*.js` for ES5 (Node, no dependencies); `--sim` reruns the tier calibration |
+| `scripts/curate-check.js` | Checks the game's decks and rules and lints `site/curate/*.js` for ES5 (Node, no dependencies); `--sim` reruns the tier calibration, `--fit` suggests thresholds |
 | `docs/DEPLOY.md` | Step-by-step deploy: Netlify, domain, backend, keys |
 | `qr/` | Booth QR generator (`make_qr.py`) and the print-ready codes: `devcon-kleros-qr-*` for the check-in, `curate-kleros-qr-*` for the game (see [Booth QR codes](#booth-qr-codes)) |
 | `docs/RESEARCH_AGENT.md` | Playbook for the agents that research leads |
@@ -148,7 +148,7 @@ https://devcon.kleros.io/curate/ teaches Kleros Curate by doing it, and is a sec
 
 | App (card) | Its need | Each entry | Picture |
 |---|---|---|---|
-| Travel guide app (Sightseeing) | needs real sights on its map | Photo, name, city | A real photo from Wikimedia Commons: 12 world landmarks and 6 Mumbai sights |
+| Travel guide app (Sightseeing) | needs real sights on its map | Photo, name, location | A real photo from Wikimedia Commons: 12 world landmarks and 6 Mumbai sights |
 | Atlas app for schools (Countries) | needs the right flags and capitals | Flag, country, capital | The real flag, flat |
 | Music streaming app (Music) | needs songs credited to the right artist | Song, artist, year released | A painted record sleeve (album art is copyrighted) |
 
@@ -181,11 +181,11 @@ Trust (the app's users' trust in its list) only drives the Results headline; it 
 | Tier | Game route | Check-in route (unchanged) | Merch (today's `config.js`) |
 |---|---|---|---|
 | Everyone | Finish a round | Visit the booth | Stickers and metallic tattoos |
-| Teal | `tiers[1]` points | Check in | Kleros flip-flops |
-| Purple | `tiers[2]` points | + Telegram, X and LinkedIn | Copper bottle or gamcha |
-| Gold | `tiers[3]` points **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
+| Teal | `tiers[1]` points (250) | Check in | Kleros flip-flops |
+| Purple | `tiers[2]` points (555) | + Telegram, X and LinkedIn | Copper bottle or gamcha |
+| Gold | `tiers[3]` points (800) **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
 
-The thresholds (`tiers` in `site/curate/settings.js`, the only place they are set: the ladder, meter and copy read them from there) come from a simulation of player profiles on the 10-entry, 40-second round (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Verifying everything, challenging everything or doing nothing never reaches Teal. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
+The thresholds (`tiers` in `site/curate/settings.js`, the only place they are set: the ladder, meter and copy read them from there) come from a simulation of player profiles on the 10-entry, 40-second round (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Verifying everything, challenging everything or doing nothing never reaches Teal. Random fast taps (10 coin flips) reach Teal in about 7% of rounds; the sim reports this but does not fail on it. `node scripts/curate-check.js --fit` prints thresholds fitted to those shares, and `--sim` checks them. A relaxed round has no time bonus; finishing it with 2 mistakes or fewer adds a flat `points.relaxedBonus` (50), so only a flawless relaxed round, with sharp evidence on every fake, reaches Gold. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
 
 **Gold needs a check-in.** A Gold score needs a confirmed check-in on the same phone (`checkinNeededFrom: 3`), read from the check-in's own storage with the same confirmation rule as the check-in page. Until then the ticket shows Purple with a gold strip linking to `/`; coming back to `/curate/` after checking in upgrades it. So every Gold ticket carries a K- code the merch desk can dedupe. Teal and Purple need no check-in ("scan and play"); `checkinNeededFrom: 1` makes every tier above Everyone need one.
 

@@ -27,7 +27,7 @@
   // Restarts a one-shot CSS animation class.
   function bump(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
   function focusEl(el) { if (!el) return; try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
-  // Parks focus on a heading or region that is not a control (tabindex -1, no ring), so it never drops to <body>.
+  // Parks focus on a non-control (tabindex -1, no ring), so it never drops to <body>.
   function park(id) {
     var el = $(id);
     if (el && !el.hasAttribute('tabindex')) { el.setAttribute('tabindex', '-1'); el.style.outline = 'none'; }
@@ -60,6 +60,7 @@
   var chalArrow = '', sayT = 0;
   var announcedTier = 0;     // highest tier toasted this shift: re-crossing a threshold stays quiet
   var focusFirst = false;    // focus the next card that lands (after Start), so focus never sits on <body>
+  var practiceNext = false;  // Practice again: one practice card before the next app picked
 
   // ---- Views and announcements ----
   var VIEWS = { brief: 'brief', play: 'play', report: 'report', ticket: 'ticketv' };
@@ -73,11 +74,10 @@
     // Keep modifier classes, replace the v-* one.
     b.className = (b.className.replace(/(^|\s)v-\S+/g, '') + ' v-' + view).replace(/^\s+/, '');
     if (view !== 'play') { show('paused', false); show('explain', false); body('is-paused', false); }
-    // The app cards replace the v3 deck switch; on Results #rep-switch goes back to them (set after rewards.js
-    // renders the report).
+    // On Results #rep-switch goes back to the app cards (set after rewards.js renders).
     show('deck-switch', false);
-    if (view === 'report') { txt('rep-switch', 'Try another app'); show('rep-switch', true); }
-    // Objects keep running on Results for the spinning medal.
+    if (view === 'report') { txt('rep-switch', 'Try another app'); show('rep-switch', !KIOSK); }   // kiosk: Next curator only
+    // objects.js keeps pause/resume as no-ops: the medal comes and goes with Results (rewards.js).
     ob(view === 'ticket' ? 'pause' : 'resume');
     try { window.scrollTo(0, 0); } catch (e) {}
   }
@@ -100,7 +100,7 @@
   // rewards.js answers any practiced.* key with "practised any app on this phone" (never in kiosk).
   function practised() { return !KIOSK && !!rw('getPref', 'practiced.any'); }
   function renderBrief() {
-    var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d;
+    var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d, pa;
     if (rb) {
       rb.textContent = 'Relaxed timing: ' + (relaxed ? 'On' : 'Off');
       rb.setAttribute('aria-pressed', relaxed ? 'true' : 'false');
@@ -114,10 +114,11 @@
     }
     body('is-relaxed', relaxed);
     show('practice-again', practised());
+    pa = $('practice-again');
+    if (pa) pa.setAttribute('aria-pressed', practiceNext ? 'true' : 'false');
   }
   // ---- App picker ----
-  // One card per deck, in CURATE_DECKS order, built once at boot. The picture is decoration (the card's
-  // text names the app): a photo, a flat flag (_flag's canvas, at a size no card uses) or a painted sleeve.
+  // One card per deck, in CURATE_DECKS order, built at boot. The picture is decoration: photo, flag or sleeve.
   function pickPic(d) {
     var p = d.pick || {}, v = p.sleeve || {}, el = null;
     if (p.img) {
@@ -147,19 +148,23 @@
       pic = ps ? pickPic(d) : null;
       if (pic) ps.appendChild(pic);
       box.appendChild(el);
+      // First visit (and kiosk): the practice photo loads while the title screen is read.
+      if (!practised() && d.practice && d.practice[0]) ob('preload', d.practice[0].obj);
     }
   }
-  // A tap on an app card picks it and starts at once (practice first, the very first time).
+  // A tap on an app card picks it and starts (practice first the first time, or when armed).
   function onPick(e) {
-    var b = e.target.closest ? e.target.closest('.pick[data-deck]') : null;
+    var b = e.target.closest ? e.target.closest('.pick[data-deck]') : null, p;
     if (!b || mode !== 'brief') return;
     keyboard = e.detail === 0;
     setDeck(b.getAttribute('data-deck'));
     rw('setPref', 'deck', deckId);
-    startFlow(false);
+    p = practiceNext;
+    practiceNext = false;
+    startFlow(p);
   }
   // ---- Photo credits ----
-  // How it works credits every photo. https links only; plain text in kiosk, which hides the docs link too.
+  // How it works credits every photo. https links only; plain text in kiosk (no docs link there).
   function link(label, href) {
     var a;
     if (KIOSK || !/^https:\/\//.test(href || '')) { a = document.createElement('span'); a.textContent = label; return a; }
@@ -211,6 +216,7 @@
     slot(el, 'foot').textContent = 'Submitted with a deposit · #' + ('000' + Math.floor(Math.random() * 10000)).slice(-4);
     for (i = 0; i < list.fields.length; i++) {
       key = list.fields[i][0]; v = String(item.f[key]);
+      if (key === list.objField) continue;   // the picture is that field: no text row for it
       li = clone('tpl-row'); b = li.querySelector('.row');
       b.setAttribute('data-f', key);
       b.setAttribute('aria-label', list.fields[i][1] + ': ' + v);
@@ -222,9 +228,10 @@
     if (!obj) { obj = document.createElement('div'); obj.className = 'obj'; obj.setAttribute('aria-hidden', 'true'); }
     objSlot.appendChild(obj);
     el._obj = obj;
-    // The picture (photo, flag, sleeve) is evidence too for a list with an objField: tapping it toggles that
-    // row, whose short text description is also the picture's accessible name.
+    // For a list with an objField the picture (photo, flag) is that field: tapping it marks it as evidence,
+    // and its short text description is only its accessible name. The stage takes the missing row's height.
     if (list.objField) {
+      el.classList.add('pic-field');
       objSlot.setAttribute('data-f', list.objField);
       objSlot.setAttribute('role', 'button');
       objSlot.setAttribute('aria-pressed', 'false');
@@ -240,7 +247,7 @@
     slot(el, 'secs').textContent = secs;
   }
   function secsText(ms) { var s = Math.max(0, Math.ceil(ms / 1000)); return ' · 0:' + (s < 10 ? '0' : '') + s; }
-  // Untimed chip suffix (practice and relaxed), short enough for the list name and a 10/10 counter at 360 px.
+  // Untimed chip suffix (practice, relaxed): fits beside the list name and 10/10 at 360 px.
   var OPEN_SUFFIX = ' · open';
   function cardLabel(el, winMs) {
     var item = el._item, f = listOf(item).fields, s = 'Entry ' + el._n + ' of ' + el._of + ', ' + listWord(item) + '. ', i;
@@ -394,7 +401,11 @@
         t = { tone: 'good', jurors: true, ms: 1300,
               title: 'Rejected · Jurors 3–0 · ' + signed(P.catch) + ' bounty' + (o.evidence === 'sharp' ? ' · ' + signed(P.evidence) + ' sharp evidence' : '') };
         // The label is quoted, so any label reads (‘What it does’ cannot be lower-cased into the sentence).
-        if (o.evidence === 'wrong') { lab = labelOf(item, item.bad); t.line = 'The problem was the “' + lab + '” line.'; t.ms = 2600; }
+        if (o.evidence === 'wrong') {
+          lab = labelOf(item, item.bad);
+          t.line = item.bad === listOf(item).objField ? 'The problem was the ' + lab.toLowerCase() + '.' : 'The problem was the “' + lab + '” line.';
+          t.ms = 2600;
+        }
         return t;
       case 'listed': return { tone: 'good', ms: 1300, title: 'Verified · Listed · ' + signed(P.letThrough) };
       case 'autoListed': return { tone: 'good', ms: 1300, title: 'No challenge in time · Listed · ' + signed(P.autoListed) };
@@ -457,6 +468,7 @@
   }
   function advance() {
     cards.shift(); idx++;
+    setChalLabel(null);   // its card has gone; topLanded relabels the next
     if (mode === 'shift' && idx >= run.length) { endShift('done'); return; }
     fillStack(); topLanded();
   }
@@ -480,7 +492,7 @@
     el.classList.add(dir < 0 ? 'fly-left' : 'fly-right');
     flying = { el: el, t: setTimeout(finishFly, RM ? 130 : 250) };
   }
-  // Ends (or fast-forwards) a fly-out: the GL object moves to the new top card before the old one goes.
+  // Ends (or fast-forwards) a fly-out; the new top card's picture goes live.
   function finishFly() {
     var f = flying;
     if (!f) return;
@@ -499,15 +511,15 @@
   function coachFact() { var p = pItem(); return p.hint || (deck.coach || {}).fact || p.why || ''; }
   function practiceCard() {
     pT0 = now(); pHinted = false;
-    coach(pItem().bad ? 'Something on this entry breaks the policy. Tap the line that’s wrong.'
-                      : 'Every line checks out. Swipe right to verify it.');
+    coach(pItem().bad ? 'Something here breaks the policy. Tap what’s wrong.'
+                      : 'Everything checks out. Swipe right to verify it.');
   }
   function sharp(item, key) { return key === item.bad || (item.also || []).indexOf(key) > -1; }
   function coachEv(card) {
     if (pStep !== 0 || !card._item.bad) return;
     pT0 = now();
     if (card._ev) coach(sharp(card._item, card._ev) ? 'That’s your evidence. Now swipe left, or press Challenge.'
-                                                    : 'Look again: one line doesn’t match.');
+                                                    : 'Look again: something else doesn’t match.');
   }
   function practiceFrame(t) {
     var top = cards[0], marks, i;
@@ -522,16 +534,17 @@
     var item = top._item, o, r;
     if (pStep !== 0) return false;
     if (item.bad && action !== 'challenge') { coach('Careful: that would list a fake. ' + coachFact()); return false; }
-    if (!item.bad && action === 'challenge') { coach('Every line is true. A wrong challenge costs your stake.'); return false; }
+    if (!item.bad && action === 'challenge') { coach('Everything here is true. A wrong challenge costs your stake.'); return false; }
     o = R.judge(item, action, top._ev);
     r = ruling(o, item); r.quiet = true;
     toast(r); say(r.title);
     if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o, false);
     pStep = 1;
-    if (item.bad) coach(o.evidence === 'sharp' ? 'Bounty won. It comes from the faker’s deposit.' : 'Tip: tap the wrong line first for +25.');
+    if (item.bad) coach(o.evidence === 'sharp' ? 'Bounty won. It comes from the faker’s deposit.' : 'Tip: tap what’s wrong first for +25.');
     else coach('Nobody challenged it, so it joins the list. That’s Curate in a nutshell.');
     cards.shift(); idx++;
+    setChalLabel(null);   // empty arena until the round
     endPractice(true);
     return true;
   }
@@ -565,7 +578,7 @@
     if ($('toasts')) $('toasts').textContent = '';
     edges(0, 0);
   }
-  // App card → (practice) → round. Practice runs the first time on this phone, and every time in kiosk.
+  // App card → (practice) → round. Practice: first time on this phone, when armed, always in kiosk.
   function startFlow(forcePractice) {
     var k;
     freshPlay();
@@ -616,7 +629,8 @@
     fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
     hudScore(score.raw);
     if (by === 'done') {
-      if (relaxed) toast({ tone: 'info', ms: 1300, title: 'All done early' });
+      if (relaxed && score.mistakes <= S.points.bonusMaxMistakes) toast({ tone: 'good', ms: 1300, title: 'All done · ' + signed(fb.timeBonus) + ' finish bonus' });
+      else if (relaxed) toast({ tone: 'info', ms: 2600, title: 'All done', line: 'Finish bonus needs ' + S.points.bonusMaxMistakes + ' mistakes or fewer.' });
       else if (score.mistakes <= S.points.bonusMaxMistakes) toast({ tone: 'good', ms: 1300, title: 'All done early · ' + signed(fb.timeBonus) + ' time bonus' });
       else toast({ tone: 'info', ms: 2600, title: 'All done early', line: 'Time bonus needs ' + S.points.bonusMaxMistakes + ' mistakes or fewer.' });
       later(function () { handOff(by); }, 1300);
@@ -640,12 +654,12 @@
   // Kiosk "next curator", and a clean slate: back to the brief with fresh state.
   function reset() {
     freshPlay();
-    mode = 'brief'; score = null; info = null; run = []; idx = 0;
+    mode = 'brief'; score = null; info = null; run = []; idx = 0; practiceNext = false;
     if (KIOSK) { relaxed = false; setDeck(firstDeck()); } else loadPrefs();
     closeHow();
     goBrief(true);
   }
-  // A How it works sheet left open must not cover the next title screen. The attribute, as without showModal.
+  // A How it works sheet left open must not cover the next title screen.
   function closeHow() {
     var h = $('how');
     if (!h || !h.hasAttribute('open')) return;
@@ -818,8 +832,9 @@
     else if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); keyboard = true; decide('letThrough'); }
     else if (k === '1' || k === '2' || k === '3') {
       keyboard = true;
-      rows = top ? top.querySelectorAll('.row') : [];
-      if (rows[+k - 1] && canPlay() && now() - landT >= GUARD) toggleEv(top, rows[+k - 1].getAttribute('data-f'));
+      // 1–3 follow the list's field order, so 1 is the picture when it is a field.
+      rows = top ? listOf(top._item).fields : [];
+      if (rows[+k - 1] && canPlay() && now() - landT >= GUARD) toggleEv(top, rows[+k - 1][0]);
     }
   }
   function trapTab(e, list) {
@@ -831,9 +846,9 @@
   function on(id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); }
   function wire() {
     var st = $('stack');
-    // The v4 shell has no #start (the app cards start the round).
+    // The v4 shell keeps #start hidden; the app cards start the round.
     on('start', function (e) { keyboard = e.detail === 0; startFlow(false); });
-    on('practice-again', function (e) { keyboard = e.detail === 0; startFlow(true); });
+    on('practice-again', function () { practiceNext = !practiceNext; renderBrief(); });
     on('picker', onPick);
     on('relaxed', toggleRelaxed);
     on('skip-practice', function (e) { keyboard = e.detail === 0; if (mode === 'practice') endPractice(false); });
@@ -845,7 +860,7 @@
     on('explain-ok', closeExplain);
     on('err-reload', function () { location.reload(); });
     on('again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
-    on('rep-switch', function () { goBrief(true); });   // Try another app: back to the picker
+    on('rep-switch', function () { if (KIOSK) reset(); else goBrief(true); });
     on('t-switch', function () { goBrief(true); });
     on('t-again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
     if (st) {

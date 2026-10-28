@@ -3,7 +3,7 @@
 // plain DOM and 2D canvas, so a card never waits on WebGL. Results: a lit metal medal in the tier colour. Its 2D
 // paint shows at once; gl.js is fetched in idle time once a round starts (never in lite) but only set up when a
 // medal is mounted. It registers with _glReady(api), then spins the medal in 3D while the 2D paint fades out.
-// gl.js api: init({ reduced }) -> ok, setReduced(b), medal(el | null, { color, mark }), pause(), resume().
+// gl.js api: init({ reduced }) -> ok, medal(el | null, { color, mark }).
 // Any GL failure (_static() or the mode event) goes back to the 2D paint for the rest of the session.
 (function () {
   var RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches),
@@ -251,7 +251,7 @@
       ';box-shadow:0 10px 26px rgba(7,0,26,.5)';
     else if (kind === 'flag') v.style.cssText += ';border-radius:4px;box-shadow:0 8px 22px rgba(7,0,26,.55),0 0 0 1px rgba(255,255,255,.12)';
     el.appendChild(v);
-    el._co = { kind: kind, cv: v, st: 'none', w: 0, h: 0 };
+    el._co = { kind: kind, cv: v, w: 0, h: 0 };
     return el;
   }
   // The photo fades in once decoded; on an error the placeholder stays and shows the description
@@ -269,8 +269,10 @@
     im.alt = s.alt || '';
     im.decoding = 'async';
     im.draggable = false;   // a native image drag would steal the card swipe
-    im.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;display:block;opacity:0;' +
-      'pointer-events:none;-webkit-user-drag:none;-webkit-user-select:none;user-select:none' + (RM ? '' : ';transition:opacity .25s');
+    // s.pos: where a tall photo anchors in the wide box, so the crop keeps a head, the arms or a torch
+    im.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;object-position:' +
+      (s.pos || '50% 50%') + ';display:block;opacity:0;pointer-events:none;-webkit-user-drag:none;-webkit-user-select:none;' +
+      'user-select:none' + (RM ? '' : ';transition:opacity .25s');
     im.onload = shown; im.onerror = failed;
     // A soft vignette and a hairline, so bright skies sit on the dark card
     vg.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;border-radius:inherit;' +
@@ -288,8 +290,11 @@
     var o = el._co, w = el.offsetWidth, h = el.offsetHeight, v, bw, bh, a, d, x, k;
     if (!o || w < 4 || h < 4 || (w === o.w && h === o.h)) return;
     o.w = w; o.h = h; v = o.cv;
-    if (o.kind === 'photo') {   // about 16:10, never wider than the slot
-      v.style.width = Math.min(w, Math.round(h * 1.6)) + 'px'; v.style.height = h + 'px';
+    if (o.kind === 'photo') {
+      // About 16:10, never wider than the slot, and never taller than the 640 px photos fill sharply (the kiosk
+      // slot reaches 520 px); .obj centres the box in the slot
+      bh = Math.min(h, 360); bw = Math.min(w, Math.round(bh * 1.6));
+      v.style.width = bw + 'px'; v.style.height = bh + 'px';
       return;
     }
     bw = w; bh = h;
@@ -411,7 +416,7 @@
         if (e.detail && e.detail.mode === 'static' && CO.mode === 'gl') toStatic(true);
       });
     },
-    // spec: { shape: 'photo', src, alt } | { shape: 'flag', flag } | { shape: 'sleeve', color, color2, mark }
+    // spec: { shape: 'photo', src, alt, pos? } | { shape: 'flag', flag } | { shape: 'sleeve', color, color2, mark }
     create: function (spec) {
       spec = spec || {};
       var kind = spec.shape === 'flag' || spec.shape === 'sleeve' ? spec.shape : 'photo', el = make(kind);
@@ -435,22 +440,15 @@
     },
     tilt: function (el, yaw, pitch) {
       if (!el || !el._co || el._co.kind === 'medal') return;
-      el._co.ty = yaw; el._co.tp = pitch;
       if (RM) return;
       var st = el._co.cv.style;
       st.transition = 'transform .12s cubic-bezier(.3,1.3,.5,1)';   // spring-smoothed over 120 ms
       st.transform = yaw || pitch ? 'perspective(600px) rotateY(' + (+yaw || 0) + 'deg) rotateX(' + (-pitch || 0) + 'deg)' : '';
     },
-    // Kept for game.js: the card’s Curate status, exposed as data-st for the shell’s CSS
-    state: function (el, s) {
-      if (!el || !el._co) return;
-      el._co.st = s || 'none';
-      el.setAttribute('data-st', el._co.st);
-    },
+    // Kept for game.js (it reports each card’s Curate status); cards no longer show it
+    state: function () {},
     // The Results medal in el (tierIndex 0 Everyone … 3 Gold), replacing the previous one; null releases it.
-    // o.still paints an extra static 2D medal (say, on the ticket) and leaves the Results medal alone.
-    medal: function (el, tierIndex, o) {
-      if (o && o.still) return el ? mount(el, tierIndex) : null;
+    medal: function (el, tierIndex) {
       if (medalEl) {
         call('medal', null);
         if (medalEl.parentNode) medalEl.parentNode.removeChild(medalEl);
@@ -462,14 +460,13 @@
       return medalEl;
     },
     hero: function () { return null; },   // v3’s title hero is gone; kept so an older caller does nothing
-    // Nothing on a card animates, and the medal shows only on Results, where game.js pauses: so neither reaches it
+    // Kept for game.js. Cards do not animate, and rewards.js releases the medal whenever Results hide (gl.js also
+    // stops while the page is hidden), so there is nothing to pause
     pause: function () {},
     resume: function () {},
-    // Shared: the flag painter (a fresh canvas) and its aspect; the medal emblem for gl.js
+    // Shared: the flag painter (a fresh canvas); the medal emblem for gl.js
     _flag: flag,
-    _flagAspect: flagAspect,
     _emblem: emblem,
-    _tiers: TIER,
     _glReady: function (a) {
       if (reg || dead || isLite || !a || !CO._on) return false;
       reg = a;

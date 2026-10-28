@@ -100,7 +100,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .pick:active { transform:scale(.985); }
 @media (hover:hover) { .pick:hover { box-shadow:0 16px 34px -14px var(--cta-glow),inset 0 1px 0 var(--cta-highlight); } }
 /* The picture: a real photo, a flat flag or a painted sleeve, 3:2 with rounded corners (paint flags at 192x128) */
-.pick-pic { position:relative; width:96px; height:64px; border-radius:12px; overflow:hidden; background:radial-gradient(closest-side,rgba(192,132,255,.28),rgba(29,16,80,.9)); box-shadow:0 0 0 1px rgba(255,255,255,.14),0 8px 18px -10px rgba(0,0,0,.8); }
+.pick-pic { display:block; position:relative; width:96px; height:64px; border-radius:12px; overflow:hidden; background:radial-gradient(closest-side,rgba(192,132,255,.28),rgba(29,16,80,.9)); box-shadow:0 0 0 1px rgba(255,255,255,.14),0 8px 18px -10px rgba(0,0,0,.8); }
 .pick-pic > img, .pick-pic > canvas { display:block; width:100%; height:100%; object-fit:cover; }
 /* Tight line heights: the need wraps to two lines at 375 px, and Music adds a sub line, yet each card stays under about 96 px */
 .pick-txt { display:flex; flex-direction:column; gap:1px; min-width:0; }
@@ -142,21 +142,23 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 /* Small links row: relaxed timing, practice, the check-in */
 .links { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:0 16px; margin-top:6px; }
 .links .ghost { margin:0; padding:8px 2px; font-size:12.5px; }
-#relaxed[aria-pressed=true] { color:var(--teal); }
+#relaxed[aria-pressed=true], #practice-again[aria-pressed=true] { color:var(--teal); }
 #hdr-link { padding:8px 2px; font:600 12.5px Inter,sans-serif; color:var(--teal); text-decoration:none; white-space:nowrap; }
 #brief .fine { margin:2px 6px 0; font-size:11px; color:#a99fd0; }
 /* How it works: a bottom sheet (a modal <dialog>; the open attribute alone where showModal is missing) */
 #how { position:fixed; inset:auto 0 0; z-index:40; width:100%; max-width:480px; max-height:86vh; max-height:86svh; margin:0 auto; padding:0; border:0; background:transparent; color:var(--text); overflow:auto; }
+#how:not([open]) { display:none; }   /* where <dialog> is unknown (Safari < 15.4) no UA rule hides it: the open attribute alone shows it */
 #how::backdrop { background:rgba(7,0,26,.72); }
-#how .dlg { max-width:none; border-radius:22px 22px 0 0; text-align:left; padding:20px 18px max(18px,env(safe-area-inset-bottom,0px)); font-size:13.5px; line-height:1.5; }
+#how .dlg { max-width:none; border-radius:22px 22px 0 0; text-align:left; padding:20px 18px 0; font-size:13.5px; line-height:1.5; }
 @media (prefers-reduced-motion:no-preference) { #how[open] .dlg { animation:sheet .28s var(--ease-out); } }
 @keyframes sheet { from { transform:translateY(40px); opacity:0; } to { transform:none; opacity:1; } }
 #how h2 { font-size:21px; margin:0 0 4px; }
 #how ol { margin:8px 0 0; padding-left:20px; color:#ddd3ff; }
 #how li + li { margin-top:4px; }
 #how p { margin:10px 0 0; color:var(--muted); font-size:13.5px; }
-#how .second { margin-top:14px; }
-#how-close { position:sticky; bottom:0; background:#2a1660; box-shadow:0 -14px 18px 4px var(--surface); }   /* the credits make the sheet scroll: Close stays in reach */
+/* The credits make the sheet scroll: Close stays in reach on a full-width footer, so no text shows round its corners, and it clears the home indicator */
+#how .how-foot { position:sticky; bottom:0; margin:14px -18px 0; padding:12px 18px max(18px,env(safe-area-inset-bottom,0px)); background:linear-gradient(180deg,rgba(26,7,61,0),var(--surface) 12px); }
+#how .how-foot .second { margin-top:0; background:#2a1660; }
 #how h3 { margin:16px 0 0; font:700 15px/1.3 var(--display); }
 /* Photo credits: game.js renders one line per photo from CURATE_CREDITS */
 #credits-list { list-style:none; margin:6px 0 0; padding:0; display:grid; gap:5px; font-size:12px; line-height:1.45; color:var(--muted); }
@@ -219,7 +221,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #coach { display:none; margin-top:auto; pointer-events:auto; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font-size:13.5px; line-height:1.35; text-align:center; }
 .is-practice #coach { display:block; }
 #coach:empty { visibility:hidden; }
-#banner { position:absolute; left:0; right:0; width:max-content; max-width:calc(100% - 16px); margin:0 auto; top:calc(40% - 28px); z-index:6; padding:12px 22px; border-radius:16px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font:700 22px var(--display); white-space:nowrap; animation:rise .3s var(--ease); }
+#banner { position:absolute; left:0; right:0; width:max-content; max-width:calc(100% - 16px); margin:0 auto; top:calc(40% - 28px); z-index:6; padding:12px 22px; border-radius:16px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font:700 clamp(17px,5.4vw,22px)/1.25 var(--display); text-align:center; text-wrap:balance; animation:rise .3s var(--ease); }   /* the app's mission may take two lines on a phone */
 /* ---- Card ---- */
 .card { position:absolute; top:0; left:0; right:0; margin:0 auto; max-width:420px; padding:8px 12px 6px; border-radius:22px; color:var(--text);
   background:linear-gradient(180deg,#24104f,var(--surface)); border:1px solid rgba(255,255,255,.12);
@@ -251,12 +253,20 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   height:clamp(84px,max(19svh,calc(100svh - 590px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),300px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
 /* Short screens in practice: the coach sits over the bottom of the arena, so the stage gives up its height and the coach is tighter,
    keeping the whole card (footer included) above it at 375x548. 468 px = play padding, HUD, list row, client, buttons, arena padding, fixed card parts, dock and a two-line coach */
+/* A picture that is a field (photo, flag) replaces a 44 px text row, so its stage gets those 44 px back */
+.pic-field .obj-slot { height:clamp(128px,calc(19vh + 44px),234px); height:clamp(128px,calc(19svh + 44px),234px);
+  height:clamp(128px,max(calc(19svh + 44px),calc(100svh - 546px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),344px); }
 @media (max-height:639px) {
   .is-practice .obj-slot { height:80px; height:clamp(56px,min(19svh,calc(100svh - 468px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),190px); }
+  .is-practice .pic-field .obj-slot { height:124px; height:clamp(100px,min(calc(19svh + 44px),calc(100svh - 424px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),234px); }
   .is-practice #coach { padding:6px 10px; font-size:12.5px; line-height:1.3; }
 }
 .obj-slot[data-f] { cursor:pointer; }
 .obj-slot.is-ev { outline:1.5px solid var(--st-contested); outline-offset:-2px; }
+/* With no text row for the picture, the picture carries the Evidence tag and the practice hint itself */
+.obj-slot.is-ev::after { content:'Evidence'; position:absolute; z-index:3; left:10px; top:10px; padding:1px 7px; border-radius:999px; font:700 10px/14px Inter,sans-serif; color:#1d1050; background:var(--st-contested); }
+.obj-slot.hint { animation:hintpic 1.2s ease-in-out infinite; }
+@keyframes hintpic { 0%, 100% { box-shadow:0 0 0 0 rgba(255,196,107,0); } 50% { box-shadow:0 0 0 3px rgba(255,196,107,.7); } }
 .obj { position:absolute; inset:0; }
 /* Card pictures. Photo: a real photo, about 16:10, cropped to fill, rounded. It gives up width before height on tall stages. */
 .obj-slot:has(.obj-photo) { background:none; }   /* objects.js sizes, rounds and shades the photo box itself */
@@ -289,6 +299,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   .is-kiosk #stack, .is-kiosk .card, .is-kiosk .dock { max-width:600px; }
   .is-kiosk .acts { max-width:616px; }
   .is-kiosk .obj-slot { height:clamp(84px,calc(100vh - 560px),520px); height:clamp(84px,calc(100svh - 560px),520px); }
+  .is-kiosk .pic-field .obj-slot { height:clamp(128px,calc(100vh - 516px),564px); height:clamp(128px,calc(100svh - 516px),564px); }
 }
 /* ---- Toasts and overlays ---- */
 /* Toasts and the practice coach share one dock, so toasts sit in the gap above the buttons, or just above the coach, and the card's state chip stays readable */
@@ -393,7 +404,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .m-line s { color:var(--st-off); }
 .miss small { display:block; color:var(--muted); font-size:12px; }
 .miss p { margin:4px 0 0; color:#ddd3ff; }
-#to-ticket { margin-top:18px; }
+#to-ticket { margin-top:18px; position:sticky; bottom:max(12px,env(safe-area-inset-bottom,0px)); z-index:2; }   /* the medal and the misses make Results tall: the ticket button stays in reach and settles into place at the end */
 /* ---- Ticket ---- */
 /* The glow lives on the wrap so the notch masks on the faces never clip it */
 .ticket-wrap { position:relative; margin:6px 0 18px; border-radius:22px; perspective:1000px; cursor:pointer; outline:none; box-shadow:0 30px 70px -28px rgba(120,110,160,.5); --face:linear-gradient(150deg,rgba(52,46,78,.95),rgba(84,78,108,.8)); --line:rgba(255,255,255,.22); }
@@ -464,6 +475,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   .card.fly-left { transform:translateX(-24px) !important; opacity:0; }
   .card.fly-right { transform:translateX(24px) !important; opacity:0; }
   .row.hint { background:rgba(255,196,107,.16); outline:1.5px dashed var(--st-contested); outline-offset:-1.5px; }   /* the pulse is off, so the hint row needs a static cue */
+  .obj-slot.hint { animation:none; outline:1.5px dashed var(--st-contested); outline-offset:-2px; }
 }
 </style>
 </head>
@@ -504,7 +516,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <div class="links">
       <button type="button" class="ghost" id="relaxed" aria-pressed="false" aria-describedby="relaxed-note">Relaxed timing: Off</button>
       <span class="sr" id="relaxed-note">60 seconds, no per-entry countdown.</span>
-      <button type="button" class="ghost" id="practice-again" hidden>Practice again</button>
+      <button type="button" class="ghost" id="practice-again" aria-pressed="false" aria-describedby="practice-note" hidden>Practice again</button>
+      <span class="sr" id="practice-note">Adds one practice card before the app you pick.</span>
       <a id="hdr-link" href="/">Booth check-in →</a>
       <button type="button" class="ghost" id="deck-switch" hidden></button>   <!-- v4: the app cards pick the deck; kept hidden for game.js -->
     </div>
@@ -534,7 +547,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <details id="rep-missed" hidden><summary id="rep-missed-sum">What you missed</summary><ul class="misses" id="rep-misses"></ul></details>
   <button type="button" class="primary" id="to-ticket">Show my merch ticket</button>
   <button type="button" class="ghost" id="again">Play again</button>
-  <button type="button" class="ghost" id="rep-switch">Try another app</button>   <!-- back to the title screen and its app cards -->
+  <button type="button" class="ghost not-kiosk" id="rep-switch">Try another app</button>   <!-- back to the title screen and its app cards; hidden in kiosk, where Next curator is the only way on -->
   <p class="fine" id="rep-fine"></p>
 </section>
 
@@ -635,7 +648,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <p class="not-kiosk"><a class="link" href="https://docs.kleros.io/products/curate" target="_blank" rel="noopener">Read about Kleros Curate →</a></p>
     <h3 id="credits-title">Photo credits</h3>
     <ul id="credits-list" aria-labelledby="credits-title"></ul>
-    <button type="button" class="second" id="how-close">Close</button>
+    <div class="how-foot"><button type="button" class="second" id="how-close">Close</button></div>
   </div>
 </dialog>
 <script>
@@ -671,7 +684,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <span class="verdict" data-s="verdict" aria-hidden="true"></span></article></template>
 <template id="tpl-row"><li><button type="button" class="row" data-f="" aria-pressed="false"><span class="r-lab" data-s="lab"></span><span class="r-val" data-s="val"></span><span class="ev-tag" aria-hidden="true">Evidence</span></button></li></template>
 <template id="tpl-toast"><div class="toast" data-tone="info"><span class="t-dot" aria-hidden="true"></span><div class="t-body"><b data-s="title"></b><span class="t-line" data-s="line" hidden></span><span class="t-fix" data-s="fix" hidden><span data-s="fixlab"></span> · <s data-s="was"></s> → <span data-s="is"></span></span></div><span class="jurors" data-s="jurors" aria-hidden="true" hidden><i></i><i></i><i></i></span><img class="t-thumb" data-s="thumb" alt="" width="24" height="24" hidden></div></template>
-<template id="tpl-pick"><button type="button" class="pick"><div class="pick-pic" data-s="pic" aria-hidden="true"></div>
+<template id="tpl-pick"><button type="button" class="pick"><span class="pick-pic" data-s="pic" aria-hidden="true"></span>
   <span class="pick-txt"><b class="pick-app" data-s="app"></b><span class="pick-need" data-s="need"></span><span class="pick-sub" data-s="sub"></span><span class="pick-meta" data-s="meta"></span></span>
   <svg class="pick-go" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 2.5 9.5 7 5 11.5"/></svg></button></template>
 <template id="tpl-miss"><li class="miss"><span class="m-kind" data-s="kind"></span><span class="m-line"><b data-s="lab"></b> · <s data-s="was"></s> → <span data-s="is"></span></span><small data-s="name"></small><p data-s="why"></p></li></template>

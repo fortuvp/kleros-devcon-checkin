@@ -210,7 +210,7 @@
 
   // ---- Hosting ----
   var host = null, med = null, VP = null, view = null, cw = 0, ch = 0, unit = .8, raf = 0, last = 0, t0 = 0;
-  var paused = false, reduced = RM, swayOn = true, dprCap = 2, ro = null;
+  var reduced = RM, swayOn = true, dprCap = 2, ro = null;
 
   function lookAt() {   // fixed camera: eye (0, .35, 4.2) on the origin
     var e = [0, .35, 4.2], l = Math.sqrt(e[1] * e[1] + e[2] * e[2]), zy = e[1] / l, zz = e[2] / l;
@@ -308,7 +308,7 @@
 
   // rAF only while needed: visible page, a mounted medal, something moving.
   function kick() {
-    if (!raf && !paused && !dead && host && !document.hidden && window.requestAnimationFrame) raf = requestAnimationFrame(loop);
+    if (!raf && !dead && host && !document.hidden && window.requestAnimationFrame) raf = requestAnimationFrame(loop);
   }
   function stop() {
     if (raf && window.cancelAnimationFrame) cancelAnimationFrame(raf);
@@ -316,7 +316,7 @@
   }
   function loop(ts) {
     raf = 0;
-    if (!host || paused || dead || document.hidden) { last = lastTs = 0; return; }
+    if (!host || dead || document.hidden) { last = lastTs = 0; return; }
     var t = now(), dt = last ? clamp((t - last) / 1000, .001, .05) : 1 / 60, busy;
     last = t;
     if (watchdog(ts)) return;
@@ -354,7 +354,6 @@
   // The contract objects.js expects (see its header). objects.js wraps every call in try/catch and drops to the
   // 2D paint on a throw.
   var api = {
-    mode: 'gl',
     init: function (o) {
       o = o || {};
       if (gl) return !dead;
@@ -374,10 +373,7 @@
       detach();
       if (dead || !el) return;
       attach(el, spec || {});
-    },
-    setReduced: function (b) { reduced = !!b; cw = 0; kick(); },
-    pause: function () { paused = true; stop(); },
-    resume: function () { paused = false; kick(); }
+    }
   };
 
   // ---- Boot ----

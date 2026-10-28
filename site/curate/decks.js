@@ -35,8 +35,9 @@
 
   // ---- Photos ----
   // Wikimedia Commons photos in /curate/img/ (credits.js holds author and licence for each). Key: the file name.
-  // [words for the Photo row and the alt text, true name, true location]. Locations read "City, Country", or a
-  // region where the sight stands outside any city.
+  // [words for the Photo row and the alt text, true name, true location, crop?]. Locations read "City, Country",
+  // or a region where the sight stands outside any city. crop: CSS object-position for a tall photo in the wide
+  // slot, so the head, arms or torch stay in view (centred when left out).
   var PHOTOS = {
     'eiffel': ['Iron lattice tower', 'Eiffel Tower', 'Paris, France'],
     'colosseum': ['Oval arena of stone arches', 'Colosseum', 'Rome, Italy'],
@@ -45,19 +46,23 @@
     'great-wall': ['Stone wall winding over hills', 'Great Wall of China', 'Northern China'],
     'golden-gate': ['Red suspension bridge', 'Golden Gate Bridge', 'San Francisco, USA'],
     'machu-picchu': ['Stone ruins on a mountain ridge', 'Machu Picchu', 'Andes, Peru'],
-    'big-ben': ['Gothic clock tower', 'Big Ben', 'London, UK'],
+    'big-ben': ['Gothic clock tower', 'Big Ben', 'London, UK', '50% 25%'],
     'burj-khalifa': ['Very tall glass skyscraper', 'Burj Khalifa', 'Dubai, UAE'],
     'sagrada-familia': ['Basilica with tall spires', 'Sagrada Família', 'Barcelona, Spain'],
-    'statue-liberty': ['Green statue with a torch', 'Statue of Liberty', 'New York, USA'],
-    'christ-redeemer': ['Statue, arms spread wide', 'Christ the Redeemer', 'Rio de Janeiro, Brazil'],
+    'statue-liberty': ['Green statue with a torch', 'Statue of Liberty', 'New York, USA', '50% 0%'],
+    'christ-redeemer': ['Statue, arms spread wide', 'Christ the Redeemer', 'Rio de Janeiro, Brazil', '50% 7%'],
     'gateway-of-india': ['Stone arch lit at dusk', 'Gateway of India', 'Mumbai, India'],
     'cst-mumbai': ['Gothic station with domes', 'Chhatrapati Shivaji Maharaj Terminus', 'Mumbai, India'],
     'sea-link': ['Cable-stayed bridge over the sea', 'Bandra–Worli Sea Link', 'Mumbai, India'],
     'haji-ali': ['White shrine with a dome', 'Haji Ali Dargah', 'Mumbai, India'],
     'marine-drive': ['Curving seafront at night', 'Marine Drive', 'Mumbai, India'],
-    'elephanta': ['Three-faced stone carving', 'Elephanta Caves', 'Mumbai, India']
+    'elephanta': ['Three-faced stone carving', 'Elephanta Caves', 'Mumbai Harbour, India']
   };
-  function photo(key) { return { shape: 'photo', src: '/curate/img/' + key + '.jpg', alt: PHOTOS[key][0] }; }
+  function photo(key) {
+    var o = { shape: 'photo', src: '/curate/img/' + key + '.jpg', alt: PHOTOS[key][0] };
+    if (PHOTOS[key][3]) o.pos = PHOTOS[key][3];
+    return o;
+  }
 
   // ---- Sleeves ----
   // A painted record sleeve per song (album art is copyrighted): two colours and the song’s initials.
@@ -129,8 +134,8 @@
     ['s-sealink', 'sea-link', 2, 'sea-link', 'Bandra–Worli Sea Link', 'Mumbai, India', 'The cable-stayed bridge across Mahim Bay.'],
     ['s-hajiali', 'haji-ali', 2, 'haji-ali', 'Haji Ali Dargah', 'Mumbai, India', 'A shrine on an islet off Worli.'],
     ['s-marine', 'marine-drive', 2, 'marine-drive', 'Marine Drive', 'Mumbai, India', 'Mumbai’s seafront, the Queen’s Necklace.'],
-    ['s-elephanta', 'elephanta', 2, 'elephanta', 'Elephanta Caves', 'Mumbai, India',
-      'Rock-cut caves on an island in Mumbai Harbour.'],
+    ['s-elephanta', 'elephanta', 2, 'elephanta', 'Elephanta Caves', 'Mumbai Harbour, India',
+      'Rock-cut caves on an island, a ferry ride from Mumbai.'],
     ['s-taj-bad', 'taj-mahal', 1, 'taj-mahal', 'Taj Mahal', 'Mumbai, India', 'The Taj Mahal is in Agra, not Mumbai.',
       'where', 'know', 'Agra, India'],
     ['s-burj-bad', 'burj-khalifa', 1, 'burj-khalifa', 'Burj Khalifa', 'Abu Dhabi, UAE',
@@ -152,7 +157,7 @@
     ['s-bigben-bad', ['big-ben', 'eiffel'], 1, 'big-ben', 'Eiffel Tower', 'Paris, France',
       'Look at the photo: that’s Big Ben, not the Eiffel Tower.', 'photo', 'card', 'Iron lattice tower'],
     ['s-liberty-bad', ['statue-liberty', 'christ-redeemer'], 1, 'statue-liberty', 'Christ the Redeemer',
-      'Rio de Janeiro, Brazil', 'Look at the photo: that’s the Statue of Liberty’s torch.', 'photo', 'card',
+      'Rio de Janeiro, Brazil', 'Look at the photo: that’s the Statue of Liberty, not Christ the Redeemer.', 'photo', 'card',
       'Statue, arms spread wide'],
     ['s-sagrada-bad', ['sagrada-familia', 'taj-mahal'], 1, 'sagrada-familia', 'Taj Mahal', 'Barcelona, Spain',
       'Spires in Barcelona: that’s the Sagrada Família.', 'name', 'card', 'Sagrada Família'],
@@ -322,7 +327,7 @@
     music: {
       id: 'music', client: 'Music streaming app',
       pick: { app: 'Music streaming app', need: 'needs songs credited to the right artist',
-              sub: 'Fake uploads steal artists’ pay.', sleeve: { color: '#4d00b4', color2: '#27cdfe', mark: 'K' } },
+              sub: 'Fake uploads steal artists’ pay.', sleeve: { color: '#11998e', color2: '#38ef7d', mark: 'JH' } },
       copy: {
         mission: 'Keep the music app’s song credits right.',
         headlines: ['Clean list. Artists get paid.', 'Mostly clean. A few fake uploads slipped in.',

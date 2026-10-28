@@ -138,10 +138,10 @@
     score.tier = tierFor(score.raw);
     return { streakBonus: bonus, tierFrom: from, tierTo: score.tier };
   }
-  // The time bonus is added to raw.
+  // The time bonus (relaxed: a flat finish bonus) is added to raw.
   function finish(score, secondsLeft, allDecided, relaxed) {
-    var P = S().points, bonus = !relaxed && allDecided && score.mistakes <= P.bonusMaxMistakes ?
-      P.perSecondLeft * Math.floor(Math.max(0, secondsLeft)) : 0;
+    var P = S().points, bonus = !allDecided || score.mistakes > P.bonusMaxMistakes ? 0 :
+      relaxed ? (P.relaxedBonus || 0) : P.perSecondLeft * Math.floor(Math.max(0, secondsLeft));
     score.timeBonus = bonus;
     score.raw += bonus;
     score.final = Math.max(0, score.raw);

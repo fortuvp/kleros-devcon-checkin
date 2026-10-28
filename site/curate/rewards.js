@@ -427,7 +427,8 @@
     txt('rep-quote', fill(band3(copy.quotes, QUOTES, band), d, trust));
     txt('rep-quote-by', copy.quoteBy || (d.client ? d.client + ' (fictional)' : ''));
     txt('rep-payoff', fill(band3(copy.payoffs, PAYOFFS, band), d, trust) +
-        (sum.caught > 0 ? ' Your bounties came from the fakers’ deposits.' : ' Catch a fake and its deposit becomes your bounty.'));
+        (sum.caught > 1 ? ' Your bounties came from the fakers’ deposits.' :
+         sum.caught ? ' Your bounty came from the faker’s deposit.' : ' Catch a fake and its deposit becomes your bounty.'));
     renderMeter(final, g);
     info = tierInfo(g);
     if (g < 3 && !(KIOSK && g >= (kioskCap()))) {
