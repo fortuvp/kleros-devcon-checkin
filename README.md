@@ -27,14 +27,14 @@ Short version: [`docs/DEPLOY.md`](docs/DEPLOY.md). `bash scripts/package.sh` bui
 | `site/config.js` | Backend URL, edition/city, privacy contact, blog URL, merch tiers, Telegram bot and follow links, Community Hubs card |
 | `site/quiz.js` | The three Kleros 101 questions, with why each answer is right or wrong |
 | `site/assets/merch/` | Merch thumbnails for the tiers (from the Web3Merch mock-ups) |
-| `site/curate/index.html` | Curate game page (`/curate/`): markup, styles and templates; loads `/config.js` and the scripts below |
+| `site/curate/index.html` | Curate game page (`/curate/`), a standalone page with its own look: markup, styles and templates; loads `/config.js` and the scripts below |
 | `site/curate/settings.js` | Every game knob: clock, windows, points, tier thresholds, the check-in rule, sold-out tiers and substitutes ([stock runbook](#curate-game-curate)) |
-| `site/curate/decks.js` | The entries: wallet lists (Tokens, Websites, Contract labels) and the Mumbai city list, the practice cards and the per-client copy |
+| `site/curate/decks.js` | The entries: one travel deck with three lists (Countries, Landmarks, Mumbai), the practice cards and the story and report copy |
 | `site/curate/rules.js` | Pure game rules: deck order, challenge windows, judging, points, tiers (also run by `scripts/curate-check.js`) |
-| `site/curate/objects.js` | The 3D-looking items (coins, shields, contract tags, landmarks) painted on a 2D canvas; loads `gl.js` |
+| `site/curate/objects.js` | The 3D-looking items (waving flags, landmark models, Mumbai sights) painted on a 2D canvas; loads `gl.js` |
 | `site/curate/gl.js` | Optional in-house WebGL renderer for the same items (no library), loaded after first paint; never fetched with `?lite=1`, Save-Data, low-memory phones or no WebGL |
-| `site/curate/rewards.js` | Merch ladder, report, ticket, staff stamp and counted shifts; the only game code that reads the check-in or writes storage |
-| `site/curate/game.js` | Game engine: brief, practice, shift, swipes, buttons and keys, toasts, pause, relaxed timing |
+| `site/curate/rewards.js` | Merch ladder, Results, ticket, staff stamp and counted rounds; the only game code that reads the check-in or writes storage |
+| `site/curate/game.js` | Game engine: title screen, practice, round, swipes, buttons and keys, toasts, pause, relaxed timing |
 | `site/_headers`, `site/robots.txt` | No-cache for `config.js`/`matching.js`/`quiz.js` and the `site/curate/` scripts, dashboard kept out of search engines |
 | `apps-script/Code.gs` | Backend: check-ins, Sheet tabs and views, research-agent API, blog gate, merch tiers, Telegram bot |
 | `apps-script/Matching.gs` | Copy of `site/matching.js` for the backend (kept in sync by the bundle script) |
@@ -140,40 +140,48 @@ Bot profile (name, description, picture `docs/telegram-bot-avatar.png`) is set i
 
 https://devcon.kleros.io/curate/ teaches Kleros Curate by doing it, and is a second way up the merch ladder. Visitors reach it from the **Play Curate** card on their final screen or from its own QR poster. It is plain static files in `site/curate/`, sharing `/config.js` (merch names and pictures) and `/assets/` with the check-in.
 
-**How to play.** A fictional client hired you to keep its list clean: a **Wallet app** (Tokens, Websites and Contract labels lists; the default) or a **City guide app** (Mumbai sights, for visitors who aren't into crypto). Fakers put down a deposit to sneak entries in.
+**Its own page.** `/curate/` is a standalone game, not the check-in with a game on top: no check-in header, gold frame, starfield, icosahedrons or tagline. A full-height title screen (Kleros colours, a glowing pedestal with three 3D objects, "Spot the fakes.") fits a 375×812 phone without scrolling, and the *Start verifying* button stays visible down to 375×548. Under it sit the prize strip (the four merch tiers as chips), the *Relaxed timing* toggle, the practice link and a link back to the check-in; *How it works* opens as a sheet from the top bar. The play, report and ticket screens use the same frame.
 
-- One **shift** is 60 s and up to 20 entries, 8 of them fake.
-- Swipe left (or *← Challenge*) to challenge a fake: you win the faker's deposit as your bounty. Swipe right (or *Let it through →*) to let a good entry through.
-- Tapping a line marks it as evidence (+25 when it is the faulty line). It never decides the entry.
-- Each entry has a short challenge window (7 s, then 5.5 s, then 4.5 s from Rush hour at 40 s). When it runs out, the entry is listed, fake or not.
-- The first shift per client on a phone starts with two untimed practice cards. *Relaxed timing* gives 90 s with no per-entry countdown.
-- Keyboard: ← or A challenges, → or D lets through, 1–3 mark evidence, Esc or P pauses.
+**How to play.** A travel app (fictional) shows its lists to millions of travellers, and scammers put down a deposit to sneak fakes in. One mixed deck, nothing web3, in the spirit of the old Curate game:
+
+- **Countries**: a waving 3D flag, the country and its capital. All three must match.
+- **Landmarks**: a 3D model (Eiffel Tower, Leaning Tower of Pisa, Big Ben, Statue of Liberty, Taj Mahal, Sydney Opera House, Colosseum, Burj Khalifa, Golden Gate Bridge, Christ the Redeemer, the Pyramids, Sagrada Família), its name and its location. All three must match.
+- **Mumbai**: real Mumbai sights, with city and type.
+
+In a fake, exactly one line is wrong (India with Mumbai as its capital, the Big Ben model labelled "Eiffel Tower"); at least half of each list's fakes can be spotted from the 3D object itself.
+
+- One **round** is 60 s and up to 20 entries, 8 of them fake.
+- Swipe left (or *← Challenge*) to challenge a fake: you win the faker's deposit as your bounty. Swipe right (or *Verify →*) to verify a good entry.
+- Tapping a line, or the flag or model, marks it as evidence (+25 when it is the faulty line). It never decides the entry.
+- Each entry has a short challenge window (7 s, then 5.5 s, then 4.5 s for the final 20 s). When it runs out, the entry is listed, fake or not.
+- The first round on a phone starts with two untimed practice cards (India with the wrong capital, then the Eiffel Tower in Paris). *Relaxed timing* gives 90 s with no per-entry countdown.
+- Keyboard: ← or A challenges, → or D verifies, 1–3 mark evidence, Esc or P pauses.
 
 | Outcome | Points |
 |---|---|
 | Fake challenged | +100, plus 25 with the right evidence line |
-| Good entry let through | +25 (+10 when its window ran out) |
-| Good entry challenged | −75 (client trust −5) |
-| Fake listed | −75 (client trust −15) |
+| Good entry verified | +25 (+10 when its window ran out) |
+| Good entry challenged | −75 (travellers’ trust −5) |
+| Fake listed | −75 (travellers’ trust −15) |
 | Every 5 right in a row | +50 |
 | All 20 decided early with 2 mistakes or fewer (standard timing only) | +5 per second left |
 
-Client trust only drives the report's headline; it never ends a shift. The final score is never below 0.
+Travellers’ trust only drives the Results headline; it never ends a round. The final score is never below 0.
 
 **Score → tier.** Names, rewards and pictures come from `config.js` `merch` by position (`free`, then `tiers[0..2]`); thresholds and rules live in `site/curate/settings.js`.
 
 | Tier | Game route | Check-in route (unchanged) | Merch (today's `config.js`) |
 |---|---|---|---|
-| Everyone | Finish a shift | Visit the booth | Stickers and metallic tattoos |
+| Everyone | Finish a round | Visit the booth | Stickers and metallic tattoos |
 | Teal | 450 points | Check in | Kleros flip-flops |
 | Purple | 950 points | + Telegram, X and LinkedIn | Copper bottle or gamcha |
 | Gold | 1,450 points **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
 
-The thresholds come from a simulation of player profiles (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Letting everything through, challenging everything or doing nothing never reaches Teal. Each phone gets **3 counted shifts per day**; a shift counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted shift. Later shifts say *Practice shift: not counted today*.
+The thresholds come from a simulation of player profiles (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Verifying everything, challenging everything or doing nothing never reaches Teal. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
 
 **Gold needs a check-in.** A Gold score needs a confirmed check-in on the same phone (`checkinNeededFrom: 3`), read from the check-in's own storage with the same confirmation rule as the check-in page. Until then the ticket shows Purple with a gold strip linking to `/`; coming back to `/curate/` after checking in upgrades it. So every Gold ticket carries a K- code the merch desk can dedupe. Teal and Purple need no check-in ("scan and play"); `checkinNeededFrom: 1` makes every tier above Everyone need one.
 
-**The ticket** looks like the check-in ticket: tier colour, sheen, pulsing live dot, ticking clock and today's date. Tapping it turns it over (shift, stats and codes on the back). The code is the check-in's **K-** code when the visitor checked in on this phone, otherwise a game **C-** code. The ticket shows the higher of the game and check-in tiers. When the check-in tier is at least the game tier, the game ticket says *Your merch comes with your check-in ticket* and has no code to stamp. A check-in marked *Already claimed* shows *Merch goes with your first check-in* instead of a tier.
+**The ticket** looks like the check-in ticket: tier colour, sheen, pulsing live dot, ticking clock and today's date. Tapping it turns it over (round, stats and codes on the back, for example *Round 2 of 3 today · Played 14:32 · Travel app*). The code is the check-in's **K-** code when the visitor checked in on this phone, otherwise a game **C-** code. The ticket shows the higher of the game and check-in tiers. When the check-in tier is at least the game tier, the game ticket says *Your merch comes with your check-in ticket* and has no code to stamp. A check-in marked *Already claimed* shows *Merch goes with your first check-in* instead of a tier.
 
 **Staff card** (also printed and laminated for the booth):
 
@@ -195,15 +203,15 @@ Mark collected greys the ticket out on that phone for the rest of Devcon (Undo f
 | Flip-flops or bottles running low | Raise `tiers[1]`/`tiers[2]` by 100, or `checkinNeededFrom: 1` |
 | Next morning | Revert |
 
-Edit `site/curate/settings.js` and deploy. The `no-cache` header (`site/_headers`) means phones pick the change up on their next load. A sold-out tier drops game scores to the next open tier, and the ticket says so (*Kleros kurta: gone for today. Your Gold score gets a copper bottle or gamcha.*). A substitute is `{ reward, short, img: [...] }`, where `short` is how it reads mid-sentence, for example `substitutes.gold = { reward: 'PoH tee', short: 'a PoH tee', img: ['assets/merch/tee.jpg'] }`. Raised thresholds apply to new shifts; tickets already earned today keep their tier (`soldOut` still applies at once). These levers change the game only, not the check-in tiers.
+Edit `site/curate/settings.js` and deploy. The `no-cache` header (`site/_headers`) means phones pick the change up on their next load. A sold-out tier drops game scores to the next open tier, and the ticket says so (*Kleros kurta: gone for today. Your Gold score gets a copper bottle or gamcha.*). A substitute is `{ reward, short, img: [...] }`, where `short` is how it reads mid-sentence, for example `substitutes.gold = { reward: 'PoH tee', short: 'a PoH tee', img: ['assets/merch/tee.jpg'] }`. Raised thresholds apply to new rounds; tickets already earned today keep their tier (`soldOut` still applies at once). These levers change the game only, not the check-in tiers.
 
-**Storage: `kleros_devcon_curate`.** Everything the game keeps is in this one `localStorage` key on the phone: chosen client, relaxed timing, practice done, the entries seen last shift, today's counted shifts and best run (with the tier it earned), the last 12 runs, and Collected. On a new day the counted shifts and best run reset; Collected stays. The game reads the check-in's `kleros_devcon_self` and never writes it. When storage is blocked the game still works, and the ticket says it won't be kept. A private tab, cleared site data or a second phone starts the counted shifts and Collected afresh; Gold stays safe because the desk dedupes its K- code.
+**Storage: `kleros_devcon_curate`.** Everything the game keeps is in this one `localStorage` key on the phone: relaxed timing, practice done, the entries seen last round, today's counted rounds and best run (with the tier it earned), the last 12 runs, and Collected. On a new day the counted rounds and best run reset; Collected stays. The game reads the check-in's `kleros_devcon_self` and never writes it. When storage is blocked the game still works, and the ticket says it won't be kept. A private tab, cleared site data or a second phone starts the counted rounds and Collected afresh; Gold stays safe because the desk dedupes its K- code.
 
-**Kiosk mode.** `/curate/?kiosk=1` on a booth tablet, the same flag as the check-in: practice every time (skippable), no storage read or write at all, tier capped at Teal (`kioskMaxTier`), no staff stamp, header or logo link, or back link, and *Next curator* resets the game 20 s after the ticket opens (or after 60 s idle on the report). The check-in's kiosk tablet hides the Play Curate card, because it resets after 12 s.
+**Kiosk mode.** `/curate/?kiosk=1` on a booth tablet, the same flag as the check-in: practice every time (skippable), no storage read or write at all, tier capped at Teal (`kioskMaxTier`), no staff stamp and no link back to the check-in, and *Next curator* resets the game 20 s after the ticket opens (or after 60 s idle on the report). The check-in's kiosk tablet hides the Play Curate card, because it resets after 12 s.
 
 **No backend.** No Apps Script change, no Sheet tab and no request to the backend: game scores are not in the Sheet or the dashboard. The only outside requests are the Google Fonts the check-in already uses. `?lite=1` forces the static 2D items (no WebGL), which is also the automatic fallback.
 
-**Checks.** Run `node scripts/curate-check.js` after editing `decks.js`, `rules.js` or `settings.js`. It validates the decks (unique ids, every fake has its fix and a short why, no links or markup), builds 2,000 shifts per client to check the deck order rules, and lints `site/curate/*.js` for ES5. `node scripts/curate-check.js --sim` also reruns the tier calibration and prints the tier shares; it fails if lazy play ever reaches Teal or the shares drift more than 4 points from the ones above.
+**Checks.** Run `node scripts/curate-check.js` after editing `decks.js`, `rules.js` or `settings.js`. It validates the decks (unique ids, every fake has its fix and a short why, no links or markup), builds 2,000 rounds of the travel deck to check the deck order rules (list split, fakes per list, easy start), and lints `site/curate/*.js` for ES5. `node scripts/curate-check.js --sim` also reruns the tier calibration and prints the tier shares; it fails if lazy play ever reaches Teal or the shares drift more than 4 points from the ones above.
 
 ## The Sheet
 
@@ -230,7 +238,7 @@ After changing it: redeploy the site and the backend, then Sheet menu *Kleros �
 
 1. `site/config.js`: `edition`, `city`, `event`, Community Hubs.
 2. `site/matching.js`: move `focus: true` to that year's pipelines; adjust keywords.
-3. `site/curate/decks.js`: the game's content is per edition. Replace the Mumbai city list (sights, practice cards and the city client's copy) with the new host city's, re-check every wallet entry (domains, tickers, contract labels), then run `node scripts/curate-check.js --sim`.
+3. `site/curate/decks.js`: the game's content is per edition. Replace the Mumbai list (sights and their models) with the new host city's, re-check every country and landmark entry (capitals and locations change rarely, but check), then run `node scripts/curate-check.js --sim`.
 4. A fresh Sheet (new Apps Script project, "From scratch") or keep one and filter on **Event**.
 5. Redeploy. The QR codes stay the same.
 
@@ -241,7 +249,7 @@ After changing it: redeploy the site and the backend, then Sheet menu *Kleros �
 The Curate game has its own poster set, written beside the check-in one without touching it (keep the trailing slash in the address):
 
 ```bash
-python3 qr/make_qr.py https://devcon.kleros.io/curate/ --name=curate-kleros-qr --headline="Play Kleros Curate" --perk="Catch the fakes in 60 s, win merch"
+python3 qr/make_qr.py https://devcon.kleros.io/curate/ --name=curate-kleros-qr --headline="Play Kleros Curate" --perk="Spot the fakes in 60 s, win merch"
 ```
 
 It writes `curate-kleros-qr-poster.png`, `curate-kleros-qr-poster-a4.png` and `.pdf`, `curate-kleros-qr-square.png`, `curate-kleros-qr-plain.png` and `curate-kleros-qr-plain.svg` (QR version 4 at ECC H), and runs the same scan check. `--name=` sets the file prefix (lower-case letters, digits and `-`), `--headline=` and `--perk=` the two top lines. Without these flags the script writes the check-in set exactly as before. The game posters aren't in the repo yet: generate them on a machine with the Python packages above, and never regenerate the check-in posters just for this.
@@ -250,4 +258,4 @@ It writes `curate-kleros-qr-poster.png`, `curate-kleros-qr-poster-a4.png` and `.
 
 The page carries its own privacy notice (controller: Cooperative Kleros; purposes include public-profile research; deletion on request). The blog box is never pre-ticked.
 
-The Curate game stores only on the phone. Scores, counted shifts and the ticket stay in the browser's `kleros_devcon_curate` key and are never sent anywhere; there is no form, no sign-up and no analytics. It reads the check-in saved on the same phone (name, K- code, tier) to show it on the ticket, and never changes it. Its fine print says so: "Your game data stays on this phone."
+The Curate game stores only on the phone. Scores, counted rounds and the ticket stay in the browser's `kleros_devcon_curate` key and are never sent anywhere; there is no form, no sign-up and no analytics. It reads the check-in saved on the same phone (name, K- code, tier) to show it on the ticket, and never changes it. Its fine print says so: "Your game data stays on this phone."

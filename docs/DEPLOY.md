@@ -42,8 +42,8 @@ On a phone: open the site, check in with a real email, confirm the Kleros blog e
 
 Then the game, on the same phone:
 
-1. On the check-in's final screen, tap **Play Curate**: https://devcon.kleros.io/curate/ opens.
-2. Play a shift to the end and see the report, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
+1. On the check-in's final screen, tap **Play Curate** (*Spot the fakes in 60 s. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header, and *Start verifying* is visible without scrolling.
+2. Tap *Start verifying* and play a round to the end (the cards mix waving flags, landmark models and Mumbai sights). See the Results, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
 3. Check the back-link under the ticket (*Back to your check-in ticket →*): it opens the check-in page.
 4. Confirm the check-in is unaffected: the same ticket, tier and code as before the game, and no new row in the Sheet.
 

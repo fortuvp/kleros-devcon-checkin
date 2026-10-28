@@ -16,7 +16,7 @@ window.CURATE_SETTINGS = {
   staffHoldMs: 2000, undoMs: 5000,
   soldOut: [],                               // e.g. ['gold'] for the rest of the day
   substitutes: { teal: null, purple: null, gold: null },   // { reward, short, img: [paths] }; short reads in a sentence
-  ranks: ['Trainee curator', 'Curator', 'Senior curator', 'Head curator'],
+  ranks: ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'],   // by tier, when no check-in name
   // Used only when config.js has no merch block with 3 tiers. An exact copy of config.js merch today.
   fallbackMerch: {
     free: { reward: 'Stickers and metallic tattoos', how: 'Free for everyone at the booth',

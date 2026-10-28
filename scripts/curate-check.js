@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Curate game checks: content schema, shift dealing, ES5 lint and file sizes; with --sim, the §2.8 tier
-// simulation. Node 22, no dependencies. It runs the very settings.js, decks.js and rules.js the phones load.
+// Curate game checks: content schema and facts, round dealing, ES5 lint, user copy (banned and web3 words)
+// and file sizes; with --sim, the §2.8 tier simulation. Node 22, no dependencies. It runs the very
+// settings.js, decks.js and rules.js the phones load.
 //   node scripts/curate-check.js          checks only
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
 // Exits non-zero on any failure. Run it after every change to settings.js, decks.js or rules.js.
@@ -67,16 +68,112 @@ function checkSettings() {
 }
 
 // ---- Schema ----
-var SHAPES = ['coin', 'shield', 'tag', 'arch', 'bridge', 'dome', 'temple', 'tower', 'minarets', 'wave', 'station',
-  'palace', 'park', 'block', 'house'];
-var MARKS = ['kleros', 'btc', 'eth', 'dollar', 'tether', 'diamond', 'hex', 'bang'];
-var MARKED = ['coin', 'shield', 'tag'];   // wallet objects always carry a mark; landmarks never need one
-function okMark(m) { return MARKS.indexOf(m) > -1 || /^[A-Z]$/.test(m); }
+var LANDMARK_SHAPES = ['eiffel', 'pisa', 'bigben', 'liberty', 'tajmahal', 'opera', 'colosseum', 'burj', 'goldengate',
+  'christ', 'pyramid', 'sagrada'];
+var MUMBAI_SHAPES = ['arch', 'bridge', 'dome', 'temple', 'tower', 'minarets', 'wave', 'station', 'palace', 'park', 'block',
+  'house'];
+var SHAPES = ['flag'].concat(LANDMARK_SHAPES, MUMBAI_SHAPES);
+// Flag kinds: the number of colours, then the optional keys each kind takes (brief §3).
+var FLAG_KINDS = { v3: [3], h3: [3, 'ratio'], h2: [2], nordic: [2, 'inner'], disc: [2, 'off'], cross: [2],
+  h3wheel: [4] };
+function hex(c) { return /^#[0-9a-f]{6}$/i.test(c || ''); }
+function okFlag(fl, where) {
+  var k = fl && FLAG_KINDS[fl.kind], key;
+  if (!k) return fail(where + ': flag kind ' + (fl && fl.kind) + ' not allowed');
+  if (!Array.isArray(fl.c) || fl.c.length !== k[0] || !fl.c.every(hex)) fail(where + ': a ' + fl.kind + ' flag needs ' + k[0] + ' #rrggbb colours');
+  for (key in fl) if (key !== 'kind' && key !== 'c' && k.indexOf(key) < 1) fail(where + ': flag key ' + key + ' not allowed on ' + fl.kind);
+  if (fl.ratio !== undefined && (!Array.isArray(fl.ratio) || fl.ratio.length !== 3 ||
+    !fl.ratio.every(function (x) { return typeof x === 'number' && x > 0; }))) fail(where + ': ratio needs 3 positive numbers');
+  if (fl.inner !== undefined && !hex(fl.inner)) fail(where + ': inner is not #rrggbb');
+  if (fl.off !== undefined && (typeof fl.off !== 'number' || Math.abs(fl.off) > 0.25)) fail(where + ': off must be a number in ±0.25');
+}
 function okObj(o, where) {
-  if (!o || SHAPES.indexOf(o.shape) < 0) fail(where + ': obj.shape ' + (o && o.shape) + ' not allowed');
-  if (o && !/^#[0-9a-f]{6}$/i.test(o.color || '')) fail(where + ': obj.color ' + (o && o.color) + ' is not #rrggbb');
-  if (o && o.mark !== undefined && !okMark(o.mark)) fail(where + ': obj.mark ' + o.mark + ' not allowed');
-  if (o && MARKED.indexOf(o.shape) > -1 && o.mark === undefined) fail(where + ': a ' + o.shape + ' needs a mark');
+  if (!o || SHAPES.indexOf(o.shape) < 0) return fail(where + ': obj.shape ' + (o && o.shape) + ' not allowed');
+  if (o.mark !== undefined) fail(where + ': obj.mark is gone (no coins, shields or tags)');
+  if (o.shape === 'flag') okFlag(o.flag, where);
+  else if (o.flag !== undefined) fail(where + ': only a flag has a flag spec');
+  // A flag paints its own colours; every other object needs a material colour.
+  if ((o.shape !== 'flag' || o.color !== undefined) && !hex(o.color)) fail(where + ': obj.color ' + o.color + ' is not #rrggbb');
+}
+
+// ---- Facts ----
+// Typed here a second time, apart from decks.js, so a slip in either shows up. Checked by hand against each
+// country’s flag specification and capital. Country: [capital, flag spec, words for the Flag row].
+var COUNTRY = {
+  Italy: ['Rome', { kind: 'v3', c: ['#009246', '#ffffff', '#ce2b37'] }, 'Green, white, red'],
+  France: ['Paris', { kind: 'v3', c: ['#0055a4', '#ffffff', '#ef4135'] }, 'Blue, white, red'],
+  Ireland: ['Dublin', { kind: 'v3', c: ['#169b62', '#ffffff', '#ff883e'] }, 'Green, white, orange'],
+  Belgium: ['Brussels', { kind: 'v3', c: ['#1a1a1a', '#fdda24', '#ef3340'] }, 'Black, yellow, red'],
+  Nigeria: ['Abuja', { kind: 'v3', c: ['#008751', '#ffffff', '#008751'] }, 'Green, white, green'],
+  Germany: ['Berlin', { kind: 'h3', c: ['#1a1a1a', '#dd0000', '#ffce00'] }, 'Black, red, gold'],
+  Austria: ['Vienna', { kind: 'h3', c: ['#c8102e', '#ffffff', '#c8102e'] }, 'Red, white, red'],
+  Hungary: ['Budapest', { kind: 'h3', c: ['#ce2939', '#ffffff', '#477050'] }, 'Red, white, green'],
+  Estonia: ['Tallinn', { kind: 'h3', c: ['#0072ce', '#1a1a1a', '#ffffff'] }, 'Blue, black, white'],
+  Colombia: ['Bogotá', { kind: 'h3', c: ['#fcd116', '#003893', '#ce1126'], ratio: [2, 1, 1] }, 'Yellow, blue, red'],
+  Poland: ['Warsaw', { kind: 'h2', c: ['#ffffff', '#dc143c'] }, 'White over red'],
+  Monaco: ['Monaco', { kind: 'h2', c: ['#ce1126', '#ffffff'] }, 'Red over white'],
+  Sweden: ['Stockholm', { kind: 'nordic', c: ['#006aa7', '#fecc02'] }, 'Blue, yellow cross'],
+  Finland: ['Helsinki', { kind: 'nordic', c: ['#ffffff', '#002f6c'] }, 'White, blue cross'],
+  Denmark: ['Copenhagen', { kind: 'nordic', c: ['#c8102e', '#ffffff'] }, 'Red, white cross'],
+  Norway: ['Oslo', { kind: 'nordic', c: ['#ba0c2f', '#ffffff'], inner: '#00205b' }, 'Red, blue cross edged white'],
+  Iceland: ['Reykjavík', { kind: 'nordic', c: ['#02529c', '#ffffff'], inner: '#dc1e35' }, 'Blue, red cross edged white'],
+  Japan: ['Tokyo', { kind: 'disc', c: ['#ffffff', '#bc002d'] }, 'White, red disc'],
+  Bangladesh: ['Dhaka', { kind: 'disc', c: ['#006a4e', '#f42a41'], off: -0.05 }, 'Green, red disc'],   // disc at 45% of the length
+  Switzerland: ['Bern', { kind: 'cross', c: ['#da291c', '#ffffff'] }, 'Red, white cross'],
+  India: ['New Delhi', { kind: 'h3wheel', c: ['#ff9933', '#ffffff', '#138808', '#000080'] }, 'Saffron, white, green, navy wheel']
+};
+// Landmark shape: [name, location, words for the Model row].
+var LANDMARK = {
+  eiffel: ['Eiffel Tower', 'Paris, France', 'Iron lattice tower'],
+  pisa: ['Leaning Tower of Pisa', 'Pisa, Italy', 'Leaning white tower'],
+  bigben: ['Big Ben', 'London, UK', 'Gothic clock tower'],
+  liberty: ['Statue of Liberty', 'New York, USA', 'Green statue with a torch'],
+  tajmahal: ['Taj Mahal', 'Agra, India', 'White dome, four minarets'],
+  opera: ['Sydney Opera House', 'Sydney, Australia', 'White shell-shaped roofs'],
+  colosseum: ['Colosseum', 'Rome, Italy', 'Oval arena of arches'],
+  burj: ['Burj Khalifa', 'Dubai, UAE', 'Very tall stepped spire'],
+  goldengate: ['Golden Gate Bridge', 'San Francisco, USA', 'Red suspension bridge'],
+  christ: ['Christ the Redeemer', 'Rio de Janeiro, Brazil', 'Statue, arms spread wide'],
+  pyramid: ['Great Pyramid of Giza', 'Giza, Egypt', 'Stone pyramid'],
+  sagrada: ['Sagrada Família', 'Barcelona, Spain', 'Basilica with tall spires']
+};
+function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function find(table, col, v) { var k; for (k in table) if (same(table[k][col], v)) return k; return null; }
+// For each field, the place it points at; then exactly the `bad` field may disagree with the other two.
+var VOTES = {
+  countries: function (it) {
+    var drawn = find(COUNTRY, 1, it.obj.flag);
+    return { flag: drawn, country: COUNTRY[it.f.country] ? it.f.country : null, capital: find(COUNTRY, 0, it.f.capital),
+      desc: drawn && COUNTRY[drawn][2], truth: function (x, k) { return k === 'flag' ? COUNTRY[x][2] : k === 'country' ? x : COUNTRY[x][0]; } };
+  },
+  landmarks: function (it) {
+    var drawn = LANDMARK[it.obj.shape] ? it.obj.shape : null;
+    return { model: drawn, name: find(LANDMARK, 0, it.f.name), where: find(LANDMARK, 1, it.f.where),
+      desc: drawn && LANDMARK[drawn][2], truth: function (x, k) { return LANDMARK[x][k === 'model' ? 2 : k === 'name' ? 0 : 1]; } };
+  }
+};
+function checkFacts(it, list, where) {
+  var keys = list.fields.map(function (f) { return f[0]; }), v, others, x;
+  if (it.list === 'mumbai') {
+    if (MUMBAI_SHAPES.indexOf(it.obj.shape) < 0) fail(where + ': a Mumbai entry needs a Mumbai shape');
+    // A wrong city may still read Mumbai (a sight from elsewhere); otherwise the city is Mumbai.
+    if (it.bad !== 'city' && it.f.city !== 'Mumbai') fail(where + ': only a wrong-city fake may name another city');
+    if (it.bad === 'place') fail(where + ': on Mumbai the odd field is city or type');
+    return;
+  }
+  if (!VOTES[it.list]) return fail(where + ': no fact table for list ' + it.list);
+  if ((it.list === 'countries') !== (it.obj.shape === 'flag')) fail(where + ': flags belong on Countries, and only there');
+  v = VOTES[it.list](it);
+  if (!v[list.objField]) return fail(where + ': the drawn ' + it.obj.shape + ' matches no known ' + list.objField);
+  // The object row always describes what is drawn: a wrong object shows on the card.
+  if (it.f[list.objField] !== v.desc) fail(where + ': ' + list.objField + ' row ' + it.f[list.objField] + ' does not describe the drawn object (' + v.desc + ')');
+  others = keys.filter(function (k) { return k !== it.bad; });
+  x = v[others[0]];
+  if (!x || !others.every(function (k) { return v[k] === x; })) return fail(where + ': ' + others.join(', ') + ' do not all point at one place');
+  if (!it.bad) return;
+  if (v[it.bad] === x) fail(where + ': the odd field ' + it.bad + ' agrees with the others');
+  if (it.fix !== v.truth(x, it.bad)) fail(where + ': fix ' + it.fix + ' should be ' + v.truth(x, it.bad));
+  if (it.bad === list.objField && it.tell !== 'card') fail(where + ': a wrong ' + it.bad + ' shows on the card, so its tell is card');
 }
 // Walks every string in a value and calls fn(string, path).
 function strings(v, at, fn) {
@@ -85,7 +182,9 @@ function strings(v, at, fn) {
   if (v && typeof v === 'object') for (k in v) if (Object.prototype.hasOwnProperty.call(v, k)) strings(v[k], at + '.' + k, fn);
 }
 var COUNTS = [];   // per list: [deck, list, good, fake, card tells], printed in the summary
-// #policy is one line (nowrap, ellipsis): no policy may be longer than the Tokens one, 61 characters.
+var LIST_KEYS = 'countries,landmarks,mumbai';   // brief §3: one deck, these three lists
+var POOL_MIN = { countries: [11, 7], landmarks: [9, 7] };   // [good, fake] in the pool
+// #policy is one line (nowrap, ellipsis): no policy may be longer than the Mumbai one, 61 characters.
 var POLICY_MAX = 61;
 // The wrong-evidence toast line, exactly as game.js ruling() builds it from a field label.
 var EV_LINE = '\'The problem was the “\' + lab + \'” line.\'';
@@ -123,13 +222,14 @@ function checkItem(deck, it, ids, practice) {
     if (typeof it.fix !== 'string' || !it.fix) fail(where + ': a fake needs a fix');
     if (it.f[it.bad] === it.fix) fail(where + ': fix equals the shown value');
   } else if (it.tell || it.fix) fail(where + ': a good entry has a tell or fix');
-  // The Coin row is words only, so it reads on any phone and to screen readers.
-  if (it.f.coin && /[₿◈]/.test(it.f.coin)) fail(where + ': coin text uses a glyph');
+  if (!it.obj || SHAPES.indexOf(it.obj.shape) < 0) return;
+  checkFacts(it, list, where);
 }
 function checkSchema() {
   var ids = {}, dk;
   if (!D) return fail('decks.js: window.CURATE_DECKS is missing');
-  if (!D.wallet || !D.mumbai) fail('decks.js: wallet and mumbai decks are both required');
+  // One mixed deck (brief §3): the wallet deck and its web3 lists are gone.
+  if (Object.keys(D).join() !== 'travel') fail('decks.js: exactly one deck, travel, is expected (found ' + Object.keys(D).join(', ') + ')');
   strings(D, 'CURATE_DECKS', function (s, at) {
     if (/http|[<>]/i.test(s)) fail('decks.js ' + at + ': contains http, < or >');
   });
@@ -138,11 +238,11 @@ function checkSchema() {
       var c = deck.copy || {}, entries = 0, fakes = 0, lk, li, per = {};
       if (deck.id !== dk) fail(dk + ': id must equal its key');
       if (typeof deck.client !== 'string') fail(dk + ': client is missing');
-      ['story1', 'payoff', 'switchTo', 'repSwitch', 'quoteBy'].forEach(function (k) {
+      ['story1', 'payoff', 'quoteBy'].forEach(function (k) {
         if (typeof c[k] !== 'string' || !c[k]) fail(dk + ': copy.' + k + ' is missing');
       });
       if (!c.quotes || c.quotes.length !== 3) fail(dk + ': copy.quotes needs 3 lines (trust ≥ 90, 70–89, < 70)');
-      if (c.payoffs && (c.payoffs.length !== 3 || c.payoffs.some(function (x) { return x.indexOf('{trust}') < 0; }))) {
+      if (!c.payoffs || c.payoffs.length !== 3 || c.payoffs.some(function (x) { return x.indexOf('{trust}') < 0; })) {
         fail(dk + ': copy.payoffs needs 3 lines (trust ≥ 90, 70–89, < 70), each with {trust}');
       }
       if (!deck.hero || deck.hero.length !== 3) fail(dk + ': hero needs 3 specs');
@@ -155,6 +255,9 @@ function checkSchema() {
         (li.fields || []).forEach(function (f) { checkLabel(dk + '.' + lk, f[1]); });
         per[lk] = [0, 0, 0];
       }
+      if (Object.keys(deck.lists).join() !== LIST_KEYS) fail(dk + ': lists must be ' + LIST_KEYS);
+      if (deck.lists.countries && deck.lists.countries.objField !== 'flag') fail(dk + '.countries: objField must be flag');
+      if (deck.lists.landmarks && deck.lists.landmarks.objField !== 'model') fail(dk + '.landmarks: objField must be model');
       if (deck.easy && !deck.lists[deck.easy]) fail(dk + ': easy list ' + deck.easy + ' does not exist');
       if (deck.late && !deck.lists[deck.late]) fail(dk + ': late list ' + deck.late + ' does not exist');
       for (lk in deck.split) {
@@ -174,7 +277,14 @@ function checkSchema() {
         COUNTS.push([dk, lk, per[lk][0], per[lk][1], per[lk][2]]);
         // At least half the fakes per list can be caught from the card plus the policy.
         if (per[lk][1] && per[lk][2] * 2 < per[lk][1]) fail(dk + '.' + lk + ': only ' + per[lk][2] + ' of ' + per[lk][1] + ' fakes are card tells (need ≥ 50%)');
+        if (POOL_MIN[lk] && (per[lk][0] < POOL_MIN[lk][0] || per[lk][1] < POOL_MIN[lk][1])) {
+          fail(dk + '.' + lk + ': pool is ' + per[lk][0] + ' good / ' + per[lk][1] + ' fake, brief §3 wants ≥ ' + POOL_MIN[lk].join(' / '));
+        }
       }
+      // Every new model is dealt as a good entry somewhere, so none is drawn only on fakes.
+      LANDMARK_SHAPES.forEach(function (sh) {
+        if (!(deck.items || []).some(function (it) { return it.obj && it.obj.shape === sh && !it.bad; })) fail(dk + ': no good entry shows the ' + sh + ' model');
+      });
     })(D[dk]);
   }
   console.log('Content');
@@ -199,7 +309,7 @@ function mulberry32(a) {
   };
 }
 var BUILDS = 2000;
-// Returns the problems with one dealt shift (empty when it follows §2.4).
+// Returns the problems with one dealt round (empty when it follows §2.4).
 function runProblems(deck, run, practiceIds) {
   var p = [], items = run.items, ids = {}, twins = {}, per = {}, fakes = 0, rf = 0, rg = 0, i, it, k, open;
   function easy(x) { return deck.easy ? x.list === deck.easy : x.lvl === 1; }
@@ -240,29 +350,30 @@ function checkDealing() {
         run = R.buildRun(deck.id, last, rand);
         p = runProblems(deck, run, practiceIds);
         if (p.length) { bad++; if (!first) first = p.join('; '); }
-        // Like a phone: the previous shift’s ids are passed in, so the next shift avoids them where it can.
+        // Like a phone: the previous round’s ids are passed in, so the next round avoids them where it can.
         repeats += run.items.filter(function (x) { return last.indexOf(x.id) > -1; }).length;
         last = run.items.map(function (x) { return x.id; });
       }
-      if (bad) fail(deck.id + ': ' + bad + ' of ' + BUILDS + ' dealt shifts break §2.4, first: ' + first);
+      if (bad) fail(deck.id + ': ' + bad + ' of ' + BUILDS + ' dealt rounds break §2.4, first: ' + first);
       // buildRun must not touch the deck: items are copies.
       run.items[0].why = 'changed';
       if (deck.items.some(function (x) { return x.why === 'changed'; })) fail(deck.id + ': buildRun returns the deck’s own objects');
-      out.push('  ' + pad(deck.id, 8) + BUILDS + ' shifts, ' + bad + ' broken, ' +
-        (Math.round(100 * repeats / (BUILDS - 1)) / 100) + ' entries repeated from the previous shift on average');
+      out.push('  ' + pad(deck.id, 8) + BUILDS + ' rounds, ' + bad + ' broken, ' +
+        (Math.round(100 * repeats / (BUILDS - 1)) / 100) + ' entries repeated from the previous round on average');
     })(D[dk]);
   }
   // A missing rand falls back to Math.random.
-  if (R.buildRun('wallet', []).items.length !== S.entries) fail('buildRun without rand failed');
+  if (R.buildRun('travel', []).items.length !== S.entries) fail('buildRun without rand failed');
   console.log('Dealing');
   out.forEach(function (l) { console.log(l); });
 }
 
 // ---- ES5 lint ----
 // Blanks comments, strings and regex literals (keeping newlines), so words in copy such as "let it through"
-// are not mistaken for code. Backticks are kept so a template literal is still caught.
-function codeOnly(src) {
-  var out = '', i = 0, n = src.length, c, q, prev = '', j, word;
+// are not mistaken for code. Backticks are kept so a template literal is still caught. onStr(text, line), when
+// given, receives every quoted string literal: the copy check reads user copy through it.
+function codeOnly(src, onStr) {
+  var out = '', i = 0, n = src.length, c, q, prev = '', j, word, line = 1, at = 0;
   function blank(s) { return s.replace(/[^\n]/g, ' '); }
   while (i < n) {
     c = src[i];
@@ -277,6 +388,7 @@ function codeOnly(src) {
     if (c === '\'' || c === '"') {
       q = c; j = i + 1;
       while (j < n && src[j] !== q && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      if (onStr) { line += src.slice(at, i).split('\n').length - 1; at = i; onStr(src.slice(i + 1, j), line); }
       out += q + blank(src.slice(i + 1, j)) + q; i = j + 1; prev = 'x'; continue;
     }
     if (c === '/') {
@@ -319,19 +431,77 @@ function checkLint() {
   console.log('ES5 lint\n  ' + files.length + ' file(s): ' + files.join(', ') + (hits ? '' : ', clean'));
 }
 
+// ---- User copy ----
+// Brief §2 and §3: no job words and nothing web3 in anything a player can read. Only user copy is read:
+// quoted string literals in site/curate/*.js (and inline scripts), plus index.html text and the readable
+// attributes. Identifier-like strings ('shift', 'end-shift', 'startShift') are internal and stay; a word joined
+// to another by a letter, digit, _ or - is part of an identifier, so it never counts either.
+function word(w, flags) { return new RegExp('(?<![\\w-])(?:' + w + ')(?![\\w-])', flags === undefined ? 'i' : flags); }
+var BANNED = [
+  [word('shifts?'), 'shift'], [word('clients?'), 'client'], [word('hired'), 'hired'], [word('jobs?'), 'job'],
+  [word('employees?'), 'employee'], [/staff of the company/i, 'staff of the company'], [word('work(?:ers?)?'), 'work'],
+  [word('boss(?:es)?'), 'boss'], [/let (?:it |them |everything )?through/i, 'let it through'],
+  [word('trainees?'), 'Trainee'], [word('senior'), 'Senior'], [/head curator/i, 'Head curator']
+];
+var WEB3 = [
+  [word('tokens?'), 'token'], [word('wallets?'), 'wallet'], [word('crypto\\w*'), 'crypto'], [word('swap\\w*'), 'swap'],
+  [word('ENS', ''), 'ENS'], [word('etherscan'), 'Etherscan'], [word('metamask'), 'MetaMask'], [word('uniswap'), 'Uniswap'],
+  [word('tickers?'), 'ticker'], [word('contracts?'), 'contract'], [word('blockchains?'), 'blockchain'],
+  [word('on-?chain'), 'on-chain'], [word('nfts?'), 'NFT'], [word('defi'), 'DeFi'], [word('web3'), 'web3'],
+  [word('ether'), 'Ether'], [word('ETH', ''), 'ETH'], [word('bitcoin'), 'Bitcoin'], [word('coins?'), 'coin'],
+  [word('PNK', ''), 'PNK'], [/seed phrase/i, 'seed phrase'], [word('dapps?'), 'dapp'], [word('airdrops?'), 'airdrop']
+];
+var IDENT = /^[a-z_$][\w$.\-\/:]*$/;   // ids, keys, classes, paths, mode names
+var SHADER = /\b(?:gl_\w+|uniform|varying|attribute|precision)\b/;
+function checkCopy() {
+  var files = fs.readdirSync(DIR).filter(function (f) { return /\.js$/.test(f); }).sort(), n = 0, hits = 0;
+  function test(text, where, isIdent) {
+    var t = text.replace(/<[^>]*>/g, ' ').replace(/&[#\w]+;/g, ' ').replace(/\{\w+\}/g, ' ');
+    if (!t.trim()) return;
+    n++;
+    if (isIdent) {
+      WEB3.forEach(function (r) { if (r[0].test(t)) warn(where + ': identifier ' + text + ' still names ' + r[1]); });
+      return;
+    }
+    BANNED.forEach(function (r) { if (r[0].test(t)) { hits++; fail(where + ': user copy says ' + r[1] + ': ' + t.trim().slice(0, 70)); } });
+    WEB3.forEach(function (r) { if (r[0].test(t)) { hits++; fail(where + ': user copy is web3 (' + r[1] + '): ' + t.trim().slice(0, 70)); } });
+  }
+  function js(src, name, from) {
+    codeOnly(src, function (str, line) {
+      if (!SHADER.test(str)) test(str, name + ':' + (from + line - 1), IDENT.test(str));
+    });
+  }
+  files.forEach(function (f) { js(fs.readFileSync(path.join(DIR, f), 'utf8'), 'site/curate/' + f, 1); });
+  (function () {
+    var src = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'), m, re, html;
+    function lineAt(i) { return src.slice(0, i).split('\n').length; }
+    function blank(x) { return x.replace(/[^\n]/g, ' '); }
+    // Inline scripts are read as JS; comments, styles and scripts are then blanked so only markup is left.
+    re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+    while ((m = re.exec(src))) js(m[1], 'site/curate/index.html', lineAt(m.index + m[0].indexOf(m[1])));
+    html = src.replace(/<!--[\s\S]*?-->|<style\b[\s\S]*?<\/style>|<script\b[\s\S]*?<\/script>/gi, blank);
+    re = /\s(?:aria-label|aria-description|title|alt|placeholder|content|value|data-label)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+    while ((m = re.exec(html))) test(m[1] !== undefined ? m[1] : m[2], 'site/curate/index.html:' + lineAt(m.index), false);
+    re = />([^<]+)</g;
+    while ((m = re.exec(html))) if (m[1].trim()) test(m[1], 'site/curate/index.html:' + lineAt(m.index), false);
+  })();
+  console.log('User copy\n  ' + n + ' strings and text runs in ' + (files.length + 1) + ' files' +
+    (hits ? ': ' + hits + ' banned or web3 word(s)' : ': no job words, nothing web3'));
+}
+
 // ---- Sizes ----
-// Budgets in bytes: [raw, gzip] (0 = no limit). P1’s own files fail when over; the rest only warn.
-// Revised after the first review round: §8.1’s numbers were set before the build and every file but P1’s
-// outgrew them, so the check only warned. Each budget is now the measured size plus about 10%, and the eager
-// total (everything but the lazy gl.js) is held under 60 KB gz. Unminified on purpose: no build step, and the
-// source stays readable. Raise a budget only with a reason, and keep the eager total under 60 KB gz.
+// Budgets in bytes: [raw, gzip] (0 = no limit). The data files (settings, decks, rules) fail when over; the
+// rest only warn. Each budget is the measured size plus about 10%: set after the first review round, and set
+// again for v3 (28 Oct), when flags, 12 landmark models and the standalone shell were added and the wallet
+// content went. Unminified on purpose: no build step, and the source stays readable. Raise a budget only with
+// a reason. Measured for v3 while objects.js and gl.js were still being finished: re-measure once they settle.
 var KB = 1024;
 var BUDGETS = {
-  'settings.js': [3 * KB, 0, true], 'decks.js': [24 * KB, 7 * KB, true], 'rules.js': [8 * KB, 0, true],
-  'objects.js': [23 * KB, 9 * KB], 'gl.js': [38 * KB, 14 * KB], 'game.js': [44 * KB, 14.5 * KB],
-  'rewards.js': [41 * KB, 13.5 * KB], 'index.html': [61 * KB, 17 * KB]
+  'settings.js': [2.3 * KB, 0, true], 'decks.js': [22.5 * KB, 7.5 * KB, true], 'rules.js': [7.8 * KB, 0, true],
+  'objects.js': [38 * KB, 14.5 * KB], 'gl.js': [41.5 * KB, 15.5 * KB], 'game.js': [45 * KB, 15 * KB],
+  'rewards.js': [43.5 * KB, 14.75 * KB], 'index.html': [62.5 * KB, 17.5 * KB]
 };
-var TOTAL = [196 * KB, 60 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
+var TOTAL = [221 * KB, 73 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
 function checkSizes() {
   var total = 0, totalGz = 0;
   console.log('Sizes (raw / gzip, budget)');
@@ -385,16 +555,17 @@ function page(ls, opts) {
   RW_SRC.forEach(function (f) {
     vm.runInContext(f[1], ctx, { filename: f[0] });
     if (/rules/.test(f[0]) && opts.settings) opts.settings(ctx.CURATE_SETTINGS);
+    if (/config/.test(f[0]) && opts.config) opts.config(ctx.KLEROS_BOOTH_CONFIG);
   });
   ctx.CurateRewards.init({});
   ctx.text = function (id) { return els[id] ? els[id].textContent : ''; };
   ctx.el = function (id) { return ctx.document.getElementById(id); };
   return ctx;
 }
-// One shift through the public API, as game.js calls it: startShift when the clock starts, then finishShift.
+// One round through the public API, as game.js calls it: startShift when the clock starts, then finishShift.
 function playShift(pg, final) {
-  var r = pg.CurateRewards.startShift('wallet');
-  pg.CurateRewards.finishShift({ deck: 'wallet', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6,
+  var r = pg.CurateRewards.startShift('travel');
+  pg.CurateRewards.finishShift({ deck: 'travel', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6,
     evidence: 1, wrong: 0, leaks: 1, trust: 85, reviewed: 10, counted: r.counted, shiftNo: r.shiftNo, code: r.code, misses: [] });
   return r;
 }
@@ -407,15 +578,15 @@ function checkRewards() {
   var n = 0, ls, a, b, c, kept, m;
   function ok(cond, msg) { n++; if (!cond) fail('rewards.js: ' + msg); }
   function stored(l) { return JSON.parse(l.getItem('kleros_devcon_curate')); }
-  // Two tabs: a stale tab neither counts a 4th shift nor drops the other tab's best or stamp.
+  // Two tabs: a stale tab neither counts a 4th round nor drops the other tab's best or stamp.
   ls = new Store(); a = page(ls); b = page(ls);
   playShift(a, 600); playShift(a, 1000); playShift(a, 300);
-  ok(!b.CurateRewards.startShift('wallet').counted, 'a stale tab counted a 4th shift');
-  ok(stored(ls).counted === 3 && stored(ls).best.final === 1000, 'a stale tab dropped the other tab’s counted shifts or best');
+  ok(!b.CurateRewards.startShift('travel').counted, 'a stale tab counted a 4th round');
+  ok(stored(ls).counted === 3 && stored(ls).best.final === 1000, 'a stale tab dropped the other tab’s counted rounds or best');
   stamp(a);
   kept = JSON.stringify(stored(ls).collected);
   ok(stored(ls).collected && stored(ls).collected.tier === 2, 'the staff stamp did not save a Purple collect');
-  b.CurateRewards.startShift('wallet'); b.CurateRewards.showTicket();
+  b.CurateRewards.startShift('travel'); b.CurateRewards.showTicket();
   ok(JSON.stringify(stored(ls).collected) === kept && b.CurateRewards.model().state === 'collected', 'a stale tab lost the stamp');
   // The check-in ticket already covers a game tier at or below it: no second claimable ticket.
   ls = new Store(); ls.setItem('kleros_devcon_self', self(3)); c = page(ls); playShift(c, 1600);
@@ -423,12 +594,12 @@ function checkRewards() {
   ls = new Store(); ls.setItem('kleros_devcon_self', self(1)); c = page(ls); playShift(c, 1000);
   m = c.CurateRewards.model();
   ok(m.state === 'live' && m.t === 2 && m.code === 'K-ABC123', 'check-in Teal plus game Purple is not a live K- Purple ticket');
-  // Everyone has nothing to stamp, and a later Teal shift still counts.
+  // Everyone has nothing to stamp, and a later Teal round still counts.
   ls = new Store(); c = page(ls); playShift(c, 300); stamp(c);
   ok(c.el('tb-staff-btn').hidden && !stored(ls).collected, 'an Everyone ticket can be stamped');
   playShift(c, 600);
   m = c.CurateRewards.model();
-  ok(m.state === 'live' && m.t === 1, 'a Teal shift after an Everyone ticket is not live Teal');
+  ok(m.state === 'live' && m.t === 1, 'a Teal round after an Everyone ticket is not live Teal');
   // A mid-day retune never downgrades a ticket, and a lower tier never replaces it.
   ls = new Store(); playShift(page(ls), 1500);
   c = page(ls, { settings: function (s) { s.tiers = [0, 450, 950, 1550]; } });
@@ -450,7 +621,7 @@ function checkRewards() {
   playShift(c, 1600);
   ok(c.text('rep-tier-line') === 'Merch goes with your first check-in. Play for fun.', 'duplicate check-in report: ' + c.text('rep-tier-line'));
   ok(c.el('rep-gold').hidden !== false && c.CurateRewards.model().state === 'dup', 'duplicate check-in is offered a Gold check-in');
-  // Kiosk: one shift is one visitor, capped at kioskMaxTier, and the ticket's button is Next curator.
+  // Kiosk: one round is one visitor, capped at kioskMaxTier, and the ticket's button is Next curator.
   c = page(new Store(), { kiosk: true });
   playShift(c, 600); playShift(c, 150);
   m = c.CurateRewards.model();
@@ -458,6 +629,12 @@ function checkRewards() {
   playShift(c, 1600); c.CurateRewards.showTicket();
   ok(c.CurateRewards.model().t === S.kioskMaxTier && c.text('t-again') === 'Next curator', 'kiosk cap or Next curator');
   ok(!c.el('hdr-logo').hasAttribute('href'), 'the kiosk logo keeps a link');
+  // The one-item rule shows once, whether or not the configured merch note already says it.
+  [null, 'While stocks last'].forEach(function (note) {
+    var p = page(new Store(), note ? { config: function (cfg) { cfg.merch.note = note; } } : {});
+    var hits = (p.text('ladder-fine').match(/one item per person/ig) || []).length;
+    ok(hits === 1, 'ladder fine print with note ' + (note || 'from config.js') + ': ' + p.text('ladder-fine'));
+  });
   console.log('Rewards\n  ' + n + ' ticket and storage cases (two tabs, check-in, Everyone, retune, sold out, duplicate, kiosk)');
 }
 
@@ -486,8 +663,8 @@ function checkWatchdog() {
 
 // ---- Simulation (§2.8) ----
 // Model: lognormal decision time (SIGMA), +0.5 s when the player taps evidence, 0.25 s per card for the
-// fly-out and landing; the best of the shifts actually played (55% play 1, 25% play 2, 20% play 3), each later
-// shift +3% accuracy and −10% time. Accuracy is the chance of the right call on a card the player decides.
+// fly-out and landing; the best of the rounds actually played (55% play 1, 25% play 2, 20% play 3), each later
+// round +3% accuracy and −10% time. Accuracy is the chance of the right call on a card the player decides.
 var RUNS = 20000, SIGMA = 0.5, EVIDENCE_S = 0.5, OVERHEAD_S = 0.25;
 var PLAYS = [[1, 0.55], [2, 0.25], [3, 0.20]];
 var PROFILES = [   // name, mix share, accuracy, mean decision s, evidence rate; then §2.8 targets for reference
@@ -499,8 +676,8 @@ function gauss(rand) { return Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 
 function lognormal(rand, mean) { return Math.exp(Math.log(mean) - SIGMA * SIGMA / 2 + SIGMA * gauss(rand)); }
 function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
 
-// One shift with the real rules. `play(item, rand)` returns { action, evidence, secs } (secs Infinity = idle).
-function shift(deckId, relaxed, play, rand, last) {
+// One round with the real rules. `play(item, rand)` returns { action, evidence, secs } (secs Infinity = idle).
+function playRound(deckId, relaxed, play, rand, last) {
   var run = R.buildRun(deckId, last, rand), sc = R.newScore(), len = relaxed ? S.relaxedSeconds : S.seconds,
     t = 0, grace = 0, decided = 0, i, it, w, d, o;
   for (i = 0; i < run.items.length; i++) {
@@ -543,9 +720,9 @@ function simProfile(prof, relaxed, rand) {
     for (k = 0; k < PLAYS.length && n === 0; k++) { u -= PLAYS[k][1]; if (u < 0) n = PLAYS[k][0]; }
     n = n || 1;
     b = 0; last = [];
-    deck = r % 2 ? 'mumbai' : 'wallet';   // both clients share the rules; half the players pick each
+    deck = 'travel';   // the one mixed deck
     for (k = 0; k < n; k++) {
-      res = shift(deck, relaxed, player(Math.min(0.99, prof[2] + 0.03 * (k ? 1 : 0)), prof[3] * (k ? 0.9 : 1), prof[4]),
+      res = playRound(deck, relaxed, player(Math.min(0.99, prof[2] + 0.03 * (k ? 1 : 0)), prof[3] * (k ? 0.9 : 1), prof[4]),
         rand, last);
       last = res.ids;
       if (k === 0) { scores.push(res.score.final); decided.push(res.decided); one[R.tierFor(res.score.final)]++; }
@@ -562,7 +739,7 @@ function simulate() {
     var relaxed = mode === 'relaxed', mix = [0, 0, 0, 0];
     console.log('\nSimulation, ' + mode + ' (' + RUNS + ' players per profile; E/T/P/G = Everyone/Teal/Purple/Gold %)');
     console.log('  ' + pad('Profile', 10) + pad('mix', 6) + pad('acc/time/ev', 16) + pad('decided', 9) + pad('median', 8) +
-      pad('one shift', 14) + 'best of plays');
+      pad('one round', 14) + 'best of plays');
     PROFILES.forEach(function (p) {
       var s = simProfile(p, relaxed, rand), i;
       for (i = 0; i < 4; i++) mix[i] += p[1] * pct(s.best[i], RUNS);
@@ -581,18 +758,18 @@ function simulate() {
 }
 // Lazy strategies must never reach Teal; random fast taps are reported only.
 function simLazy(rand) {
-  console.log('\nLazy strategies, standard (' + RUNS + ' shifts each)');
-  [['let', 'Let everything through'], ['challenge', 'Challenge everything'], ['idle', 'Idle'],
+  console.log('\nLazy strategies, standard (' + RUNS + ' rounds each)');
+  [['let', 'Verify everything'], ['challenge', 'Challenge everything'], ['idle', 'Idle'],
     ['random', 'Random fast taps (0.45 s)']].forEach(function (s) {
     var scores = [], teal = 0, r, f;
     for (r = 0; r < RUNS; r++) {
-      f = shift(r % 2 ? 'mumbai' : 'wallet', false, lazy(s[0]), rand, []).score.final;
+      f = playRound('travel', false, lazy(s[0]), rand, []).score.final;
       scores.push(f);
       if (R.tierFor(f) >= 1) teal++;
     }
     console.log('  ' + pad(s[1], 28) + 'median ' + lpad(median(scores), 4) + '   max ' + lpad(Math.max.apply(null, scores), 4) +
       '   reaches Teal ' + pct(teal, RUNS) + '%');
-    if (s[0] !== 'random' && teal) fail(s[1] + ' reached Teal in ' + teal + ' shifts');
+    if (s[0] !== 'random' && teal) fail(s[1] + ' reached Teal in ' + teal + ' rounds');
   });
 }
 
@@ -601,6 +778,7 @@ checkSettings();
 checkSchema();
 checkDealing();
 checkLint();
+checkCopy();
 try { checkRewards(); } catch (e) { fail('rewards.js: the ticket checks threw ' + e.message); }
 checkWatchdog();
 checkSizes();

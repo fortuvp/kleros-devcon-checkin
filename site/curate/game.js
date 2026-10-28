@@ -1,4 +1,5 @@
-// Curate game engine: brief, practice, the 60-second shift and the hand-off to the report.
+// Curate game engine: brief, practice, the 60-second round and the hand-off to the report. Internal names
+// still say "shift" (mode, startShift, #end-shift); only the copy says round.
 // One rAF loop drives the clock, the per-entry windows and drag frames. Rules come from rules.js, items are
 // painted by objects.js, and rewards.js owns storage, the report and the ticket: this file never touches
 // localStorage. User text goes in through textContent only.
@@ -9,10 +10,10 @@
   var LITE = /[?&]lite=1\b/.test(location.search) || !!(navigator.connection && navigator.connection.saveData);
   var MINUS = '−', GUARD = 120;
 
-  // Practice coach facts per client (§1.3 S2); the rest of the coach copy is shared.
+  // Practice coach facts per deck (P1 is India with capital Mumbai, P2 the Eiffel Tower in Paris); the rest of
+  // the coach copy is shared. A deck without an entry falls back to its practice cards' own lines.
   var COACH = {
-    wallet: { fact: 'Kleros’ token is PNK.', good: 'devcon.org is Devcon’s site.' },
-    mumbai: { fact: 'India Gate is in New Delhi.', good: 'the Gateway of India is in Mumbai.' }
+    travel: { fact: 'India’s capital is New Delhi.', good: 'the Eiffel Tower is in Paris.' }
   };
 
   // ---- Helpers ----
@@ -43,8 +44,15 @@
   function later(fn, ms) { var t = setTimeout(fn, ms); timers.push(t); return t; }
   function clearTimers() { while (timers.length) clearTimeout(timers.pop()); }
 
+  // ---- Decks ----
+  // The default deck is the first key of CURATE_DECKS (travel). A stored id that no longer exists (an old
+  // deck pref) falls back to it; with one deck the switch buttons stay hidden.
+  function deckIds() { var a = [], k; for (k in D) if (D.hasOwnProperty(k)) a.push(k); return a; }
+  function firstDeck() { return deckIds()[0] || ''; }
+  function multiDeck() { return deckIds().length > 1; }
+
   // ---- State ----
-  var deckId = 'wallet', deck = null, relaxed = false;
+  var deckId = '', deck = null, relaxed = false;
   var mode = 'brief';        // brief | practice | between | banner | shift | ended
   var run = [], idx = 0, cards = [], score = null, info = null, total = 0;
   var clockOn = false, elapsed = 0, lastT = 0, paused = false, explainOpen = false;
@@ -58,12 +66,18 @@
 
   // ---- Views and announcements ----
   var VIEWS = { brief: 'brief', play: 'play', report: 'report', ticket: 'ticketv' };
+  var curView = '';
   function showView(view) {
     var k, b = document.body;
+    // Any view change, timer-driven ones included, shuts a How it works sheet left open.
+    if (view !== curView) closeHow();
+    curView = view;
     for (k in VIEWS) show($(VIEWS[k]), k === view);
-    // Keep modifier classes, swap the v-* one.
+    // Keep modifier classes, replace the v-* one.
     b.className = (b.className.replace(/(^|\s)v-\S+/g, '') + ' v-' + view).replace(/^\s+/, '');
     if (view !== 'play') { show('paused', false); show('explain', false); body('is-paused', false); }
+    // rewards.js fills #rep-switch on the report; with one deck neither switch ever shows.
+    if (!multiDeck()) { show('deck-switch', false); show('rep-switch', false); }
     ob(view === 'report' || view === 'ticket' ? 'pause' : 'resume');
     try { window.scrollTo(0, 0); } catch (e) {}
   }
@@ -80,7 +94,7 @@
 
   // ---- Brief ----
   function setDeck(id) {
-    deckId = D[id] ? id : 'wallet';
+    deckId = id && D.hasOwnProperty(id) ? id : firstDeck();
     deck = D[deckId];
   }
   function practised() { return !KIOSK && !!rw('getPref', 'practiced.' + deckId); }
@@ -88,12 +102,18 @@
     var c = deck.copy, rb = $('relaxed');
     txt('story-1', c.story1);
     txt('payoff', c.payoff);
-    txt('deck-switch', c.switchTo);
-    txt('rep-switch', c.repSwitch);
+    txt('deck-switch', c.switchTo || '');
+    txt('rep-switch', c.repSwitch || '');
+    show('deck-switch', multiDeck() && !!c.switchTo);
+    if (!multiDeck()) show('rep-switch', false);
     if (rb) {
       rb.textContent = 'Relaxed timing: ' + (relaxed ? 'On' : 'Off');
       rb.setAttribute('aria-pressed', relaxed ? 'true' : 'false');
     }
+    // The title promises the round length: 90 s with Relaxed timing.
+    var secs = String(relaxed ? S.relaxedSeconds : S.seconds);
+    txt('brief-secs', secs);
+    txt('under-secs', secs);
     body('is-relaxed', relaxed);
     show('practice-again', practised());
     // The hero keeps its SVG placeholder when objects.js is missing.
@@ -107,8 +127,11 @@
     showView('brief');
     if (focus) park('brief-title');
   }
+  // Cycles to the next deck; a no-op with one deck (the buttons are hidden then anyway).
   function switchDeck() {
-    setDeck(deckId === 'wallet' ? 'mumbai' : 'wallet');
+    var ids = deckIds();
+    if (ids.length < 2) return;
+    setDeck(ids[(ids.indexOf(deckId) + 1) % ids.length]);
     rw('setPref', 'deck', deckId);
   }
   function toggleRelaxed() {
@@ -124,8 +147,6 @@
     return key;
   }
   function listWord(item) { var n = listOf(item).name; return /list$/i.test(n) ? n : n + ' list'; }
-  // Long domains keep their end, where lookalikes hide: first 10 + … + last 15.
-  function mid(v) { v = String(v); return v.length > 26 ? v.slice(0, 10) + '…' + v.slice(-15) : v; }
   function clone(id) { return $(id).content.firstElementChild.cloneNode(true); }
   function makeCard(item, n, of) {
     var el = clone('tpl-card'), list = listOf(item), rows = slot(el, 'rows'), objSlot = slot(el, 'obj');
@@ -140,15 +161,15 @@
       b.setAttribute('data-f', key);
       b.setAttribute('aria-label', list.fields[i][1] + ': ' + v);
       slot(li, 'lab').textContent = list.fields[i][1];
-      slot(li, 'val').textContent = key === 'site' ? mid(v) : v;
-      if (key === 'site') slot(li, 'val').classList.add('mono');
+      slot(li, 'val').textContent = v;
       rows.appendChild(li);
     }
     obj = ob('create', item.obj, { size: 'card' });
     if (!obj) { obj = document.createElement('div'); obj.className = 'obj'; obj.setAttribute('aria-hidden', 'true'); }
     objSlot.appendChild(obj);
     el._obj = obj;
-    // The coin is evidence too: tapping it toggles the Coin row.
+    // The 3D object is evidence too, for any list with an objField (Flag, Model): tapping it toggles that row.
+    // The row holds a short text description, which is also the object's accessible name.
     if (list.objField) {
       objSlot.setAttribute('data-f', list.objField);
       objSlot.setAttribute('role', 'button');
@@ -165,6 +186,8 @@
     slot(el, 'secs').textContent = secs;
   }
   function secsText(ms) { var s = Math.max(0, Math.ceil(ms / 1000)); return ' · 0:' + (s < 10 ? '0' : '') + s; }
+  // Untimed chip suffix (practice and relaxed). Kept short so it fits beside the list name and a 20/20 counter at 360 px.
+  var OPEN_SUFFIX = ' · open';
   function cardLabel(el, winMs) {
     var item = el._item, f = listOf(item).fields, s = 'Entry ' + el._n + ' of ' + el._of + ', ' + listWord(item) + '. ', i;
     for (i = 0; i < f.length; i++) s += f[i][1] + ': ' + item.f[f[i][0]] + '. ';
@@ -215,7 +238,7 @@
     }
     graceNext = false;
     winStart = elapsed; shownSecs = -1;
-    setChip(top, 'st-window', 'Pending', winLen ? secsText(winLen) : ' · open to challenge');
+    setChip(top, 'st-window', 'Pending', winLen ? secsText(winLen) : OPEN_SUFFIX);
     slot(top, 'rail').style.setProperty('--w', '1');
     cardLabel(top, winLen);
     ob('state', top._obj, 'pending');
@@ -310,7 +333,7 @@
         // The label is quoted, so any label reads (‘What it does’ cannot be lower-cased into the sentence).
         if (o.evidence === 'wrong') { lab = labelOf(item, item.bad); t.line = 'The problem was the “' + lab + '” line.'; t.ms = 2600; }
         return t;
-      case 'listed': return { tone: 'good', ms: 1300, title: 'Listed · ' + signed(P.letThrough) };
+      case 'listed': return { tone: 'good', ms: 1300, title: 'Verified · Listed · ' + signed(P.letThrough) };
       case 'autoListed': return { tone: 'good', ms: 1300, title: 'No challenge in time · Listed · ' + signed(P.autoListed) };
       case 'wrongChallenge':
         return { tone: 'bad', jurors: true, ms: 2600, line: why,
@@ -407,11 +430,14 @@
   // ---- Practice ----
   // Two untimed cards that cannot be failed: a wrong move springs the card back with a coach line.
   function coach(s) { txt('coach', s); }
-  function coachFacts() { return COACH[deckId] || COACH.wallet; }
+  function coachFacts() {
+    var p = deck.practice || [];
+    return COACH[deckId] || { fact: (p[0] && p[0].why) || '', good: '' };
+  }
   function practiceCard() {
     pT0 = now(); pHinted = false;
     coach(pStep === 0 ? 'Something on this entry breaks the policy. Tap the line that’s wrong.'
-                      : 'Every line checks out. Swipe right to let it through.');
+                      : 'Every line checks out. Swipe right to verify it.');
   }
   function sharp(item, key) { return key === item.bad || (item.also || []).indexOf(key) > -1; }
   function coachEv(card) {
@@ -421,18 +447,19 @@
                                                     : 'Look again: one line doesn’t match.');
   }
   function practiceFrame(t) {
-    var top = cards[0], row;
+    var top = cards[0], marks, i;
     if (pStep !== 0 || pHinted || !top || top._ev || t - pT0 < 4000) return;
     pHinted = true;
-    row = top.querySelector('.row[data-f="' + top._item.bad + '"]');
-    if (row) row.classList.add('hint');
+    // The row, and the 3D object when the faulty field is the objField.
+    marks = top.querySelectorAll('[data-f="' + top._item.bad + '"]');
+    for (i = 0; i < marks.length; i++) marks[i].classList.add('hint');
     coach('Hint: ' + coachFacts().fact);
   }
   function practiceDecide(top, action) {
     var item = top._item, c = coachFacts(), o, r, step = pStep;
     if (step === 0 && action !== 'challenge') { coach('Careful: that would list a fake. ' + c.fact); return false; }
     if (step === 1 && action === 'challenge') {
-      coach('Every line is true: ' + c.good + ' A wrong challenge costs your stake.');
+      coach((c.good ? 'Every line is true: ' + c.good : 'Every line is true.') + ' A wrong challenge costs your stake.');
       return false;
     }
     o = R.judge(item, action, top._ev);
@@ -447,7 +474,7 @@
       // The second card is live at once; its coach line follows once the first lesson has been read.
       later(function () { if (mode === 'practice' && pStep === 1) practiceCard(); }, 1800);
     } else {
-      coach('Nobody challenged it, so it joins the list. That’s how Curate works.');
+      coach('Nobody challenged it, so it joins the list. That’s Curate in a nutshell.');
       cards.shift(); idx++;
       endPractice(true);
     }
@@ -481,7 +508,7 @@
     if ($('toasts')) $('toasts').textContent = '';
     edges(0, 0);
   }
-  // Brief → (practice) → shift. Practice runs the first time per client, and every time in kiosk.
+  // Brief → (practice) → round. Practice runs the first time per deck, and every time in kiosk.
   function startFlow(forcePractice) {
     freshPlay();
     total = relaxed ? S.relaxedSeconds : S.seconds;
@@ -504,7 +531,7 @@
     said30 = said10 = rushed = false;
     hudScore(0); hudClock(total * 1000);
     preloadThumbs();
-    banner('Shift starts · ' + total + ' s', 600, function () {
+    banner('Go · ' + total + ' s', 600, function () {
       // The clock starts when the first real card lands; the shift counts from here.
       mode = 'shift';
       info = rw('startShift', deckId) || { counted: false, shiftNo: 0, code: null };
@@ -525,9 +552,9 @@
     fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
     hudScore(score.raw);
     if (by === 'done') {
-      if (relaxed) toast({ tone: 'info', ms: 1300, title: 'Shift done early' });
-      else if (score.mistakes <= S.points.bonusMaxMistakes) toast({ tone: 'good', ms: 1300, title: 'Shift done early · ' + signed(fb.timeBonus) + ' time bonus' });
-      else toast({ tone: 'info', ms: 2600, title: 'Shift done early', line: 'Time bonus needs ' + S.points.bonusMaxMistakes + ' mistakes or fewer.' });
+      if (relaxed) toast({ tone: 'info', ms: 1300, title: 'All done early' });
+      else if (score.mistakes <= S.points.bonusMaxMistakes) toast({ tone: 'good', ms: 1300, title: 'All done early · ' + signed(fb.timeBonus) + ' time bonus' });
+      else toast({ tone: 'info', ms: 2600, title: 'All done early', line: 'Time bonus needs ' + S.points.bonusMaxMistakes + ' mistakes or fewer.' });
       later(function () { handOff(by); }, 1300);
     } else if (by === 'time') {
       if (cards[0]) cards[0].setAttribute('inert', '');
@@ -543,16 +570,24 @@
                 misses: s.misses, at: Date.now() };
     freshPlay();
     mode = 'ended';
-    say('Shift over. ' + fmt(s.final) + ' points.');
+    say('Round over. ' + fmt(s.final) + ' points.');
     if (Rw()) Rw().finishShift(sum); else goBrief(true);
   }
   // Kiosk "next curator", and a clean slate for debugging: back to the brief with fresh state.
   function reset() {
     freshPlay();
     mode = 'brief'; score = null; info = null; run = []; idx = 0;
-    if (KIOSK) { relaxed = false; setDeck('wallet'); } else loadPrefs();
+    if (KIOSK) { relaxed = false; setDeck(firstDeck()); } else loadPrefs();
     heroDeck = '';
+    closeHow();
     goBrief(true);
+  }
+  // A How it works sheet left open on the report or ticket must not cover the next visitor's title screen.
+  // The open attribute, not .open: where showModal is missing the shell sets the attribute only.
+  function closeHow() {
+    var h = $('how');
+    if (!h || !h.hasAttribute('open')) return;
+    if (h.close) { try { h.close(); } catch (e) { h.removeAttribute('open'); } } else h.removeAttribute('open');
   }
 
   // ---- Loop ----
@@ -582,7 +617,7 @@
     if (!said10 && left <= 10000) { said10 = true; say('10 seconds left'); }
     if (!relaxed && !rushed && elapsed >= S.rushAt * 1000) {
       rushed = true;
-      toast({ tone: 'info', ms: 2200, title: 'Rush hour · ' + (total - S.rushAt) + ' s left · entries close faster' });
+      toast({ tone: 'info', ms: 2200, title: 'Final ' + (total - S.rushAt) + ' s · entries close faster' });
     }
     if (left <= 0) { endShift('time'); return; }
     if (!top || !winLen) return;
@@ -594,7 +629,7 @@
   }
   // ---- Gestures ----
   // Pointer Events on #stack. Taps are left to the native click (so rows stay real buttons); a drag starts
-  // past 8 px of mostly horizontal travel and captures the pointer. Move work is batched into the rAF loop.
+  // past 8 px of mostly horizontal travel and captures the pointer. Move handling is batched into the rAF loop.
   function canPlay() { return (mode === 'shift' || mode === 'practice') && !paused && !explainOpen; }
   function onDown(e) {
     var top = cards[0], t = now();
@@ -673,7 +708,7 @@
   function contest(c, on) {
     if (on) setChip(c, 'st-contested', 'Challenging…', '');
     else {
-      setChip(c, 'st-window', 'Pending', winLen && mode === 'shift' ? secsText(winLen - (elapsed - winStart)) : ' · open to challenge');
+      setChip(c, 'st-window', 'Pending', winLen && mode === 'shift' ? secsText(winLen - (elapsed - winStart)) : OPEN_SUFFIX);
       shownSecs = -1;
     }
     ob('state', c._obj, on ? 'challenge' : 'pending');
@@ -825,7 +860,7 @@
 
   // ---- Boot ----
   function loadPrefs() {
-    setDeck(rw('getPref', 'deck') || 'wallet');
+    setDeck(rw('getPref', 'deck'));
     relaxed = !!rw('getPref', 'relaxed');
   }
   function showErr() {

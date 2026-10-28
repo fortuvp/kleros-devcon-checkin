@@ -1,142 +1,186 @@
-// Curate game content: the two fictional clients, their lists and every entry. Data only: rules.js deals the
-// shift, game.js shows it. Real project names appear only as entry text. Domains are plain text, never links.
-// Re-check every domain and ticker before merge, and again the week before the event.
-// `node scripts/curate-check.js` validates this file (ids, fields, tells, lengths, shapes and marks).
+// Curate game content: one fictional travel app, its three lists and every entry. Data only: rules.js deals
+// the round, game.js shows it. Facts (capitals, flags, locations) were checked by hand; re-check before merge.
+// `node scripts/curate-check.js` validates this file (ids, fields, tells, lengths, shapes, flags, one odd field).
 (function () {
   // ---- Lists ----
-  var WALLET = {
-    sites: { name: 'Websites', policy: 'Policy: official website, every line true. No lookalikes.',
-             fields: [['app', 'App'], ['site', 'Website'], ['does', 'What it does']] },
-    tokens: { name: 'Tokens', policy: 'Policy: coin, name and ticker must be the same token. No ads.',
-              fields: [['coin', 'Coin'], ['name', 'Name'], ['ticker', 'Ticker']], objField: 'coin' },
-    labels: { name: 'Contract labels', policy: 'Policy: label, project and website must match. No ads.',
-              fields: [['label', 'Label'], ['project', 'Project'], ['site', 'Website']] }
+  var LISTS = {
+    countries: { name: 'Countries', policy: 'Policy: flag, country and capital must all match.',
+                 fields: [['flag', 'Flag'], ['country', 'Country'], ['capital', 'Capital']], objField: 'flag' },
+    landmarks: { name: 'Landmarks', policy: 'Policy: model, name and location must all match.',
+                 fields: [['model', 'Model'], ['name', 'Name'], ['where', 'Location']], objField: 'model' },
+    mumbai: { name: 'Mumbai', policy: 'Policy: real Mumbai sights only. City and type must be true.',
+              fields: [['place', 'Place'], ['city', 'City'], ['type', 'Type']] }
   };
-  var MUMBAI = {
-    city: { name: 'City list', policy: 'Policy: real Mumbai sights only. City and type must be true.',
-            fields: [['place', 'Place'], ['city', 'City'], ['type', 'Type']] }
+
+  // ---- Flags ----
+  // [spec for CurateObjects._flag, words for the Flag row]. The words read on any phone and to screen readers.
+  // Kinds: v3 (hoist to fly), h3 (top to bottom, optional ratio), h2, nordic (field, cross, optional inner),
+  // disc (field, disc, optional off: fraction of the width, negative towards the hoist), cross (Swiss),
+  // h3wheel (India). Colours follow each country’s official specification as #rrggbb; black is lifted to
+  // #1a1a1a so it still reads against the dark stage.
+  var FLAGS = {
+    it: [{ kind: 'v3', c: ['#009246', '#ffffff', '#ce2b37'] }, 'Green, white, red'],
+    fr: [{ kind: 'v3', c: ['#0055a4', '#ffffff', '#ef4135'] }, 'Blue, white, red'],
+    ie: [{ kind: 'v3', c: ['#169b62', '#ffffff', '#ff883e'] }, 'Green, white, orange'],
+    be: [{ kind: 'v3', c: ['#1a1a1a', '#fdda24', '#ef3340'] }, 'Black, yellow, red'],
+    ng: [{ kind: 'v3', c: ['#008751', '#ffffff', '#008751'] }, 'Green, white, green'],
+    de: [{ kind: 'h3', c: ['#1a1a1a', '#dd0000', '#ffce00'] }, 'Black, red, gold'],
+    at: [{ kind: 'h3', c: ['#c8102e', '#ffffff', '#c8102e'] }, 'Red, white, red'],
+    hu: [{ kind: 'h3', c: ['#ce2939', '#ffffff', '#477050'] }, 'Red, white, green'],
+    ee: [{ kind: 'h3', c: ['#0072ce', '#1a1a1a', '#ffffff'] }, 'Blue, black, white'],
+    co: [{ kind: 'h3', c: ['#fcd116', '#003893', '#ce1126'], ratio: [2, 1, 1] }, 'Yellow, blue, red'],
+    pl: [{ kind: 'h2', c: ['#ffffff', '#dc143c'] }, 'White over red'],
+    mc: [{ kind: 'h2', c: ['#ce1126', '#ffffff'] }, 'Red over white'],
+    se: [{ kind: 'nordic', c: ['#006aa7', '#fecc02'] }, 'Blue, yellow cross'],
+    fi: [{ kind: 'nordic', c: ['#ffffff', '#002f6c'] }, 'White, blue cross'],
+    dk: [{ kind: 'nordic', c: ['#c8102e', '#ffffff'] }, 'Red, white cross'],
+    no: [{ kind: 'nordic', c: ['#ba0c2f', '#ffffff'], inner: '#00205b' }, 'Red, blue cross edged white'],
+    is: [{ kind: 'nordic', c: ['#02529c', '#ffffff'], inner: '#dc1e35' }, 'Blue, red cross edged white'],
+    jp: [{ kind: 'disc', c: ['#ffffff', '#bc002d'] }, 'White, red disc'],
+    bd: [{ kind: 'disc', c: ['#006a4e', '#f42a41'], off: -0.05 }, 'Green, red disc'],
+    ch: [{ kind: 'cross', c: ['#da291c', '#ffffff'] }, 'Red, white cross'],
+    'in': [{ kind: 'h3wheel', c: ['#ff9933', '#ffffff', '#138808', '#000080'] }, 'Saffron, white, green, navy wheel']
+  };
+
+  // ---- Landmark models ----
+  // [material colour, words for the Model row]. Each shape is an original simplified silhouette (objects.js).
+  var MODELS = {
+    eiffel: ['#8a6a4f', 'Iron lattice tower'],
+    pisa: ['#efe6d2', 'Leaning white tower'],
+    bigben: ['#c9a66b', 'Gothic clock tower'],
+    liberty: ['#5fae9a', 'Green statue with a torch'],
+    tajmahal: ['#f1ecff', 'White dome, four minarets'],
+    opera: ['#f4f1ea', 'White shell-shaped roofs'],
+    colosseum: ['#d4a373', 'Oval arena of arches'],
+    burj: ['#a9c4d8', 'Very tall stepped spire'],
+    goldengate: ['#c0362c', 'Red suspension bridge'],
+    christ: ['#e6e2d8', 'Statue, arms spread wide'],
+    pyramid: ['#d9b26f', 'Stone pyramid'],
+    sagrada: ['#c8b48a', 'Basilica with tall spires']
   };
 
   // ---- Builders ----
   // Rows keep the file small. Each row becomes a full item:
-  // { id, list, twin, lvl, obj: { shape, color, mark }, f: { the list’s 3 fields }, bad, also, tell, fix, why }
-  // `bad` is the faulty field (null for a good entry); `also` lists other fields accepted as sharp evidence.
+  // { id, list, twin, lvl, obj: { shape, color?, flag? }, f: { the list’s 3 fields }, bad, also, tell, fix, why }
+  // `bad` is the one odd field (null for a good entry): the other two always agree with each other.
   // `tell` is 'card' when the card plus the policy show the flaw, 'know' when it takes knowing the fact.
-  function item(list, fields, r, obj, lvl, at) {
-    var f = {}, it, i;
-    for (i = 0; i < 3; i++) f[fields[i][0]] = r[at + i];
-    it = { id: r[0], list: list, twin: r[1] || null, lvl: lvl, obj: obj, f: f,
-           bad: r[at + 4] || null, also: r[at + 7] || [], why: r[at + 3] };
-    if (it.bad) { it.tell = r[at + 5]; it.fix = r[at + 6]; }
+  function item(list, r, f, obj, lvl, at) {
+    var it = { id: r[0], list: list, twin: r[1] || null, lvl: lvl, obj: obj, f: f,
+               bad: r[at + 1] || null, also: [], why: r[at] };
+    if (it.bad) { it.tell = r[at + 2]; it.fix = r[at + 3]; }
     return it;
   }
-  // Wallet rows: [id, twin, colour, mark, field 1, field 2, field 3, why, bad, tell, fix, also]
-  function wallet(list, shape, lvl, rows) {
+  // Country rows: [id, twin, lvl, drawn flag, country, capital, why, bad, tell, fix]
+  // The Flag row always describes the flag that is drawn, so a wrong flag shows on the card.
+  function country(rows) {
     return rows.map(function (r) {
-      return item(list, WALLET[list].fields, r, { shape: shape, color: r[2], mark: r[3] }, lvl, 4);
+      var fl = FLAGS[r[3]];
+      return item('countries', r, { flag: fl[1], country: r[4], capital: r[5] }, { shape: 'flag', flag: fl[0] }, r[2], 6);
     });
   }
-  // City rows: [id, twin, shape, colour, lvl, place, city, type, why, bad, tell, fix]
+  // Landmark rows: [id, twin, lvl, drawn model, name, location, why, bad, tell, fix]
+  function landmark(rows) {
+    return rows.map(function (r) {
+      var m = MODELS[r[3]];
+      return item('landmarks', r, { model: m[1], name: r[4], where: r[5] }, { shape: r[3], color: m[0] }, r[2], 6);
+    });
+  }
+  // Mumbai rows: [id, twin, shape, colour, lvl, place, city, type, why, bad, tell, fix]
   // The landmark always has the place’s true shape, so a wrong type can be seen on the card.
   function city(rows) {
     return rows.map(function (r) {
-      return item('city', MUMBAI.city.fields, r, { shape: r[2], color: r[3] }, r[4], 5);
+      return item('mumbai', r, { place: r[5], city: r[6], type: r[7] }, { shape: r[2], color: r[3] }, r[4], 8);
     });
   }
 
-  // ---- Wallet · Websites (shield; 9 good, 7 fake) ----
-  var SITES = wallet('sites', 'shield', 1, [
-    ['site-opensea', 'opensea-s', '#2081e2', 'O', 'OpenSea', 'opensea.io', 'NFT marketplace', 'OpenSea’s real site.'],
-    ['site-uniswap', 'uniswap-s', '#ff3fa4', 'U', 'Uniswap', 'app.uniswap.org', 'Token swaps', 'The real Uniswap app.'],
-    ['site-aave', 'aave-s', '#9a7bff', 'A', 'Aave', 'app.aave.com', 'Lending', 'The real Aave app.'],
-    ['site-ens', null, '#5298ff', 'E', 'ENS', 'app.ens.domains', '.eth names', 'The real ENS app.'],
-    ['site-kleros', 'kleros-s', '#9013fe', 'kleros', 'Kleros', 'kleros.io', 'Dispute resolution', 'Kleros’ real site.'],
-    ['site-devcon', 'devcon-s', '#f5a524', 'D', 'Devcon', 'devcon.org', 'Ethereum conference',
-      'Devcon’s real site. You’re here.'],
-    ['site-etherscan', 'etherscan-s', '#5b8def', 'E', 'Etherscan', 'etherscan.io', 'Block explorer',
-      'Etherscan’s real site.'],
-    ['site-metamask', 'metamask-s', '#f6851b', 'M', 'MetaMask', 'metamask.io', 'Wallet', 'MetaMask’s real site.'],
-    ['site-safe', null, '#2fd47a', 'S', 'Safe', 'app.safe.global', 'Multisig wallet', 'The real Safe app.'],
-    ['site-opensea-bad', 'opensea-s', '#2081e2', 'O', 'OpenSea', '0pensea.io', 'NFT marketplace',
-      'That’s a zero, not an O. OpenSea is opensea.io.', 'site', 'card', 'opensea.io'],
-    ['site-uniswap-bad', 'uniswap-s', '#ff3fa4', 'U', 'Uniswap', 'uniswap.org.claim-now.xyz', 'Token swaps',
-      'Read the end: this site is claim-now.xyz, not Uniswap.', 'site', 'card', 'app.uniswap.org'],
-    ['site-aave-bad', 'aave-s', '#9a7bff', 'A', 'Aave', 'aave-app.co', 'Lending',
-      'Not Aave’s domain. The Aave app is app.aave.com.', 'site', 'know', 'app.aave.com'],
-    ['site-devcon-bad', 'devcon-s', '#f5a524', 'D', 'Devcon', 'devcon-tickets.xyz', 'Ethereum conference',
-      'Devcon is devcon.org. Fake ticket sites are a classic scam.', 'site', 'card', 'devcon.org'],
-    ['site-metamask-bad', 'metamask-s', '#f6851b', 'M', 'MetaMask', 'metamask-support.help', 'Wallet',
-      'MetaMask is metamask.io. Fake support sites steal seed phrases.', 'site', 'know', 'metamask.io'],
-    ['site-kleros-bad', 'kleros-s', '#9013fe', 'kleros', 'Kleros', 'klerros.io', 'Dispute resolution',
-      'One r too many. Kleros is kleros.io.', 'site', 'card', 'kleros.io'],
-    ['site-etherscan-bad', 'etherscan-s', '#5b8def', 'E', 'Etherscan', 'etherscan.io', 'Crypto wallet',
-      'Etherscan is a block explorer, not a wallet.', 'does', 'know', 'Block explorer']
+  // ---- Countries (waving flag; the flag is the `flag` field and can be tapped; 20 good, 10 fake) ----
+  // Left out on purpose: capitals in dispute or transition, and politically sensitive entries.
+  var COUNTRIES = country([
+    ['c-it', null, 1, 'it', 'Italy', 'Rome', 'Italy’s tricolour and capital. All three match.'],
+    ['c-fr', null, 1, 'fr', 'France', 'Paris', 'France’s tricolour and capital. All three match.'],
+    ['c-ie', 'ie', 1, 'ie', 'Ireland', 'Dublin', 'Ireland’s green, white and orange. All three match.'],
+    ['c-be', 'be', 2, 'be', 'Belgium', 'Brussels', 'Belgium’s upright black, yellow, red. All three match.'],
+    ['c-ng', 'ng', 2, 'ng', 'Nigeria', 'Abuja', 'Abuja has been Nigeria’s capital since 1991.'],
+    ['c-de', null, 1, 'de', 'Germany', 'Berlin', 'Germany’s black, red and gold. All three match.'],
+    ['c-at', null, 2, 'at', 'Austria', 'Vienna', 'Austria’s red, white, red. All three match.'],
+    ['c-hu', null, 2, 'hu', 'Hungary', 'Budapest', 'Hungary’s red, white, green. All three match.'],
+    ['c-ee', null, 2, 'ee', 'Estonia', 'Tallinn', 'Estonia’s blue, black, white. All three match.'],
+    ['c-co', 'co', 2, 'co', 'Colombia', 'Bogotá', 'Colombia’s flag has a double-height yellow band.'],
+    ['c-pl', 'pl', 1, 'pl', 'Poland', 'Warsaw', 'Poland’s white over red. All three match.'],
+    ['c-se', 'se', 1, 'se', 'Sweden', 'Stockholm', 'Sweden’s yellow cross on blue. All three match.'],
+    ['c-fi', null, 2, 'fi', 'Finland', 'Helsinki', 'Finland’s blue cross on white. All three match.'],
+    ['c-dk', null, 2, 'dk', 'Denmark', 'Copenhagen', 'Denmark’s white cross on red. All three match.'],
+    ['c-no', null, 2, 'no', 'Norway', 'Oslo', 'Norway’s blue cross edged in white. All three match.'],
+    ['c-is', null, 2, 'is', 'Iceland', 'Reykjavík', 'Iceland’s red cross edged in white. All three match.'],
+    ['c-jp', 'jp', 1, 'jp', 'Japan', 'Tokyo', 'Japan’s red disc on white. All three match.'],
+    ['c-bd', null, 2, 'bd', 'Bangladesh', 'Dhaka', 'Bangladesh’s red disc on green. All three match.'],
+    ['c-ch', 'ch', 1, 'ch', 'Switzerland', 'Bern', 'Bern is Switzerland’s federal city. All three match.'],
+    ['c-in', null, 1, 'in', 'India', 'New Delhi', 'India’s tricolour and capital. All three match.'],
+    ['c-ch-bad', 'ch', 1, 'ch', 'Switzerland', 'Zurich', 'Zurich is the biggest city. The capital is Bern.',
+      'capital', 'know', 'Bern'],
+    ['c-ng-bad', 'ng', 2, 'ng', 'Nigeria', 'Lagos', 'Lagos is the biggest city. The capital is Abuja.',
+      'capital', 'know', 'Abuja'],
+    ['c-jp-bad', 'jp', 1, 'jp', 'Japan', 'Kyoto', 'Kyoto was the old capital. Today it’s Tokyo.',
+      'capital', 'know', 'Tokyo'],
+    ['c-co-bad', 'co', 2, 'co', 'Colombia', 'Medellín', 'Medellín is a big city, but the capital is Bogotá.',
+      'capital', 'know', 'Bogotá'],
+    ['c-pl-bad', 'pl', 2, 'pl', 'Poland', 'Kraków', 'Kraków was the old royal capital. Today it’s Warsaw.',
+      'capital', 'know', 'Warsaw'],
+    ['c-se-bad', 'se', 1, 'fi', 'Sweden', 'Stockholm', 'That’s Finland’s flag. Sweden’s cross is yellow on blue.',
+      'flag', 'card', 'Blue, yellow cross'],
+    ['c-ie-bad', 'ie', 1, 'it', 'Ireland', 'Dublin', 'That’s Italy’s flag. Ireland’s has orange, not red.',
+      'flag', 'card', 'Green, white, orange'],
+    ['c-pl-flag-bad', 'pl', 1, 'mc', 'Poland', 'Warsaw', 'Upside down: Poland’s flag is white over red.',
+      'flag', 'card', 'White over red'],
+    ['c-jp-name-bad', 'jp', 1, 'jp', 'China', 'Tokyo', 'Red disc on white, capital Tokyo: that’s Japan.',
+      'country', 'card', 'Japan'],
+    ['c-be-bad', 'be', 2, 'de', 'Belgium', 'Brussels', 'That’s Germany’s flag. Belgium’s stripes stand upright.',
+      'flag', 'card', 'Black, yellow, red']
   ]);
 
-  // ---- Wallet · Tokens (coin; the coin is the `coin` field and can be tapped; 11 good, 6 fake) ----
-  // The Coin row describes the coin in words, so it reads on any phone and to screen readers.
-  var TOKENS = wallet('tokens', 'coin', 2, [
-    ['tok-uni', 'uni', '#ff3fa4', 'U', 'Pink, letter U', 'Uniswap', 'UNI', 'Coin, name and ticker all match Uniswap.'],
-    ['tok-link', 'link', '#2a5ada', 'hex', 'Blue, hexagon', 'Chainlink', 'LINK',
-      'Chainlink’s ticker is LINK. All three match.'],
-    ['tok-usdc', 'usdc', '#2775ca', 'dollar', 'Blue, dollar sign', 'USD Coin', 'USDC', 'USD Coin is USDC. All three match.'],
-    ['tok-dai', null, '#f5ac37', 'diamond', 'Amber, diamond', 'Dai', 'DAI', 'Dai is DAI. All three match.'],
-    ['tok-weth', 'weth', '#8c93a8', 'eth', 'Silver, Ether sign Ξ', 'Wrapped Ether', 'WETH',
-      'WETH wraps Ether, hence the Ξ coin.'],
-    ['tok-pnk', null, '#9013fe', 'kleros', 'Purple, Kleros mark', 'Kleros', 'PNK',
-      'Kleros’ token is PNK, after the pinakion, a juror’s ticket.'],
-    ['tok-gno', null, '#1fb58f', 'G', 'Green, letter G', 'Gnosis', 'GNO', 'Gnosis is GNO. All three match.'],
-    ['tok-ldo', null, '#5ab0ff', 'L', 'Sky blue, letter L', 'Lido DAO', 'LDO', 'Lido DAO is LDO. All three match.'],
-    ['tok-aave', null, '#9a7bff', 'A', 'Lilac, letter A', 'Aave', 'AAVE', 'Aave’s ticker is AAVE. All three match.'],
-    ['tok-ens', null, '#5298ff', 'E', 'Blue, letter E', 'ENS', 'ENS', 'ENS is ENS. All three match.'],
-    ['tok-arb', 'arb', '#28a0f0', 'A', 'Azure, letter A', 'Arbitrum', 'ARB', 'Arbitrum is ARB. All three match.'],
-    ['tok-usdt-bad', 'usdc', '#2775ca', 'dollar', 'Blue, dollar sign', 'USD Coin', 'USDT',
-      'USD Coin is USDC. USDT is Tether’s ticker.', 'ticker', 'know', 'USDC'],
-    ['tok-arb-bad', 'arb', '#28a0f0', 'A', 'Azure, letter A', 'Arbitrum', 'OP',
-      'Arbitrum is ARB. OP is Optimism’s ticker.', 'ticker', 'know', 'ARB'],
-    ['tok-weth-bad', 'weth', '#f7931a', 'btc', 'Orange, Bitcoin sign', 'Wrapped Ether', 'WETH',
-      'A Bitcoin coin on an Ether entry. WETH’s coin carries Ξ.', 'coin', 'card', 'Silver, Ether sign Ξ'],
-    ['tok-bal-bad', null, '#4a4a6a', 'B', 'Slate, letter B', 'Balancer', 'CRV',
-      'Balancer is BAL. CRV is Curve’s ticker.', 'ticker', 'know', 'BAL'],
-    ['tok-spam-bad', 'uni', '#ff3fa4', 'U', 'Pink, letter U', 'Claim UNI at uni-bonus.xyz', 'UNI',
-      'A token name that advertises a website is a spam trick.', 'name', 'card', 'Uniswap'],
-    ['tok-link-bad', 'link', '#ff3fa4', 'U', 'Pink, letter U', 'Chainlink', 'LINK',
-      'That’s a pink U coin. Chainlink’s coin is the blue hexagon.', 'coin', 'card', 'Blue, hexagon']
+  // ---- Landmarks (3D model; the model is the `model` field and can be tapped; 12 good, 10 fake) ----
+  // Twins follow the claimed landmark, so one round never lists the same name twice.
+  var LANDMARKS = landmark([
+    ['l-eiffel', 'eiffel', 1, 'eiffel', 'Eiffel Tower', 'Paris, France', 'Model, name and location all match.'],
+    ['l-pisa', 'pisa', 1, 'pisa', 'Leaning Tower of Pisa', 'Pisa, Italy', 'It leans, and it’s in Pisa. All three match.'],
+    ['l-bigben', null, 1, 'bigben', 'Big Ben', 'London, UK', 'Model, name and location all match.'],
+    ['l-liberty', null, 1, 'liberty', 'Statue of Liberty', 'New York, USA', 'Model, name and location all match.'],
+    ['l-taj', 'taj', 1, 'tajmahal', 'Taj Mahal', 'Agra, India', 'The Taj Mahal stands in Agra. All three match.'],
+    ['l-opera', null, 1, 'opera', 'Sydney Opera House', 'Sydney, Australia', 'Model, name and location all match.'],
+    ['l-colosseum', 'colosseum', 1, 'colosseum', 'Colosseum', 'Rome, Italy', 'Model, name and location all match.'],
+    ['l-burj', 'burj', 1, 'burj', 'Burj Khalifa', 'Dubai, UAE', 'Model, name and location all match.'],
+    ['l-goldengate', 'goldengate', 1, 'goldengate', 'Golden Gate Bridge', 'San Francisco, USA',
+      'Model, name and location all match.'],
+    ['l-christ', 'christ', 1, 'christ', 'Christ the Redeemer', 'Rio de Janeiro, Brazil',
+      'It overlooks Rio from Corcovado. All three match.'],
+    ['l-pyramid', 'pyramid', 1, 'pyramid', 'Great Pyramid of Giza', 'Giza, Egypt', 'Model, name and location all match.'],
+    ['l-sagrada', 'sagrada', 1, 'sagrada', 'Sagrada Família', 'Barcelona, Spain', 'Gaudí’s basilica in Barcelona.'],
+    ['l-taj-bad', 'taj', 1, 'tajmahal', 'Taj Mahal', 'Mumbai, India', 'The Taj Mahal is in Agra, not Mumbai.',
+      'where', 'know', 'Agra, India'],
+    ['l-burj-bad', 'burj', 1, 'burj', 'Burj Khalifa', 'Abu Dhabi, UAE', 'The Burj Khalifa is in Dubai, not Abu Dhabi.',
+      'where', 'know', 'Dubai, UAE'],
+    ['l-christ-bad', 'christ', 1, 'christ', 'Christ the Redeemer', 'Lisbon, Portugal',
+      'Near Lisbon stands a cousin, Cristo Rei. The original is in Rio.', 'where', 'know', 'Rio de Janeiro, Brazil'],
+    ['l-pisa-bad', 'pisa', 1, 'pisa', 'Leaning Tower of Pisa', 'Rome, Italy', 'The clue is in the name: it’s in Pisa.',
+      'where', 'know', 'Pisa, Italy'],
+    ['l-eiffel-bad', 'eiffel', 1, 'eiffel', 'Eiffel Tower', 'Berlin, Germany', 'The Eiffel Tower is in Paris, not Berlin.',
+      'where', 'know', 'Paris, France'],
+    ['l-brooklyn-bad', 'goldengate', 1, 'goldengate', 'Brooklyn Bridge', 'San Francisco, USA',
+      'A red bridge in San Francisco: that’s the Golden Gate.', 'name', 'card', 'Golden Gate Bridge'],
+    ['l-bigben-bad', 'eiffel', 1, 'bigben', 'Eiffel Tower', 'Paris, France',
+      'Look at the model: that’s Big Ben, not the Eiffel Tower.', 'model', 'card', 'Iron lattice tower'],
+    ['l-pyramid-bad', 'colosseum', 1, 'pyramid', 'Colosseum', 'Giza, Egypt', 'A pyramid in Giza is no Colosseum.',
+      'name', 'card', 'Great Pyramid of Giza'],
+    ['l-liberty-bad', 'christ', 1, 'liberty', 'Christ the Redeemer', 'Rio de Janeiro, Brazil',
+      'Look at the model: that’s the Statue of Liberty’s torch.', 'model', 'card', 'Statue, arms spread wide'],
+    ['l-sagrada-bad', 'taj', 1, 'sagrada', 'Taj Mahal', 'Barcelona, Spain',
+      'Spires in Barcelona: that’s the Sagrada Família.', 'name', 'card', 'Sagrada Família']
   ]);
 
-  // ---- Wallet · Contract labels (contract block with a hanging tag; 8 good, 6 fake) ----
-  // The tag’s colour and mark are the label’s project.
-  var LABELS = wallet('labels', 'tag', 3, [
-    ['lab-router', 'router', '#ff3fa4', 'U', 'Uniswap V3: Router', 'Uniswap', 'uniswap.org',
-      'Label, project and website all agree.'],
-    ['lab-pool', 'pool', '#9a7bff', 'A', 'Aave V3: Pool', 'Aave', 'aave.com', 'Label, project and website all agree.'],
-    ['lab-court', null, '#9013fe', 'kleros', 'Kleros: Court', 'Kleros', 'kleros.io',
-      'The court that rules on Curate challenges.'],
-    ['lab-ens', 'ens-l', '#5298ff', 'E', 'ENS: Registry', 'ENS', 'ens.domains', 'ENS lives at ens.domains. All three agree.'],
-    ['lab-steth', 'steth', '#5ab0ff', 'L', 'Lido: stETH Token', 'Lido', 'lido.fi', 'Lido’s site is lido.fi. All three agree.'],
-    ['lab-safe', null, '#2fd47a', 'S', 'Safe: Proxy Factory', 'Safe', 'safe.global', 'Label, project and website all agree.'],
-    ['lab-seaport', 'seaport', '#2081e2', 'O', 'OpenSea: Seaport', 'OpenSea', 'opensea.io',
-      'Seaport is OpenSea’s marketplace contract.'],
-    ['lab-feed', null, '#2a5ada', 'hex', 'Chainlink: ETH/USD Feed', 'Chainlink', 'chain.link',
-      'Chainlink’s site is chain.link. All three agree.'],
-    ['lab-router-bad', 'router', '#ff3fa4', 'U', 'Uniswap V3: Router', 'Uniswap', 'uniswap-rewards.app',
-      'That’s not Uniswap’s site. “Rewards” domains are a phishing classic.', 'site', 'card', 'uniswap.org'],
-    ['lab-pool-bad', 'pool', '#9a7bff', 'A', 'Aave V3: Pool', 'Compound', 'aave.com',
-      'Label and website say Aave. The project says Compound.', 'project', 'card', 'Aave'],
-    ['lab-ad-bad', null, '#ff5a78', 'bang', 'FREE ETH: Claim now', 'Unknown', 'claim-eth.gift',
-      'A label says what a contract is. Ads and promises aren’t labels.', 'label', 'card', 'A plain contract name',
-      ['site']],
-    ['lab-ens-bad', 'ens-l', '#5298ff', 'E', 'ENS: Registry', 'ENS', 'ens-domains.net',
-      'ENS lives at ens.domains, not ens-domains.net.', 'site', 'know', 'ens.domains'],
-    ['lab-steth-bad', 'steth', '#5ab0ff', 'L', 'Lido: stETH Token', 'Lido', 'lido-staking.org',
-      'Lido’s site is lido.fi.', 'site', 'know', 'lido.fi'],
-    ['lab-seaport-bad', 'seaport', '#2081e2', 'O', 'OpenSea: Seaport', 'Blur', 'opensea.io',
-      'Label and website say OpenSea. Seaport isn’t Blur’s.', 'project', 'card', 'OpenSea']
-  ]);
-
-  // ---- Mumbai · City list (landmark miniature; 18 good, 15 fake) ----
+  // ---- Mumbai (landmark miniature; 18 good, 15 fake) ----
   // Left out on purpose: Taj Mahal (the Taj Mahal Palace hotel is in Mumbai), Elephanta (Raigad district).
-  var CITY = city([
+  // Unchanged from v1 apart from the list id.
+  var MUMBAI_ITEMS = city([
     ['m-gateway', 'gateway', 'arch', '#e8c79a', 1, 'Gateway of India', 'Mumbai', 'Monument',
       'Mumbai’s 1924 waterfront arch.'],
     ['m-csmt', null, 'station', '#d9b48a', 1, 'Chhatrapati Shivaji Maharaj Terminus', 'Mumbai', 'Railway station',
@@ -201,62 +245,36 @@
       'It’s a convention centre. Devcon VIII is inside it.', 'type', 'know', 'Convention centre']
   ]);
 
-  // ---- Decks ----
-  // Practice cards live apart and never enter a shift: the first breaks the policy, the second is good.
+  // ---- Deck ----
+  // One mixed deck. Practice cards live apart and never enter a round: the first breaks the policy, the
+  // second is good. `client` is an internal key; the visible word is the app’s name.
   window.CURATE_DECKS = {
-    wallet: {
-      id: 'wallet', client: 'Wallet app',
+    travel: {
+      id: 'travel', client: 'Travel app',
       copy: {
-        story1: 'A wallet app shows this list to its users. Fakes keep slipping in.',
-        payoff: 'Clean list: safe users, and the app keeps earning.',
-        switchTo: 'Not into crypto? Play the Mumbai city list',
-        repSwitch: 'Switch to the Mumbai city list',
-        quotes: ['“Our users only saw real entries today. Same time tomorrow?”',
-                 '“A few fakes got through. We filed removal requests to take them down.”',
-                 '“Users swapped into fakes. We’re pausing the list until it’s clean.”'],   // trust ≥ 90, 70–89, < 70
-        quoteBy: 'Wallet app (fictional client)'
+        story1: 'A travel app shows these lists to millions of travellers. Scammers keep sneaking fakes in.',
+        payoff: 'Clean lists keep travellers safe, and the app keeps earning.',
+        quotes: ['“Travellers only saw real entries today. Come back tomorrow?”',
+                 '“A few fakes got through. We filed removal requests.”',
+                 '“Travellers went to fake places. We’re pausing the lists until they’re clean.”'],   // trust ≥ 90, 70–89, < 70
+        quoteBy: 'Travel app (fictional)',
+        // Report payoff by the same trust bands; rewards.js appends the bounty sentence.
+        payoffs: ['{client} kept {trust}% of travellers’ trust, so they keep using it and it keeps earning.',
+                  '{client} kept {trust}% of travellers’ trust. Each fake that got listed cost it travellers.',
+                  '{client} lost travellers’ trust (down to {trust}%): fakes reached them, and it stops earning until the lists are clean.']
       },
-      hero: [{ shape: 'tag', color: '#27cdfe', mark: 'hex' }, { shape: 'coin', color: '#9013fe', mark: 'kleros' },
-             { shape: 'shield', color: '#65dc7f', mark: 'S' }],
-      lists: WALLET,
-      easy: 'sites', late: 'labels',
-      split: { sites: [7, 3], tokens: [7, 3], labels: [6, 2] },   // [entries, fakes]
-      practice: wallet('tokens', 'coin', 2, [
-        ['prac-klr', null, '#9013fe', 'kleros', 'Purple, Kleros mark', 'Kleros', 'KLR',
-          'Kleros’ token is PNK, not KLR.', 'ticker', 'know', 'PNK']
-      ]).concat(wallet('sites', 'shield', 1, [
-        ['prac-devcon', null, '#f5a524', 'D', 'Devcon', 'devcon.org', 'Ethereum conference',
-          'Every line checks out: devcon.org is Devcon’s site.']
+      hero: [{ shape: 'flag', flag: FLAGS['in'][0] }, { shape: 'eiffel', color: MODELS.eiffel[0] },
+             { shape: 'tajmahal', color: MODELS.tajmahal[0] }],
+      lists: LISTS,
+      easy: 'landmarks', late: null,   // the opening three come from Landmarks
+      split: { countries: [7, 3], landmarks: [7, 3], mumbai: [6, 2] },   // [entries, fakes]
+      practice: country([
+        ['prac-india', null, 1, 'in', 'India', 'Mumbai', 'India’s capital is New Delhi. Mumbai is its financial capital.',
+          'capital', 'know', 'New Delhi']
+      ]).concat(landmark([
+        ['prac-eiffel', 'eiffel', 1, 'eiffel', 'Eiffel Tower', 'Paris, France', 'Every line checks out: the Eiffel Tower is in Paris.']
       ])),
-      items: SITES.concat(TOKENS, LABELS)
-    },
-    mumbai: {
-      id: 'mumbai', client: 'City guide app',
-      copy: {
-        story1: 'A city guide app shows this list to visitors. Wrong sights keep slipping in.',
-        payoff: 'Clean list: happy visitors, and the guide keeps earning.',
-        switchTo: 'Play the wallet lists instead',
-        repSwitch: 'Switch to the wallet lists',
-        quotes: ['“Visitors found every sight. Same time tomorrow?”',
-                 '“A couple of wrong sights slipped in. We filed removal requests.”',
-                 '“Visitors went to the wrong places. We’re pausing the list.”'],
-        quoteBy: 'City guide app (fictional client)',
-        // Report payoff by the same trust bands; rewards.js appends the bounty sentence. The wallet uses its default.
-        payoffs: ['{client} kept {trust}% of visitors’ trust, so they keep using it and it keeps earning.',
-                  '{client} kept {trust}% of visitors’ trust. Each wrong sight that got listed cost it visitors.',
-                  '{client} lost visitors’ trust (down to {trust}%): wrong sights reached them, and it stops earning until the list is clean.']
-      },
-      hero: [{ shape: 'arch', color: '#e8c79a' }, { shape: 'bridge', color: '#9fb4d8' }, { shape: 'dome', color: '#f1ecff' }],
-      lists: MUMBAI,
-      easy: null, late: null,   // easy pool: lvl 1 entries
-      split: { city: [20, 8] },
-      practice: city([
-        ['prac-indiagate', null, 'arch', '#e8c79a', 1, 'India Gate', 'Mumbai', 'Monument',
-          'India Gate is in New Delhi. Mumbai has the Gateway of India.', 'city', 'know', 'New Delhi'],
-        ['prac-gateway', null, 'arch', '#e8c79a', 1, 'Gateway of India', 'Mumbai', 'Monument',
-          'Mumbai’s 1924 waterfront arch.']
-      ]),
-      items: CITY
+      items: COUNTRIES.concat(LANDMARKS, MUMBAI_ITEMS)
     }
   };
 })();

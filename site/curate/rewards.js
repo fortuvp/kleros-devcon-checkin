@@ -1,4 +1,4 @@
-// Curate game rewards: merch ladder, counted shifts, the report and the live merch ticket.
+// Curate game rewards: prize strip, counted rounds, the report and the live merch ticket.
 // The only reader of kleros_devcon_self (never written here) and the only writer of kleros_devcon_curate.
 // No network calls. User data reaches the DOM through textContent only.
 (function () {
@@ -25,7 +25,14 @@
   function hhmm(at) { var d = new Date(at); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function lowerFirst(s) { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); }
   function kioskCap() { return S.kioskMaxTier == null ? 1 : S.kioskMaxTier; }
-  function deckOf(id) { var D = window.CURATE_DECKS || {}; return D[id] || D.wallet || { client: '', copy: {} }; }
+  // An unknown id (say a 'wallet' run stored before v3) falls back to the first deck, travel.
+  function firstDeck() {
+    var D = window.CURATE_DECKS || {}, k;
+    if (D.travel) return D.travel;
+    for (k in D) if (D.hasOwnProperty(k)) return D[k];
+    return null;
+  }
+  function deckOf(id) { var D = window.CURATE_DECKS || {}; return D[id] || firstDeck() || { client: 'Travel app', copy: {} }; }
   function thumbs(box, imgs) {
     if (!box) return;
     while (box.firstChild) box.removeChild(box.firstChild);
@@ -84,7 +91,7 @@
   // One object under one key. Kiosk never touches storage; a blocked browser keeps a memory copy for this visit.
   var st = null, blocked = false;
   function fresh() {
-    return { v: 1, deck: 'wallet', relaxed: false, practiced: {}, lastIds: {}, day: today(), counted: 0,
+    return { v: 1, deck: (firstDeck() || {}).id || 'travel', relaxed: false, practiced: {}, lastIds: {}, day: today(), counted: 0,
              best: null, runs: [], collected: null };
   }
   function load() {
@@ -96,6 +103,7 @@
     if (!d || typeof d !== 'object' || d.v !== 1) d = f;
     for (k in f) if (f.hasOwnProperty(k) && (d[k] === undefined || d[k] === null && f[k] !== null)) d[k] = f[k];
     if (!(d.runs instanceof Array)) d.runs = [];
+    if (window.CURATE_DECKS && !CURATE_DECKS[d.deck]) d.deck = f.deck;   // a deck that no longer exists
     st = d;
     rollDay();
   }
@@ -158,7 +166,7 @@
     return r;
   }
 
-  // ---- Brief: header link, welcome chip, ladder ----
+  // ---- Title screen: check-in link (footer row), welcome chip, prize strip ----
   function renderHeader() {
     var a = vis('hdr-link', !KIOSK), logo = $('hdr-logo'), me;
     if (logo && KIOSK) logo.removeAttribute('href');   // a booth tablet never opens the check-in page, by key either
@@ -175,7 +183,7 @@
       else if (ci && ci.claimed) line = 'You already checked in at the booth, so your merch goes with that check-in. Play for fun.';
       else if (best && m.state === 'live' && m.t > 0) { line = 'Your ' + baseTier(m.t).name + ' ticket is ready ·'; go = 'Show staff →'; }
       else if (best) { line = 'Your best today: ' + fmt(best.final) + ' pts ·'; go = 'Show ticket →'; }
-      else if (st.counted >= PER_DAY) line = fmt(PER_DAY) + ' of ' + fmt(PER_DAY) + ' shifts counted today. Play for fun, or come back tomorrow.';
+      else if (st.counted >= PER_DAY) line = fmt(PER_DAY) + ' of ' + fmt(PER_DAY) + ' rounds counted today. Play for fun, or come back tomorrow.';
       else if (ci && ci.ok && ci.tier > 0 && ci.tier < 3) {
         n = ci.tier + 1;
         line = 'You’re checked in: ' + baseTier(ci.tier).name + '. Score ' + fmt(TIERS[n]) + ' to move up to ' + baseTier(n).name + '.';
@@ -185,30 +193,57 @@
     txt('welcome-text', line);
     if (vis('welcome-go', !!go)) txt('welcome-go', go);
   }
+  // A chip’s short line: points, or what the tier needs on top.
   function ladderHow(i) {
     var info = tierInfo(i);
-    if (info.soldOut) return 'Gone for today: scores here get ' + info.short;
-    if (i === 0) return 'Finish a shift';
-    if (KIOSK && i > kioskCap()) return fmt(TIERS[i]) + ' points · on your own phone';
-    return fmt(TIERS[i]) + ' points' + (i >= NEED ? ' + check in on this phone' : '');
+    if (info.soldOut) return 'Gone today';
+    if (i === 0) return 'Finish a round';
+    if (KIOSK && i > kioskCap()) return fmt(TIERS[i]) + ' pts · own phone';
+    return fmt(TIERS[i]) + ' pts' + (i >= NEED ? ' + check-in' : '');
+  }
+  // The prize strip: 4 chips the shell lays out in a row. Built here, so it needs no template:
+  // <li class="chip t-teal [is-locked] [is-sold]"><span class="thumbs"><img alt=""></span>
+  //   <span class="chip-txt"><b><em>Teal</em></b><span class="how">450 pts</span></span><span class="sr">reward</span></li>
+  function make(tag, cls, s, slot) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (s != null) e.textContent = s;
+    if (slot) e.setAttribute('data-s', slot);
+    return e;
+  }
+  function chip(i) {
+    var info = tierInfo(i), li = make('li', 'chip t-' + NAMES[i]), th = make('span', 'thumbs', null, 'thumbs'),
+        tx = make('span', 'chip-txt'), b = make('b'), im,
+        sr = info.reward + (info.soldOut ? ': gone today, scores here get ' + info.short : '') +
+          (KIOSK && i > kioskCap() ? ': play on your own phone' : '');
+    if (KIOSK && i > kioskCap()) li.className += ' is-locked';   // out of the tablet’s reach
+    if (info.soldOut) li.className += ' is-sold';
+    li.setAttribute('data-tier', NAMES[i]);
+    li.title = sr;
+    if (info.img.length) {   // one thumb per chip keeps the strip compact
+      im = make('img'); im.src = info.img[0]; im.alt = ''; im.width = im.height = 44;
+      im.setAttribute('loading', 'lazy'); im.setAttribute('decoding', 'async');
+      th.appendChild(im);
+    }
+    b.appendChild(make('em', '', info.name, 'name'));
+    tx.appendChild(b);
+    tx.appendChild(make('span', 'how', ladderHow(i), 'how'));
+    li.appendChild(th); li.appendChild(tx);
+    li.appendChild(make('span', 'sr', ' · ' + sr, 'reward'));
+    return li;
   }
   function renderLadder() {
-    var list = $('ladder-list'), tpl = $('tpl-tier'), i, li, info, s;
-    if (list && tpl && tpl.content) {
+    var list = $('ladder-list'), i;
+    if (list) {
       while (list.firstChild) list.removeChild(list.firstChild);
-      for (i = 0; i < 4; i++) {
-        info = tierInfo(i);
-        li = tpl.content.firstElementChild.cloneNode(true);
-        li.className = 't-' + NAMES[i] + (KIOSK && i > kioskCap() ? ' is-locked' : '');   // out of the tablet’s reach
-        thumbs(li.querySelector('[data-s="thumbs"]'), info.img);
-        s = li.querySelector('[data-s="name"]'); if (s) s.textContent = info.name;
-        s = li.querySelector('[data-s="reward"]'); if (s) s.textContent = info.reward;
-        s = li.querySelector('[data-s="how"]'); if (s) s.textContent = ladderHow(i);
-        list.appendChild(li);
-      }
+      for (i = 0; i < 4; i++) list.appendChild(chip(i));
     }
-    txt('ladder-fine', 'One item per person, from the game or check-in: your best tier counts. Your best of ' +
-        fmt(PER_DAY) + ' shifts today counts.' + (MERCH.note ? ' ' + MERCH.note + '.' : ''));
+    // Brief copy leads with the one-item rule; skip it only when the configured merch note already says it, so it never repeats or disappears.
+    var once = /one item per person/i.test(MERCH.note || '');
+    // A booth tablet has no "best of 3": every round is the next visitor.
+    if (KIOSK) txt('ladder-fine', 'Booth tablet: one round per visitor, up to Teal. Play on your own phone for Purple and Gold.');
+    else txt('ladder-fine', (once ? 'From the game or check-in, your' : 'One item per person, from the game or check-in: your') +
+        ' best tier counts. Your best of ' + fmt(PER_DAY) + ' rounds today counts.' + (MERCH.note ? ' ' + MERCH.note + '.' : ''));
   }
   function refreshBrief() {
     stopTicket();
@@ -309,27 +344,33 @@
     if (b) b.textContent = v; else txt(id, label + ' ' + v.replace(/ /g, '\u00a0'));
   }
   // The payoff follows the trust band, like the headline and the quote; a deck may bring its own lines.
-  var PAYOFFS = ['{client} kept {trust}% of its users’ trust, so they keep using it and it keeps earning.',
-    '{client} kept {trust}% of its users’ trust. Each fake that got listed cost it users.',
-    '{client} lost its users’ trust (down to {trust}%): fakes reached them, and it stops earning until the list is clean.'];
+  var PAYOFFS = ['{client} kept {trust}% of travellers’ trust, so they keep using it and it keeps earning.',
+    '{client} kept {trust}% of travellers’ trust. Each fake that got listed cost it travellers.',
+    '{client} lost travellers’ trust (down to {trust}%): fakes reached them, and it stops earning until the lists are clean.'];
+  var QUOTES = ['“Travellers only saw real entries today. Come back tomorrow?”',
+    '“A few fakes got through. We filed removal requests.”',
+    '“Travellers went to fake places. We’re pausing the lists until they’re clean.”'];
+  // Ranks by tier when no check-in name; settings.js wins when it has them.
+  var RANKS = ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'];
   function againText(c) {
     return KIOSK ? 'Next curator' : c.reason === 'collected' || c.left === 0 ? 'Play again for fun' :
-      'Play again · ' + c.left + ' of ' + PER_DAY + ' counted shifts left today';
+      'Play again · ' + c.left + ' of ' + PER_DAY + ' counted rounds left today';
   }
   function renderReport(sum, misses) {
     var d = deckOf(sum.deck), copy = d.copy || {}, trust = sum.trust == null ? 100 : sum.trust,
         band = trust >= 90 ? 0 : trust >= 70 ? 1 : 2, final = sum.final || 0, ci = checkin(),
         g0 = tierFor(final), g = g0, info, next = '', c = canCount(), pending;
     if (KIOSK) g = Math.min(g, kioskCap());
-    txt('rep-kicker', 'Shift report · ' + d.client + (sum.counted ? '' : ' · Practice shift: not counted today'));
-    txt('rep-title', ['Clean list. Users are safe.', 'Mostly clean. A few fakes slipped in.', 'Leaky list. Users got scammed.'][band]);
+    txt('rep-kicker', 'Results · ' + d.client + (sum.counted ? '' : ' · Practice round: not counted today'));
+    txt('rep-title', ['Clean lists. Travellers are safe.', 'Mostly clean. A few fakes slipped in.',
+      'Leaky lists. Travellers got fooled.'][band]);
     txt('rep-sub', fmt(sum.reviewed) + ' of ' + fmt(sum.entries || S.entries || 20) + ' entries reviewed');
     stat('rep-caught', 'Fakes caught', fmt(sum.caught) + ' of ' + fmt(sum.fakesSeen));
     stat('rep-listed', 'Good entries listed', fmt(sum.listed) + ' of ' + fmt(sum.goodsSeen));
     stat('rep-evidence', 'Sharp evidence', fmt(sum.evidence));
     stat('rep-wrong', 'Wrong challenges', fmt(sum.wrong));
-    txt('rep-quote', (copy.quotes || [])[band] || '');
-    txt('rep-quote-by', copy.quoteBy || '');
+    txt('rep-quote', (copy.quotes || QUOTES)[band] || '');
+    txt('rep-quote-by', copy.quoteBy || (d.client ? d.client + ' (fictional)' : ''));
     txt('rep-payoff', ((copy.payoffs || [])[band] || PAYOFFS[band]).replace('{client}', d.client).replace('{trust}', trust) +
         (sum.caught > 0 ? ' Your bounties came from the fakers’ deposits.' : ' Catch a fake and its deposit becomes your bounty.'));
     renderMeter(final, g);
@@ -342,13 +383,13 @@
     // A duplicate check-in already holds this person's one item, so the score names no reward.
     txt('rep-tier-line', ci && ci.claimed ? 'Merch goes with your first check-in. Play for fun.' : tierTitle(g) + ' · ' + info.reward + '.' + next);
     thumbs($('rep-thumbs'), ci && ci.claimed ? [] : info.img);
-    // The strip shows only when this counted shift earned a gated tier that a check-in would unlock.
+    // The strip shows only when this counted round earned a gated tier that a check-in would unlock.
     pending = sum.counted && !KIOSK && g >= NEED && !(ci && (ci.ok || ci.claimed)) && !st.collected && !isSoldOut(g) ? g : 0;
     renderGold('rep-gold', 'rep-gold-go', pending, ci);
     renderMisses([].concat(misses || sum.misses || []));
     txt('to-ticket', 'Show my merch ticket');
     txt('again', againText(c));
-    txt('rep-switch', copy.repSwitch || '');
+    txt('rep-switch', '');   // one mixed deck: the shell keeps #rep-switch hidden
     txt('rep-fine', 'Points are for booth merch, not real money. Real challenge windows last days; here you get seconds.' +
         (MERCH.note ? ' ' + MERCH.note + '.' : ''));
   }
@@ -428,11 +469,11 @@
       from = baseTier(m.soldFrom);
       return from.reward + ': gone for today. Your ' + from.name + ' score gets ' + tierInfo(m.t).short + '.';
     }
-    return m.source === 'checkin' ? 'From your check-in' : 'From your shift';
+    return m.source === 'checkin' ? 'From your check-in' : 'From your round';
   }
   function renderBack(m) {
     var b = m.best, ci = m.ci, live = m.state === 'live', staff = live && !KIOSK && m.t > 0;   // Everyone: nothing to stamp
-    txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Shift ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' today · ') +
+    txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Round ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' today · ') +
         'Played ' + hhmm(b.at) + ' · ' + deckOf(b.deck).client);
     txt('tb-stats', !b ? '' : fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes · ' +
         fmt(b.evidence) + ' sharp evidence · trust ' + (b.trust == null ? 100 : b.trust) + '%');
@@ -477,12 +518,12 @@
           'check-in. One item per person.');
       txt('t-hint', thanks); txt('t-note', '');
     } else {
-      txt('t-tier', 'From a previous day'); txt('t-reward', ''); txt('t-hint', 'Play a shift for today’s ticket.');
+      txt('t-tier', 'From a previous day'); txt('t-reward', ''); txt('t-hint', 'Play a round for today’s ticket.');
       txt('t-note', '');
     }
     vis('t-note', !!($('t-note') || {}).textContent);
     // The check-in name only when its gate passes; otherwise a rank earned by the score.
-    who = ci && ci.ok && ci.name ? ci.name : (S.ranks || [])[b ? tierOf(b) : 0] || '';
+    who = ci && ci.ok && ci.name ? ci.name : (S.ranks || RANKS)[b ? tierOf(b) : 0] || '';
     txt('t-who', who);
     txt('t-org', b ? fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes caught' : '');
     ck = vis('t-code', live);

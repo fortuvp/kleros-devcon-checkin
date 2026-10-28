@@ -17,8 +17,8 @@
     return { fields: [] };
   }
 
-  // ---- Dealing a shift ----
-  // Up to n items passing test: ids not in the last shift first, one per twin.
+  // ---- Dealing a round ----
+  // Up to n items passing test: ids not in the last round first, one per twin.
   function take(pool, n, test, out, seen, last, rand) {
     var c = shuffle(pool.filter(test), rand), i, it;
     c.sort(function (a, b) { return (last.indexOf(a.id) > -1) - (last.indexOf(b.id) > -1); });   // stable
@@ -54,10 +54,13 @@
   }
   // Spec §2.4: easy opening with a card-tell fake at 1 or 2; late list from 5.
   function buildRun(deckId, lastIds, rand) {
-    var D = window.CURATE_DECKS, deck = D[deckId] || D.wallet, items = deck.items, split = deck.split;
+    var D = window.CURATE_DECKS, deck = D[deckId] || D.travel, items = deck.items, split = deck.split;
     var last = lastIds || [], seen = {}, open = [], rest = [], got = {}, k, r, t;
     rand = rand || Math.random;
-    function easy(it) { return deck.easy ? it.list === deck.easy : it.lvl === 1; }
+    // Never open on the twin of a practice card (e.g. the Eiffel Tower right after practising on it).
+    var pt = {};
+    (deck.practice || []).forEach(function (p) { if (p.twin) pt[p.twin] = 1; });
+    function easy(it) { return !pt[it.twin] && (deck.easy ? it.list === deck.easy : it.lvl === 1); }
     take(items, 1, function (it) { return easy(it) && it.bad && it.tell === 'card'; }, open, seen, last, rand);
     take(items, 2, function (it) { return easy(it) && !it.bad; }, open, seen, last, rand);
     open.forEach(function (it) { (got[it.list] || (got[it.list] = [0, 0]))[it.bad ? 1 : 0]++; });
@@ -115,7 +118,7 @@
       score.mistakes++;
       list = listOf(item.list);
       key = k === 'wrongChallenge' ? '' : item.bad || '';
-      // Name: the first field, skipping the coin description.
+      // Name: the first field, skipping the drawn object’s description (Flag, Model).
       list.fields.forEach(function (fd) {
         if (!name && fd[0] !== list.objField) name = item.f[fd[0]];
         if (fd[0] === key) lab = fd[1];
