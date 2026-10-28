@@ -700,7 +700,7 @@
       </div>
     </section>
 
-    <a class="game-cta" id="game-cta" href="/curate/"><span><b>Play Curate</b><small>Spot the fakes in 60 s. Better score, better merch.</small></span><i aria-hidden="true">→</i></a>
+    <a class="game-cta" id="game-cta" href="/curate/"><span><b>Play Curate</b><small>Help an app keep its list clean. Better score, better merch.</small></span><i aria-hidden="true">→</i></a>
 
     <div class="match blog" id="blog" hidden>
       <div class="kicker">Kleros blog</div>
@@ -1153,7 +1153,7 @@
     $('levelup').hidden = !!m.claimed || KIOSK;   // a booth tablet resets after a few seconds: Teal only
     $('quiz').hidden = !!m.claimed || KIOSK || !QUIZ.length;
     // a duplicate keeps the card (play for fun) but must not be promised merch
-    $('game-cta').querySelector('small').textContent = m.claimed ? 'Spot the fakes in 60 s. Just for fun: your merch went with your first check-in.' : 'Spot the fakes in 60 s. Better score, better merch.';
+    $('game-cta').querySelector('small').textContent = m.claimed ? 'Help an app keep its list clean. Just for fun: your merch went with your first check-in.' : 'Help an app keep its list clean. Better score, better merch.';
     $('t-live').hidden = $('t-code').hidden = !!m.claimed;
     if (m.claimed) {
       t.setAttribute('data-tier', 'claimed');

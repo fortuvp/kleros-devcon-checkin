@@ -4,6 +4,7 @@
 // settings.js, decks.js and rules.js the phones load.
 //   node scripts/curate-check.js          checks only
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
+//   node scripts/curate-check.js --fit    the same simulation, plus the tier thresholds that would hit TARGET
 // Exits non-zero on any failure. Run it after every change to settings.js, decks.js or rules.js.
 // A deliberate retune (README stock runbook) moves the tier mix away from §2.8 on purpose: the --sim table
 // then shows the new shares; update TARGET below once the team agrees on them.
@@ -11,7 +12,7 @@
 var fs = require('fs'), path = require('path'), vm = require('vm'), zlib = require('zlib');
 
 var ROOT = path.join(__dirname, '..'), DIR = path.join(ROOT, 'site', 'curate');
-var SIM = process.argv.indexOf('--sim') > -1;
+var FIT = process.argv.indexOf('--fit') > -1, SIM = FIT || process.argv.indexOf('--sim') > -1;
 var errors = [], warnings = [];
 function fail(msg) { errors.push(msg); }
 function warn(msg) { warnings.push(msg); }
@@ -68,15 +69,20 @@ function checkSettings() {
 }
 
 // ---- Schema ----
-var LANDMARK_SHAPES = ['eiffel', 'pisa', 'bigben', 'liberty', 'tajmahal', 'opera', 'colosseum', 'burj', 'goldengate',
-  'christ', 'pyramid', 'sagrada'];
-var MUMBAI_SHAPES = ['arch', 'bridge', 'dome', 'temple', 'tower', 'minarets', 'wave', 'station', 'palace', 'park', 'block',
-  'house'];
-var SHAPES = ['flag'].concat(LANDMARK_SHAPES, MUMBAI_SHAPES);
+// v4 (brief §B, §D): sights show a photo, countries a flat flag, music a painted sleeve.
+var SHAPES = ['photo', 'flag', 'sleeve'];
+var IMG = path.join(DIR, 'img'), IMG_URL = '/curate/img/';
 // Flag kinds: the number of colours, then the optional keys each kind takes (brief §3).
 var FLAG_KINDS = { v3: [3], h3: [3, 'ratio'], h2: [2], nordic: [2, 'inner'], disc: [2, 'off'], cross: [2],
   h3wheel: [4] };
 function hex(c) { return /^#[0-9a-f]{6}$/i.test(c || ''); }
+// Photo credits (P0): every file in site/curate/img has exactly one entry, and only credited files are used.
+var CREDITS = (function () {
+  var c;
+  try { c = load(['site/curate/credits.js']).CURATE_CREDITS; } catch (e) { fail('credits.js could not be read: ' + e.message); }
+  return Array.isArray(c) ? c : [];
+})();
+var CREDITED = {}, USED = {};
 function okFlag(fl, where) {
   var k = fl && FLAG_KINDS[fl.kind], key;
   if (!k) return fail(where + ': flag kind ' + (fl && fl.kind) + ' not allowed');
@@ -87,13 +93,48 @@ function okFlag(fl, where) {
   if (fl.inner !== undefined && !hex(fl.inner)) fail(where + ': inner is not #rrggbb');
   if (fl.off !== undefined && (typeof fl.off !== 'number' || Math.abs(fl.off) > 0.25)) fail(where + ': off must be a number in ±0.25');
 }
+// A photo path is /curate/img/<file>.jpg, on disk and in credits.js. Returns the key (file name without .jpg).
+function okImg(src, where) {
+  var m = /^\/curate\/img\/([a-z0-9-]+)\.jpg$/.exec(src || '');
+  if (!m) return fail(where + ': photo src ' + src + ' is not ' + IMG_URL + '<name>.jpg'), null;
+  if (!fs.existsSync(path.join(IMG, m[1] + '.jpg'))) fail(where + ': ' + src + ' is not in site/curate/img');
+  if (!CREDITED[m[1] + '.jpg']) fail(where + ': ' + src + ' has no entry in credits.js');
+  USED[m[1] + '.jpg'] = 1;
+  return m[1];
+}
+function okSleeve(o, where) {
+  if (!hex(o.color) || !hex(o.color2)) fail(where + ': a sleeve needs color and color2 as #rrggbb');
+  if (typeof o.mark !== 'string' || !/^[A-Z0-9]{1,3}$/.test(o.mark)) fail(where + ': sleeve mark ' + o.mark + ' is not 1 to 3 capitals');
+}
 function okObj(o, where) {
+  var allowed = { photo: ['src', 'alt'], flag: ['flag'], sleeve: ['color', 'color2', 'mark'] }, k;
   if (!o || SHAPES.indexOf(o.shape) < 0) return fail(where + ': obj.shape ' + (o && o.shape) + ' not allowed');
-  if (o.mark !== undefined) fail(where + ': obj.mark is gone (no coins, shields or tags)');
-  if (o.shape === 'flag') okFlag(o.flag, where);
-  else if (o.flag !== undefined) fail(where + ': only a flag has a flag spec');
-  // A flag paints its own colours; every other object needs a material colour.
-  if ((o.shape !== 'flag' || o.color !== undefined) && !hex(o.color)) fail(where + ': obj.color ' + o.color + ' is not #rrggbb');
+  for (k in o) if (k !== 'shape' && allowed[o.shape].indexOf(k) < 0) fail(where + ': obj.' + k + ' not allowed on a ' + o.shape);
+  if (o.shape === 'photo') {
+    okImg(o.src, where);
+    if (typeof o.alt !== 'string' || !o.alt) fail(where + ': a photo needs alt text');
+  } else if (o.shape === 'flag') okFlag(o.flag, where);
+  else okSleeve(o, where);
+}
+function checkCredits() {
+  var files = fs.existsSync(IMG) ? fs.readdirSync(IMG).filter(function (f) { return !/^\./.test(f); }) : [];
+  CREDITS.forEach(function (c, i) {
+    var at = 'credits.js[' + i + ']';
+    ['file', 'subject', 'author', 'license', 'licenseUrl', 'source'].forEach(function (k) {
+      if (typeof c[k] !== 'string' || !c[k].trim()) fail(at + ': ' + k + ' is missing');
+    });
+    if (CREDITED[c.file]) fail(at + ': ' + c.file + ' is credited twice');
+    CREDITED[c.file] = 1;
+    if (files.indexOf(c.file) < 0) fail(at + ': ' + c.file + ' is not in site/curate/img');
+    if (!/^https:\/\//.test(c.licenseUrl || '') || !/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/.test(c.source || '')) {
+      fail(at + ': licenseUrl must be https and source a Commons file page');
+    }
+    if (!/^(CC0|Public domain|CC BY(-SA)? [0-9.]+)$/.test(c.license || '')) fail(at + ': licence ' + c.license + ' is not CC0, PD, CC BY or CC BY-SA');
+  });
+  files.forEach(function (f) {
+    if (!/\.jpg$/.test(f)) fail('site/curate/img/' + f + ': only .jpg photos belong here');
+    if (!CREDITED[f]) fail('site/curate/img/' + f + ': no entry in credits.js');
+  });
 }
 
 // ---- Facts ----
@@ -122,58 +163,92 @@ var COUNTRY = {
   Switzerland: ['Bern', { kind: 'cross', c: ['#da291c', '#ffffff'] }, 'Red, white cross'],
   India: ['New Delhi', { kind: 'h3wheel', c: ['#ff9933', '#ffffff', '#138808', '#000080'] }, 'Saffron, white, green, navy wheel']
 };
-// Landmark shape: [name, location, words for the Model row].
-var LANDMARK = {
-  eiffel: ['Eiffel Tower', 'Paris, France', 'Iron lattice tower'],
-  pisa: ['Leaning Tower of Pisa', 'Pisa, Italy', 'Leaning white tower'],
-  bigben: ['Big Ben', 'London, UK', 'Gothic clock tower'],
-  liberty: ['Statue of Liberty', 'New York, USA', 'Green statue with a torch'],
-  tajmahal: ['Taj Mahal', 'Agra, India', 'White dome, four minarets'],
-  opera: ['Sydney Opera House', 'Sydney, Australia', 'White shell-shaped roofs'],
-  colosseum: ['Colosseum', 'Rome, Italy', 'Oval arena of arches'],
-  burj: ['Burj Khalifa', 'Dubai, UAE', 'Very tall stepped spire'],
-  goldengate: ['Golden Gate Bridge', 'San Francisco, USA', 'Red suspension bridge'],
-  christ: ['Christ the Redeemer', 'Rio de Janeiro, Brazil', 'Statue, arms spread wide'],
-  pyramid: ['Great Pyramid of Giza', 'Giza, Egypt', 'Stone pyramid'],
-  sagrada: ['Sagrada Família', 'Barcelona, Spain', 'Basilica with tall spires']
+// Photo file: [name, location, words for the Photo row]. Each checked against the photo itself and its
+// Commons page (Jinshanling is in northern China, Elephanta Island in Mumbai Harbour).
+var SIGHT = {
+  'eiffel': ['Eiffel Tower', 'Paris, France', 'Iron lattice tower'],
+  'colosseum': ['Colosseum', 'Rome, Italy', 'Oval arena of stone arches'],
+  'taj-mahal': ['Taj Mahal', 'Agra, India', 'White marble dome, four minarets'],
+  'opera-house': ['Sydney Opera House', 'Sydney, Australia', 'White shell-shaped roofs'],
+  'great-wall': ['Great Wall of China', 'Northern China', 'Stone wall winding over hills'],
+  'golden-gate': ['Golden Gate Bridge', 'San Francisco, USA', 'Red suspension bridge'],
+  'machu-picchu': ['Machu Picchu', 'Andes, Peru', 'Stone ruins on a mountain ridge'],
+  'big-ben': ['Big Ben', 'London, UK', 'Gothic clock tower'],
+  'burj-khalifa': ['Burj Khalifa', 'Dubai, UAE', 'Very tall glass skyscraper'],
+  'sagrada-familia': ['Sagrada Família', 'Barcelona, Spain', 'Basilica with tall spires'],
+  'statue-liberty': ['Statue of Liberty', 'New York, USA', 'Green statue with a torch'],
+  'christ-redeemer': ['Christ the Redeemer', 'Rio de Janeiro, Brazil', 'Statue, arms spread wide'],
+  'gateway-of-india': ['Gateway of India', 'Mumbai, India', 'Stone arch lit at dusk'],
+  'cst-mumbai': ['Chhatrapati Shivaji Maharaj Terminus', 'Mumbai, India', 'Gothic station with domes'],
+  'sea-link': ['Bandra–Worli Sea Link', 'Mumbai, India', 'Cable-stayed bridge over the sea'],
+  'haji-ali': ['Haji Ali Dargah', 'Mumbai, India', 'White shrine with a dome'],
+  'marine-drive': ['Marine Drive', 'Mumbai, India', 'Curving seafront at night'],
+  'elephanta': ['Elephanta Caves', 'Mumbai, India', 'Three-faced stone carving']
 };
+// Song: [lead artist, year it first came out]. Each checked by hand against the original release (album or
+// single, whichever came first); no covers, no shared or “featuring” credits.
+var SONG = {
+  'Hey Jude': ['The Beatles', '1968'], 'Wonderwall': ['Oasis', '1995'], 'Bohemian Rhapsody': ['Queen', '1975'],
+  'Imagine': ['John Lennon', '1971'], 'Like a Prayer': ['Madonna', '1989'], 'Smells Like Teen Spirit': ['Nirvana', '1991'],
+  'Dancing Queen': ['ABBA', '1976'], 'Rolling in the Deep': ['Adele', '2010'], 'Shape of You': ['Ed Sheeran', '2017'],
+  'Bad Guy': ['Billie Eilish', '2019'], 'Jai Ho': ['A. R. Rahman', '2008'], 'Tunak Tunak Tun': ['Daler Mehndi', '1998'],
+  'Gangnam Style': ['PSY', '2012'], 'Blinding Lights': ['The Weeknd', '2019'], 'Purple Rain': ['Prince', '1984'],
+  'Viva la Vida': ['Coldplay', '2008'], 'Dynamite': ['BTS', '2020'], 'Stayin’ Alive': ['Bee Gees', '1977'],
+  'Thriller': ['Michael Jackson', '1982'], 'Africa': ['Toto', '1982']
+};
+// Real artists that may appear only as the wrong artist on a fake (a fake upload under a famous name).
+var OTHER_ARTISTS = ['The Rolling Stones', 'Blur', 'Paul McCartney', 'Shawn Mendes', 'Arijit Singh', 'Pearl Jam', 'Drake'];
+
 function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
-function find(table, col, v) { var k; for (k in table) if (same(table[k][col], v)) return k; return null; }
-// For each field, the place it points at; then exactly the `bad` field may disagree with the other two.
+// Every key of table whose column col equals v (a location such as Mumbai, India fits several sights).
+function keysWhere(table, col, v) { return Object.keys(table).filter(function (k) { return same(table[k][col], v); }); }
+// For each field, the keys it points at; then exactly the `bad` field may disagree with the other two.
+// `drawn` is the key of the drawn object (photo or flag), and `desc` the words its row must show.
 var VOTES = {
-  countries: function (it) {
-    var drawn = find(COUNTRY, 1, it.obj.flag);
-    return { flag: drawn, country: COUNTRY[it.f.country] ? it.f.country : null, capital: find(COUNTRY, 0, it.f.capital),
-      desc: drawn && COUNTRY[drawn][2], truth: function (x, k) { return k === 'flag' ? COUNTRY[x][2] : k === 'country' ? x : COUNTRY[x][0]; } };
+  sights: function (it) {
+    var m = /\/([a-z0-9-]+)\.jpg$/.exec(it.obj.src || ''), drawn = m && SIGHT[m[1]] ? m[1] : null;
+    return { photo: drawn ? [drawn] : [], name: keysWhere(SIGHT, 0, it.f.name), where: keysWhere(SIGHT, 1, it.f.where),
+      drawn: drawn, desc: drawn && SIGHT[drawn][2],
+      truth: function (x, k) { return SIGHT[x][k === 'photo' ? 2 : k === 'name' ? 0 : 1]; } };
   },
-  landmarks: function (it) {
-    var drawn = LANDMARK[it.obj.shape] ? it.obj.shape : null;
-    return { model: drawn, name: find(LANDMARK, 0, it.f.name), where: find(LANDMARK, 1, it.f.where),
-      desc: drawn && LANDMARK[drawn][2], truth: function (x, k) { return LANDMARK[x][k === 'model' ? 2 : k === 'name' ? 0 : 1]; } };
+  countries: function (it) {
+    var drawn = keysWhere(COUNTRY, 1, it.obj.flag)[0] || null;
+    return { flag: drawn ? [drawn] : [], country: COUNTRY[it.f.country] ? [it.f.country] : [],
+      capital: keysWhere(COUNTRY, 0, it.f.capital), drawn: drawn, desc: drawn && COUNTRY[drawn][2],
+      truth: function (x, k) { return k === 'flag' ? COUNTRY[x][2] : k === 'country' ? x : COUNTRY[x][0]; } };
+  },
+  songs: function (it) {
+    return { song: SONG[it.f.song] ? [it.f.song] : [], artist: keysWhere(SONG, 0, it.f.artist),
+      year: keysWhere(SONG, 1, it.f.year), truth: function (x, k) { return k === 'song' ? x : SONG[x][k === 'artist' ? 0 : 1]; } };
   }
 };
 function checkFacts(it, list, where) {
-  var keys = list.fields.map(function (f) { return f[0]; }), v, others, x;
-  if (it.list === 'mumbai') {
-    if (MUMBAI_SHAPES.indexOf(it.obj.shape) < 0) fail(where + ': a Mumbai entry needs a Mumbai shape');
-    // A wrong city may still read Mumbai (a sight from elsewhere); otherwise the city is Mumbai.
-    if (it.bad !== 'city' && it.f.city !== 'Mumbai') fail(where + ': only a wrong-city fake may name another city');
-    if (it.bad === 'place') fail(where + ': on Mumbai the odd field is city or type');
-    return;
-  }
+  var keys = list.fields.map(function (f) { return f[0]; }), v, others, x, y;
   if (!VOTES[it.list]) return fail(where + ': no fact table for list ' + it.list);
-  if ((it.list === 'countries') !== (it.obj.shape === 'flag')) fail(where + ': flags belong on Countries, and only there');
   v = VOTES[it.list](it);
-  if (!v[list.objField]) return fail(where + ': the drawn ' + it.obj.shape + ' matches no known ' + list.objField);
-  // The object row always describes what is drawn: a wrong object shows on the card.
-  if (it.f[list.objField] !== v.desc) fail(where + ': ' + list.objField + ' row ' + it.f[list.objField] + ' does not describe the drawn object (' + v.desc + ')');
+  if (list.objField) {
+    if (!v.drawn) return fail(where + ': the drawn ' + it.obj.shape + ' matches no known ' + list.objField);
+    // The object row always describes what is drawn: a wrong object shows on the card.
+    if (it.f[list.objField] !== v.desc) fail(where + ': ' + list.objField + ' row ' + it.f[list.objField] + ' does not describe the drawn object (' + v.desc + ')');
+    if (it.obj.shape === 'photo' && it.obj.alt !== v.desc) fail(where + ': photo alt ' + it.obj.alt + ' should be ' + v.desc);
+  }
+  if (it.list === 'songs') {
+    if (!SONG[it.f.song]) fail(where + ': song ' + it.f.song + ' is not in the fact table');
+    if (!v.artist.length && (it.bad !== 'artist' || OTHER_ARTISTS.indexOf(it.f.artist) < 0)) fail(where + ': artist ' + it.f.artist + ' is unknown');
+    if (it.bad === 'song') fail(where + ': on Songs the odd field is artist or year');
+  }
   others = keys.filter(function (k) { return k !== it.bad; });
-  x = v[others[0]];
-  if (!x || !others.every(function (k) { return v[k] === x; })) return fail(where + ': ' + others.join(', ') + ' do not all point at one place');
+  // The places the other two fields agree on.
+  x = v[others[0]].filter(function (p) { return others.every(function (k) { return v[k].indexOf(p) > -1; }); });
+  if (!x.length) return fail(where + ': ' + others.join(', ') + ' do not all point at one place');
   if (!it.bad) return;
-  if (v[it.bad] === x) fail(where + ': the odd field ' + it.bad + ' agrees with the others');
-  if (it.fix !== v.truth(x, it.bad)) fail(where + ': fix ' + it.fix + ' should be ' + v.truth(x, it.bad));
+  if (v[it.bad].some(function (p) { return x.indexOf(p) > -1; })) fail(where + ': the odd field ' + it.bad + ' agrees with the others');
+  y = v.truth(x[0], it.bad);
+  if (x.some(function (p) { return v.truth(p, it.bad) !== y; })) fail(where + ': ' + others.join(', ') + ' leave the fix ambiguous');
+  if (it.fix !== y) fail(where + ': fix ' + it.fix + ' should be ' + y);
   if (it.bad === list.objField && it.tell !== 'card') fail(where + ': a wrong ' + it.bad + ' shows on the card, so its tell is card');
+  // A wrong year is far off, so it is a fact to know, not a near miss.
+  if (it.bad === 'year' && Math.abs(Number(it.f.year) - Number(y)) <= 5) fail(where + ': a wrong year must be more than 5 years off');
 }
 // Walks every string in a value and calls fn(string, path).
 function strings(v, at, fn) {
@@ -182,10 +257,13 @@ function strings(v, at, fn) {
   if (v && typeof v === 'object') for (k in v) if (Object.prototype.hasOwnProperty.call(v, k)) strings(v[k], at + '.' + k, fn);
 }
 var COUNTS = [];   // per list: [deck, list, good, fake, card tells], printed in the summary
-var LIST_KEYS = 'countries,landmarks,mumbai';   // brief §3: one deck, these three lists
-var POOL_MIN = { countries: [11, 7], landmarks: [9, 7] };   // [good, fake] in the pool
-// #policy is one line (nowrap, ellipsis): no policy may be longer than the Mumbai one, 61 characters.
+// Brief §A and §D: three apps in title-screen order, each with one list and its picture.
+var DECKS = { sights: ['sights', 'photo', 'img'], countries: ['countries', 'flag', 'flag'], music: ['songs', null, 'sleeve'] };
+var POOL_MIN = { sights: [10, 7], countries: [11, 7], songs: [12, 8] };   // [good, fake] in the pool
+// #policy is one line (nowrap, ellipsis): no policy may be longer than 61 characters.
 var POLICY_MAX = 61;
+// Short copy: [path in the deck, max characters]. Title cards and banners must fit a phone line or two.
+var COPY_MAX = [['pick.app', 24], ['pick.need', 42], ['pick.sub', 36], ['copy.mission', 44], ['copy.quoteBy', 34]];
 // The wrong-evidence toast line, exactly as game.js ruling() builds it from a field label.
 var EV_LINE = '\'The problem was the “\' + lab + \'” line.\'';
 function evLine(lab) { return 'The problem was the “' + lab + '” line.'; }
@@ -197,6 +275,7 @@ function checkLabel(where, lab) {
   if (line.length > 80) fail(where + ': ' + line + ' is ' + line.length + ' characters (max 80)');
   if (EV_LINES.indexOf(line) < 0) EV_LINES.push(line);
 }
+function twinsOf(it) { return !it.twin ? [] : typeof it.twin === 'string' ? [it.twin] : it.twin; }
 function checkItem(deck, it, ids, practice) {
   var where = deck.id + (practice ? '.practice ' : ' ') + (it && it.id), list, keys, k;
   if (!it || typeof it.id !== 'string' || !it.id) return fail(deck.id + ': an item has no id');
@@ -209,9 +288,11 @@ function checkItem(deck, it, ids, practice) {
   keys.forEach(function (k) {
     if (typeof it.f[k] !== 'string' || !it.f[k].trim()) fail(where + ': field ' + k + ' is missing or empty');
   });
-  if (it.twin !== null && typeof it.twin !== 'string') fail(where + ': twin must be a string or null');
+  if (it.twin !== null && typeof it.twin !== 'string' && !(Array.isArray(it.twin) && it.twin.length &&
+    it.twin.every(function (t) { return typeof t === 'string' && t; }))) fail(where + ': twin must be null, a string or a list of strings');
   if ([1, 2, 3].indexOf(it.lvl) < 0) fail(where + ': lvl must be 1, 2 or 3');
   okObj(it.obj, where);
+  if (it.obj && it.obj.shape !== DECKS[deck.id][2].replace('img', 'photo')) fail(where + ': a ' + deck.id + ' entry cannot show a ' + it.obj.shape);
   if (it.bad !== null && keys.indexOf(it.bad) < 0) fail(where + ': bad ' + it.bad + ' is not a field of ' + it.list);
   if (!Array.isArray(it.also)) fail(where + ': also must be an array');
   else it.also.forEach(function (k) { if (keys.indexOf(k) < 0) fail(where + ': also has unknown field ' + k); });
@@ -225,28 +306,48 @@ function checkItem(deck, it, ids, practice) {
   if (!it.obj || SHAPES.indexOf(it.obj.shape) < 0) return;
   checkFacts(it, list, where);
 }
+function get(o, p) { return p.split('.').reduce(function (a, k) { return a == null ? a : a[k]; }, o); }
 function checkSchema() {
   var ids = {}, dk;
   if (!D) return fail('decks.js: window.CURATE_DECKS is missing');
-  // One mixed deck (brief §3): the wallet deck and its web3 lists are gone.
-  if (Object.keys(D).join() !== 'travel') fail('decks.js: exactly one deck, travel, is expected (found ' + Object.keys(D).join(', ') + ')');
+  // Brief §A: three apps, in title-screen order.
+  if (Object.keys(D).join() !== Object.keys(DECKS).join()) fail('decks.js: decks must be ' + Object.keys(DECKS).join(', ') + ' (found ' + Object.keys(D).join(', ') + ')');
   strings(D, 'CURATE_DECKS', function (s, at) {
     if (/http|[<>]/i.test(s)) fail('decks.js ' + at + ': contains http, < or >');
   });
   for (dk in D) {
     (function (deck) {
-      var c = deck.copy || {}, entries = 0, fakes = 0, lk, li, per = {};
+      var c = deck.copy || {}, pk = deck.pick || {}, want = DECKS[dk] || [], entries = 0, fakes = 0, lk, li, per = {},
+        cardEasy = 0, easyFakes = 0, pt = {};
       if (deck.id !== dk) fail(dk + ': id must equal its key');
-      if (typeof deck.client !== 'string') fail(dk + ': client is missing');
-      ['story1', 'payoff', 'quoteBy'].forEach(function (k) {
+      if (typeof deck.client !== 'string' || !deck.client) fail(dk + ': client is missing');
+      // The title-screen card: app, need, optional sub, and the deck’s own kind of picture.
+      ['app', 'need'].forEach(function (k) { if (typeof pk[k] !== 'string' || !pk[k]) fail(dk + ': pick.' + k + ' is missing'); });
+      if (pk.sub !== undefined && (typeof pk.sub !== 'string' || !pk.sub)) fail(dk + ': pick.sub must be a line of copy');
+      ['img', 'flag', 'sleeve'].forEach(function (k) {
+        if ((pk[k] !== undefined) !== (k === want[2])) fail(dk + ': the pick picture must be pick.' + want[2] + ' only');
+      });
+      if (pk.img !== undefined) okImg(pk.img, dk + '.pick');
+      if (pk.flag !== undefined) okFlag(pk.flag, dk + '.pick');
+      if (pk.sleeve !== undefined) okSleeve(pk.sleeve || {}, dk + '.pick');
+      ['mission', 'quoteBy'].forEach(function (k) {
         if (typeof c[k] !== 'string' || !c[k]) fail(dk + ': copy.' + k + ' is missing');
       });
-      if (!c.quotes || c.quotes.length !== 3) fail(dk + ': copy.quotes needs 3 lines (trust ≥ 90, 70–89, < 70)');
-      if (!c.payoffs || c.payoffs.length !== 3 || c.payoffs.some(function (x) { return x.indexOf('{trust}') < 0; })) {
-        fail(dk + ': copy.payoffs needs 3 lines (trust ≥ 90, 70–89, < 70), each with {trust}');
-      }
-      if (!deck.hero || deck.hero.length !== 3) fail(dk + ': hero needs 3 specs');
-      else deck.hero.forEach(function (o, i) { okObj(o, dk + ' hero[' + i + ']'); });
+      ['headlines', 'quotes', 'payoffs'].forEach(function (k) {
+        if (!Array.isArray(c[k]) || c[k].length !== 3 || !c[k].every(function (x) { return typeof x === 'string' && x; })) {
+          fail(dk + ': copy.' + k + ' needs 3 lines (trust ≥ 90, 70–89, < 70)');
+        }
+      });
+      (c.payoffs || []).forEach(function (x, i) {
+        if (String(x).indexOf('{trust}') < 0 || String(x).indexOf('{client}') < 0) fail(dk + ': copy.payoffs[' + i + '] needs {client} and {trust}');
+      });
+      (c.headlines || []).forEach(function (x, i) { if (String(x).length > 50) fail(dk + ': copy.headlines[' + i + '] is over 50 characters'); });
+      COPY_MAX.forEach(function (m) {
+        var s = get(deck, m[0]);
+        if (typeof s === 'string' && s.length > m[1]) fail(dk + ': ' + m[0] + ' is ' + s.length + ' characters (max ' + m[1] + ')');
+      });
+      if (deck.coach !== undefined && (!deck.coach || typeof deck.coach.fact !== 'string' || !deck.coach.fact)) fail(dk + ': coach.fact is missing');
+      if (deck.hero !== undefined) fail(dk + ': hero is gone in v4 (pictures live on the title cards)');
       for (lk in deck.lists) {
         li = deck.lists[lk];
         if (!li.name || !li.policy || !li.fields || li.fields.length !== 3) fail(dk + '.' + lk + ': name, policy and 3 fields needed');
@@ -255,9 +356,9 @@ function checkSchema() {
         (li.fields || []).forEach(function (f) { checkLabel(dk + '.' + lk, f[1]); });
         per[lk] = [0, 0, 0];
       }
-      if (Object.keys(deck.lists).join() !== LIST_KEYS) fail(dk + ': lists must be ' + LIST_KEYS);
-      if (deck.lists.countries && deck.lists.countries.objField !== 'flag') fail(dk + '.countries: objField must be flag');
-      if (deck.lists.landmarks && deck.lists.landmarks.objField !== 'model') fail(dk + '.landmarks: objField must be model');
+      // One list per app, with the drawn object (if any) as its first field.
+      if (Object.keys(deck.lists || {}).join() !== want[0]) fail(dk + ': lists must be ' + want[0]);
+      if (deck.lists[want[0]] && (deck.lists[want[0]].objField || null) !== want[1]) fail(dk + '.' + want[0] + ': objField must be ' + want[1]);
       if (deck.easy && !deck.lists[deck.easy]) fail(dk + ': easy list ' + deck.easy + ' does not exist');
       if (deck.late && !deck.lists[deck.late]) fail(dk + ': late list ' + deck.late + ' does not exist');
       for (lk in deck.split) {
@@ -265,32 +366,42 @@ function checkSchema() {
         entries += deck.split[lk][0]; fakes += deck.split[lk][1];
       }
       if (entries !== S.entries || fakes !== S.fakes) fail(dk + ': split adds up to ' + entries + '/' + fakes + ', settings say ' + S.entries + '/' + S.fakes);
+      // Practice (brief §C): at least one card; the first is a fake the coach can explain.
+      if (!Array.isArray(deck.practice) || !deck.practice.length || !deck.practice[0].bad) fail(dk + ': practice needs at least 1 item, a fake first');
+      (deck.practice || []).forEach(function (it) {
+        checkItem(deck, it, ids, true);
+        twinsOf(it).forEach(function (t) { pt[t] = 1; });
+      });
       (deck.items || []).forEach(function (it) {
         checkItem(deck, it, ids, false);
         if (per[it.list]) { per[it.list][it.bad ? 1 : 0]++; if (it.bad && it.tell === 'card') per[it.list][2]++; }
+        if (it.bad && it.lvl === 1 && !twinsOf(it).some(function (t) { return pt[t]; })) { easyFakes++; if (it.tell === 'card') cardEasy++; }
       });
-      (deck.practice || []).forEach(function (it) { checkItem(deck, it, ids, true); });
-      if (!deck.practice || deck.practice.length !== 2 || !deck.practice[0].bad || deck.practice[1].bad) {
-        fail(dk + ': practice needs 2 items, a fake then a good entry');
-      }
+      if (easyFakes < 3) fail(dk + ': only ' + easyFakes + ' easy fakes can open a round (need ≥ 3)');
+      if (want[1] && cardEasy < 3) fail(dk + ': only ' + cardEasy + ' easy card-tell fakes can open a round (need ≥ 3)');
       for (lk in per) {
         COUNTS.push([dk, lk, per[lk][0], per[lk][1], per[lk][2]]);
-        // At least half the fakes per list can be caught from the card plus the policy.
-        if (per[lk][1] && per[lk][2] * 2 < per[lk][1]) fail(dk + '.' + lk + ': only ' + per[lk][2] + ' of ' + per[lk][1] + ' fakes are card tells (need ≥ 50%)');
+        // With a drawn object, at least half the fakes can be caught from the card plus the policy. Songs have
+        // nothing drawn to contradict a line, so every Songs fake is a fact to know (and rounds open on lvl 1).
+        if (deck.lists[lk].objField && per[lk][1] && per[lk][2] * 2 < per[lk][1]) fail(dk + '.' + lk + ': only ' + per[lk][2] + ' of ' + per[lk][1] + ' fakes are card tells (need ≥ 50%)');
         if (POOL_MIN[lk] && (per[lk][0] < POOL_MIN[lk][0] || per[lk][1] < POOL_MIN[lk][1])) {
-          fail(dk + '.' + lk + ': pool is ' + per[lk][0] + ' good / ' + per[lk][1] + ' fake, brief §3 wants ≥ ' + POOL_MIN[lk].join(' / '));
+          fail(dk + '.' + lk + ': pool is ' + per[lk][0] + ' good / ' + per[lk][1] + ' fake, brief §D wants ≥ ' + POOL_MIN[lk].join(' / '));
         }
       }
-      // Every new model is dealt as a good entry somewhere, so none is drawn only on fakes.
-      LANDMARK_SHAPES.forEach(function (sh) {
-        if (!(deck.items || []).some(function (it) { return it.obj && it.obj.shape === sh && !it.bad; })) fail(dk + ': no good entry shows the ' + sh + ' model');
-      });
+      // Every photo is dealt as a good entry somewhere, so none is shown only on fakes.
+      if (dk === 'sights') {
+        Object.keys(SIGHT).forEach(function (k) {
+          if (!(deck.items || []).some(function (it) { return !it.bad && it.obj && it.obj.src === IMG_URL + k + '.jpg'; })) fail(dk + ': no good entry shows ' + k + '.jpg');
+        });
+      }
     })(D[dk]);
   }
+  CREDITS.forEach(function (c) { if (!USED[c.file]) warn('credits.js: ' + c.file + ' is credited but no deck shows it'); });
   console.log('Content');
   COUNTS.forEach(function (c) {
-    console.log('  ' + pad(c[0] + '.' + c[1], 16) + lpad(c[2], 3) + ' good ' + lpad(c[3], 3) + ' fake  (' + c[4] + ' card tells)');
+    console.log('  ' + pad(c[0] + '.' + c[1], 21) + lpad(c[2], 3) + ' good ' + lpad(c[3], 3) + ' fake  (' + c[4] + ' card tells)');
   });
+  console.log('  ' + CREDITS.length + ' credited photos, ' + Object.keys(USED).length + ' used');
   // The sentence lives in game.js: make sure it is still the one rendered here.
   try {
     if (fs.readFileSync(path.join(DIR, 'game.js'), 'utf8').indexOf(EV_LINE) < 0) warn('game.js: the wrong-evidence line is no longer ' + EV_LINE + '; update evLine() here');
@@ -319,7 +430,7 @@ function runProblems(deck, run, practiceIds) {
     it = items[i];
     if (ids[it.id]) p.push('duplicate ' + it.id);
     ids[it.id] = 1;
-    if (it.twin) { if (twins[it.twin]) p.push('two of twin ' + it.twin); twins[it.twin] = 1; }
+    twinsOf(it).forEach(function (t) { if (twins[t]) p.push('two of twin ' + t); twins[t] = 1; });
     if (practiceIds[it.id]) p.push('practice item ' + it.id);
     per[it.list] = per[it.list] || [0, 0];
     per[it.list][0]++;
@@ -337,7 +448,14 @@ function runProblems(deck, run, practiceIds) {
   open = items.slice(0, 3);
   if (!open.every(easy)) p.push('an opening entry is not from the easy pool');
   if (open.filter(function (x) { return x.bad; }).length !== 1 || open[0].bad) p.push('the opening needs one fake, at 1 or 2');
-  open.forEach(function (x) { if (x.bad && x.tell !== 'card') p.push('the opening fake is not a card tell'); });
+  // A deck with a drawn object opens on a card tell; Songs (no object) on any easy fake.
+  if (deck.lists[Object.keys(deck.lists)[0]].objField) {
+    open.forEach(function (x) { if (x.bad && x.tell !== 'card') p.push('the opening fake is not a card tell'); });
+  }
+  // Never open on the twin of a practice card.
+  (deck.practice || []).forEach(function (pr) {
+    twinsOf(pr).forEach(function (t) { if (open.some(function (x) { return twinsOf(x).indexOf(t) > -1; })) p.push('the opening repeats practice twin ' + t); });
+  });
   return p;
 }
 function checkDealing() {
@@ -358,12 +476,14 @@ function checkDealing() {
       // buildRun must not touch the deck: items are copies.
       run.items[0].why = 'changed';
       if (deck.items.some(function (x) { return x.why === 'changed'; })) fail(deck.id + ': buildRun returns the deck’s own objects');
-      out.push('  ' + pad(deck.id, 8) + BUILDS + ' rounds, ' + bad + ' broken, ' +
+      out.push('  ' + pad(deck.id, 11) + BUILDS + ' rounds, ' + bad + ' broken, ' +
         (Math.round(100 * repeats / (BUILDS - 1)) / 100) + ' entries repeated from the previous round on average');
     })(D[dk]);
   }
   // A missing rand falls back to Math.random.
-  if (R.buildRun('travel', []).items.length !== S.entries) fail('buildRun without rand failed');
+  if (R.buildRun('sights', []).items.length !== S.entries) fail('buildRun without rand failed');
+  // An unknown id (a stored v3 'travel' run) plays the first deck.
+  if (R.buildRun('travel', [], mulberry32(3)).deck !== Object.keys(D)[0]) fail('buildRun with an unknown deck does not fall back to the first deck');
   console.log('Dealing');
   out.forEach(function (l) { console.log(l); });
 }
@@ -464,6 +584,8 @@ function checkCopy() {
       return;
     }
     BANNED.forEach(function (r) { if (r[0].test(t)) { hits++; fail(where + ': user copy says ' + r[1] + ': ' + t.trim().slice(0, 70)); } });
+    // v4 (user feedback): the title shows what an app needs, so the v3 line is retired everywhere.
+    if (/spot the fakes/i.test(t)) warn(where + ': the retired v3 line “Spot the fakes” is still in user copy');
     WEB3.forEach(function (r) { if (r[0].test(t)) { hits++; fail(where + ': user copy is web3 (' + r[1] + '): ' + t.trim().slice(0, 70)); } });
   }
   function js(src, name, from) {
@@ -490,20 +612,22 @@ function checkCopy() {
 }
 
 // ---- Sizes ----
-// Budgets in bytes: [raw, gzip] (0 = no limit). The data files (settings, decks, rules) fail when over; the
-// rest only warn. Each budget is the measured size plus about 10%: set after the first review round, and set
-// again for v3 (28 Oct), when flags, 12 landmark models and the standalone shell were added and the wallet
-// content went. Unminified on purpose: no build step, and the source stays readable. Raise a budget only with
-// a reason. Measured for v3 while objects.js and gl.js were still being finished: re-measure once they settle.
-var KB = 1024;
+// Budgets in bytes: [raw, gzip] (0 = no limit). The data files (settings, decks, rules, credits) fail when over;
+// the rest only warn. Each budget is the measured size plus about 10%: set after the first review round, set
+// again for v3 (28 Oct), and for v4 the data files again (three decks, one list each, photo credits).
+// Unminified on purpose: no build step, and the source stays readable. Raise a budget only with a reason.
+// Photos in site/curate/img are not eager (a card loads its photo when dealt): they are reported apart, each
+// within 60 KiB.
+var KB = 1024, IMG_MAX = 60 * KB;
 var BUDGETS = {
-  'settings.js': [2.3 * KB, 0, true], 'decks.js': [22.5 * KB, 7.5 * KB, true], 'rules.js': [7.8 * KB, 0, true],
+  'settings.js': [2.4 * KB, 0, true], 'decks.js': [29 * KB, 9 * KB, true], 'rules.js': [8.9 * KB, 0, true],
+  'credits.js': [5.75 * KB, 2.25 * KB, true],
   'objects.js': [38 * KB, 14.5 * KB], 'gl.js': [41.5 * KB, 15.5 * KB], 'game.js': [45 * KB, 15 * KB],
   'rewards.js': [43.5 * KB, 14.75 * KB], 'index.html': [62.5 * KB, 17.5 * KB]
 };
-var TOTAL = [221 * KB, 73 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
+var TOTAL = [227 * KB, 75 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
 function checkSizes() {
-  var total = 0, totalGz = 0;
+  var total = 0, totalGz = 0, imgs = [], imgTotal = 0, big = 0;
   console.log('Sizes (raw / gzip, budget)');
   Object.keys(BUDGETS).forEach(function (f) {
     var b = BUDGETS[f], p = path.join(DIR, f), buf, raw, gz, over;
@@ -517,8 +641,15 @@ function checkSizes() {
     if (over) (b[2] ? fail : warn)('site/curate/' + f + ' is over its budget');
   });
   console.log('  ' + pad('total', 12) + lpad(total, 6) + ' / ' + lpad(totalGz, 5) + '   ≤ ' + (TOTAL[0] / KB) + ' KB / ' +
-    (TOTAL[1] / KB) + ' KB gz, before gl.js');
+    (TOTAL[1] / KB) + ' KB gz, before gl.js and photos');
   if (total > TOTAL[0] || totalGz > TOTAL[1]) warn('site/curate is over the total budget (eager files)');
+  if (fs.existsSync(IMG)) imgs = fs.readdirSync(IMG).filter(function (f) { return /\.jpg$/.test(f); });
+  imgs.forEach(function (f) {
+    var n = fs.statSync(path.join(IMG, f)).size;
+    imgTotal += n;
+    if (n > IMG_MAX) { big++; fail('site/curate/img/' + f + ' is ' + n + ' bytes (max ' + IMG_MAX + ')'); }
+  });
+  console.log('  ' + pad('img/*.jpg', 12) + lpad(imgTotal, 7) + '  in ' + imgs.length + ' photos, not eager, each ≤ 60 KB' + (big ? '   OVER' : ''));
 }
 
 // ---- Rewards ----
@@ -564,8 +695,8 @@ function page(ls, opts) {
 }
 // One round through the public API, as game.js calls it: startShift when the clock starts, then finishShift.
 function playShift(pg, final) {
-  var r = pg.CurateRewards.startShift('travel');
-  pg.CurateRewards.finishShift({ deck: 'travel', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6,
+  var r = pg.CurateRewards.startShift('sights');
+  pg.CurateRewards.finishShift({ deck: 'sights', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6,
     evidence: 1, wrong: 0, leaks: 1, trust: 85, reviewed: 10, counted: r.counted, shiftNo: r.shiftNo, code: r.code, misses: [] });
   return r;
 }
@@ -575,39 +706,42 @@ function self(tier, merch) {
   return JSON.stringify({ ticket: 'K-ABC123', name: 'Ana', confirmed: true, newsletter: false, merch: m });
 }
 function checkRewards() {
-  var n = 0, ls, a, b, c, kept, m;
+  var n = 0, ls, a, b, c, kept, m, T = S.tiers;
+  // Scores inside each tier, read from settings.js so a retune keeps these cases meaningful.
+  var EVERY = Math.floor(T[1] / 2), LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
+    PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3] + 50, GOLD2 = T[3] + 150;
   function ok(cond, msg) { n++; if (!cond) fail('rewards.js: ' + msg); }
   function stored(l) { return JSON.parse(l.getItem('kleros_devcon_curate')); }
   // Two tabs: a stale tab neither counts a 4th round nor drops the other tab's best or stamp.
   ls = new Store(); a = page(ls); b = page(ls);
-  playShift(a, 600); playShift(a, 1000); playShift(a, 300);
-  ok(!b.CurateRewards.startShift('travel').counted, 'a stale tab counted a 4th round');
-  ok(stored(ls).counted === 3 && stored(ls).best.final === 1000, 'a stale tab dropped the other tab’s counted rounds or best');
+  playShift(a, TEAL); playShift(a, PURPLE); playShift(a, EVERY);
+  ok(!b.CurateRewards.startShift('sights').counted, 'a stale tab counted a 4th round');
+  ok(stored(ls).counted === 3 && stored(ls).best.final === PURPLE, 'a stale tab dropped the other tab’s counted rounds or best');
   stamp(a);
   kept = JSON.stringify(stored(ls).collected);
   ok(stored(ls).collected && stored(ls).collected.tier === 2, 'the staff stamp did not save a Purple collect');
-  b.CurateRewards.startShift('travel'); b.CurateRewards.showTicket();
+  b.CurateRewards.startShift('sights'); b.CurateRewards.showTicket();
   ok(JSON.stringify(stored(ls).collected) === kept && b.CurateRewards.model().state === 'collected', 'a stale tab lost the stamp');
   // The check-in ticket already covers a game tier at or below it: no second claimable ticket.
-  ls = new Store(); ls.setItem('kleros_devcon_self', self(3)); c = page(ls); playShift(c, 1600);
+  ls = new Store(); ls.setItem('kleros_devcon_self', self(3)); c = page(ls); playShift(c, GOLD2);
   ok(c.CurateRewards.model().state === 'checkin', 'check-in Gold plus game Gold is still claimable');
-  ls = new Store(); ls.setItem('kleros_devcon_self', self(1)); c = page(ls); playShift(c, 1000);
+  ls = new Store(); ls.setItem('kleros_devcon_self', self(1)); c = page(ls); playShift(c, PURPLE);
   m = c.CurateRewards.model();
   ok(m.state === 'live' && m.t === 2 && m.code === 'K-ABC123', 'check-in Teal plus game Purple is not a live K- Purple ticket');
   // Everyone has nothing to stamp, and a later Teal round still counts.
-  ls = new Store(); c = page(ls); playShift(c, 300); stamp(c);
+  ls = new Store(); c = page(ls); playShift(c, EVERY); stamp(c);
   ok(c.el('tb-staff-btn').hidden && !stored(ls).collected, 'an Everyone ticket can be stamped');
-  playShift(c, 600);
+  playShift(c, TEAL);
   m = c.CurateRewards.model();
   ok(m.state === 'live' && m.t === 1, 'a Teal round after an Everyone ticket is not live Teal');
   // A mid-day retune never downgrades a ticket, and a lower tier never replaces it.
-  ls = new Store(); playShift(page(ls), 1500);
-  c = page(ls, { settings: function (s) { s.tiers = [0, 450, 950, 1550]; } });
+  ls = new Store(); playShift(page(ls), GOLD);
+  c = page(ls, { settings: function (s) { s.tiers = [0, T[1], T[2], T[3] + 100]; } });
   ok(c.CurateRewards.model().g === 3, 'raising the Gold threshold downgraded today’s Gold ticket');
-  playShift(c, 1520);
-  ok(stored(ls).best.final === 1500, 'a Purple 1520 replaced a Gold 1500');
+  playShift(c, GOLD + 20);
+  ok(stored(ls).best.final === GOLD, 'a Purple ' + (GOLD + 20) + ' replaced a Gold ' + GOLD);
   // Sold-out notes read as plain sentences for every tier.
-  [['teal', 600], ['purple', 1000], ['gold', 1500]].forEach(function (t) {
+  [['teal', TEAL], ['purple', PURPLE], ['gold', GOLD]].forEach(function (t) {
     var l = new Store(), p;
     // Gold needs a confirmed check-in; a Teal check-in alone already covers Teal and Purple sold down to Teal.
     if (t[0] === 'gold') l.setItem('kleros_devcon_self', JSON.stringify({ ticket: 'K-Z', confirmed: true, merch: {} }));
@@ -618,15 +752,15 @@ function checkRewards() {
   // A duplicate check-in (merch.claimed): the merch already went with it, so the game names no reward.
   ls = new Store(); ls.setItem('kleros_devcon_self', self(0, { claimed: 'email' })); c = page(ls);
   ok(/^You already checked in at the booth/.test(c.text('welcome-text')), 'duplicate check-in welcome: ' + c.text('welcome-text'));
-  playShift(c, 1600);
+  playShift(c, GOLD2);
   ok(c.text('rep-tier-line') === 'Merch goes with your first check-in. Play for fun.', 'duplicate check-in report: ' + c.text('rep-tier-line'));
   ok(c.el('rep-gold').hidden !== false && c.CurateRewards.model().state === 'dup', 'duplicate check-in is offered a Gold check-in');
   // Kiosk: one round is one visitor, capped at kioskMaxTier, and the ticket's button is Next curator.
   c = page(new Store(), { kiosk: true });
-  playShift(c, 600); playShift(c, 150);
+  playShift(c, TEAL); playShift(c, LOW);
   m = c.CurateRewards.model();
-  ok(m.t === 0 && m.best.final === 150, 'the next kiosk visitor inherited an earlier best');
-  playShift(c, 1600); c.CurateRewards.showTicket();
+  ok(m.t === 0 && m.best.final === LOW, 'the next kiosk visitor inherited an earlier best');
+  playShift(c, GOLD2); c.CurateRewards.showTicket();
   ok(c.CurateRewards.model().t === S.kioskMaxTier && c.text('t-again') === 'Next curator', 'kiosk cap or Next curator');
   ok(!c.el('hdr-logo').hasAttribute('href'), 'the kiosk logo keeps a link');
   // The one-item rule shows once, whether or not the configured merch note already says it.
@@ -713,14 +847,15 @@ function lazy(kind) {
     return { action: ch ? 'challenge' : 'letThrough', evidence: '', secs: lognormal(rand, 0.45) };
   };
 }
+var DECK_IDS = Object.keys(D || {});
 function simProfile(prof, relaxed, rand) {
-  var one = [0, 0, 0, 0], best = [0, 0, 0, 0], scores = [], decided = [], r, k, n, u, b, res, last, deck;
+  var one = [0, 0, 0, 0], best = [0, 0, 0, 0], scores = [], bests = [], decided = [], r, k, n, u, b, res, last, deck;
   for (r = 0; r < RUNS; r++) {
     u = rand(); n = 0;
     for (k = 0; k < PLAYS.length && n === 0; k++) { u -= PLAYS[k][1]; if (u < 0) n = PLAYS[k][0]; }
     n = n || 1;
     b = 0; last = [];
-    deck = 'travel';   // the one mixed deck
+    deck = DECK_IDS[Math.floor(rand() * DECK_IDS.length)];   // each player picks one app and replays it
     for (k = 0; k < n; k++) {
       res = playRound(deck, relaxed, player(Math.min(0.99, prof[2] + 0.03 * (k ? 1 : 0)), prof[3] * (k ? 0.9 : 1), prof[4]),
         rand, last);
@@ -729,25 +864,29 @@ function simProfile(prof, relaxed, rand) {
       b = Math.max(b, res.score.final);
     }
     best[R.tierFor(b)]++;
+    bests.push(b);
   }
-  return { one: one, best: best, median: median(scores), decided: median(decided) };
+  return { one: one, best: best, bests: bests, median: median(scores), decided: median(decided) };
 }
 function shares(c) { return c.map(function (x) { return Math.round(pct(x, RUNS)); }); }
 function simulate() {
   var rand = mulberry32(2026), modes = ['standard', 'relaxed'];
   modes.forEach(function (mode) {
-    var relaxed = mode === 'relaxed', mix = [0, 0, 0, 0];
+    var relaxed = mode === 'relaxed', mix = [0, 0, 0, 0], all = [];
     console.log('\nSimulation, ' + mode + ' (' + RUNS + ' players per profile; E/T/P/G = Everyone/Teal/Purple/Gold %)');
     console.log('  ' + pad('Profile', 10) + pad('mix', 6) + pad('acc/time/ev', 16) + pad('decided', 9) + pad('median', 8) +
       pad('one round', 14) + 'best of plays');
     PROFILES.forEach(function (p) {
       var s = simProfile(p, relaxed, rand), i;
       for (i = 0; i < 4; i++) mix[i] += p[1] * pct(s.best[i], RUNS);
+      s.bests.forEach(function (b) { all.push([b, p[1] / RUNS]); });
       console.log('  ' + pad(p[0], 10) + pad(Math.round(p[1] * 100) + '%', 6) + pad(p[2] + '/' + p[3] + 's/' + p[4], 16) +
         pad(s.decided, 9) + pad(s.median, 8) + pad(shares(s.one).join('/'), 14) + shares(s.best).join('/'));
     });
     mix = mix.map(function (x) { return Math.round(x * 10) / 10; });
-    console.log('  Mix: ' + mix.join(' / ') + ' %   (§2.8: ≈ ' + TARGET[mode].join(' / ') + ' %, ±' + TOLERANCE + ')');
+    console.log('  Mix: ' + mix.join(' / ') + ' %   (§2.8: ≈ ' + TARGET[mode].join(' / ') + ' %, ±' + TOLERANCE + ')' +
+      '   tiers ' + S.tiers.join(' / '));
+    if (FIT && !relaxed) fit(all);
     mix.forEach(function (x, i) {
       if (Math.abs(x - TARGET[mode][i]) > TOLERANCE) {
         (relaxed ? warn : fail)(mode + ' mix tier ' + i + ' is ' + x + '%, §2.8 says ' + TARGET[mode][i] + '% ±' + TOLERANCE);
@@ -756,6 +895,18 @@ function simulate() {
   });
   simLazy(rand);
 }
+// --fit: the thresholds that put the weighted best-of-plays scores at the TARGET shares, rounded to 5 points.
+// Paste them into settings.js tiers, then run --sim again: the lazy check still has the last word.
+function fit(all) {
+  var cut = [], acc = 0, i = 0, goal = 0, t;
+  all.sort(function (a, b) { return a[0] - b[0]; });
+  for (t = 0; t < 3; t++) {
+    goal += TARGET.standard[t] / 100;
+    while (i < all.length && acc + all[i][1] <= goal) { acc += all[i][1]; i++; }
+    cut.push(Math.round((i < all.length ? all[i][0] : all[all.length - 1][0]) / 5) * 5);
+  }
+  console.log('  Fit: tiers [0, ' + cut.join(', ') + '] would give about ' + TARGET.standard.join(' / ') + ' %');
+}
 // Lazy strategies must never reach Teal; random fast taps are reported only.
 function simLazy(rand) {
   console.log('\nLazy strategies, standard (' + RUNS + ' rounds each)');
@@ -763,7 +914,7 @@ function simLazy(rand) {
     ['random', 'Random fast taps (0.45 s)']].forEach(function (s) {
     var scores = [], teal = 0, r, f;
     for (r = 0; r < RUNS; r++) {
-      f = playRound('travel', false, lazy(s[0]), rand, []).score.final;
+      f = playRound(DECK_IDS[r % DECK_IDS.length], false, lazy(s[0]), rand, []).score.final;
       scores.push(f);
       if (R.tierFor(f) >= 1) teal++;
     }
@@ -775,6 +926,7 @@ function simLazy(rand) {
 
 // ---- Main ----
 checkSettings();
+checkCredits();
 checkSchema();
 checkDealing();
 checkLint();

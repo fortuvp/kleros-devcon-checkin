@@ -18,14 +18,17 @@
   }
 
   // ---- Dealing a round ----
-  // Up to n items passing test: ids not in the last round first, one per twin.
+  // An item's twin keys: null, one string, or a list (a Big Ben photo named Eiffel Tower is both).
+  function twins(it) { return !it.twin ? [] : typeof it.twin === 'string' ? [it.twin] : it.twin; }
+  // Up to n items passing test: ids not in the last round first, one per twin key.
   function take(pool, n, test, out, seen, last, rand) {
-    var c = shuffle(pool.filter(test), rand), i, it;
+    var c = shuffle(pool.filter(test), rand), i, it, tw;
     c.sort(function (a, b) { return (last.indexOf(a.id) > -1) - (last.indexOf(b.id) > -1); });   // stable
     for (i = 0; i < c.length && n > 0; i++) {
-      it = c[i];
-      if (seen[it.id] || (it.twin && seen['~' + it.twin])) continue;
-      seen[it.id] = seen['~' + it.twin] = 1;
+      it = c[i]; tw = twins(it);
+      if (seen[it.id] || tw.some(function (k) { return seen['~' + k]; })) continue;
+      seen[it.id] = 1;
+      tw.forEach(function (k) { seen['~' + k] = 1; });
       out.push(it); n--;
     }
   }
@@ -52,16 +55,22 @@
     }
     return { ok: true, items: seq };
   }
-  // Spec §2.4: easy opening with a card-tell fake at 1 or 2; late list from 5.
+  // Spec §2.4: easy opening with a card-tell fake at 1 or 2; late list from 5. A deck with no easy
+  // card-tell fake (Music: every fake takes knowing the song) opens on any easy fake instead.
   function buildRun(deckId, lastIds, rand) {
-    var D = window.CURATE_DECKS, deck = D[deckId] || D.travel, items = deck.items, split = deck.split;
+    var D = window.CURATE_DECKS, deck = D[deckId], items, split;
     var last = lastIds || [], seen = {}, open = [], rest = [], got = {}, k, r, t;
+    if (!deck) for (k in D) { deck = D[k]; break; }   // an unknown id plays the first deck
+    items = deck.items; split = deck.split;
     rand = rand || Math.random;
     // Never open on the twin of a practice card (e.g. the Eiffel Tower right after practising on it).
     var pt = {};
-    (deck.practice || []).forEach(function (p) { if (p.twin) pt[p.twin] = 1; });
-    function easy(it) { return !pt[it.twin] && (deck.easy ? it.list === deck.easy : it.lvl === 1); }
+    (deck.practice || []).forEach(function (p) { twins(p).forEach(function (x) { pt[x] = 1; }); });
+    function easy(it) {
+      return !twins(it).some(function (x) { return pt[x]; }) && (deck.easy ? it.list === deck.easy : it.lvl === 1);
+    }
     take(items, 1, function (it) { return easy(it) && it.bad && it.tell === 'card'; }, open, seen, last, rand);
+    if (!open.length) take(items, 1, function (it) { return easy(it) && it.bad; }, open, seen, last, rand);
     take(items, 2, function (it) { return easy(it) && !it.bad; }, open, seen, last, rand);
     open.forEach(function (it) { (got[it.list] || (got[it.list] = [0, 0]))[it.bad ? 1 : 0]++; });
     function pick(bad) {

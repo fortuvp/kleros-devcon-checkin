@@ -25,14 +25,16 @@
   function hhmm(at) { var d = new Date(at); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function lowerFirst(s) { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); }
   function kioskCap() { return S.kioskMaxTier == null ? 1 : S.kioskMaxTier; }
-  // An unknown id (say a 'wallet' run stored before v3) falls back to the first deck, travel.
+  // An unknown id (say a 'travel' run stored before v4) falls back to the first deck in decks.js order.
   function firstDeck() {
     var D = window.CURATE_DECKS || {}, k;
-    if (D.travel) return D.travel;
     for (k in D) if (D.hasOwnProperty(k)) return D[k];
     return null;
   }
-  function deckOf(id) { var D = window.CURATE_DECKS || {}; return D[id] || firstDeck() || { client: 'Travel app', copy: {} }; }
+  function deckOf(id) {
+    var D = window.CURATE_DECKS || {};
+    return (D.hasOwnProperty(id) && D[id]) || firstDeck() || { id: '', client: 'Kleros Curate', copy: {} };
+  }
   function thumbs(box, imgs) {
     if (!box) return;
     while (box.firstChild) box.removeChild(box.firstChild);
@@ -47,7 +49,8 @@
   // ---- Merch tiers ----
   // Names, rewards and pictures come from config.js by index, never by name; settings.js decides who gets what.
   var MERCH = CFG.merch && (CFG.merch.tiers || []).length === 3 ? CFG.merch : (S.fallbackMerch || { tiers: [{}, {}, {}] });
-  var TIERS = S.tiers || [0, 450, 950, 1450];
+  // settings.js owns the thresholds (tuned with curate-check --sim): no copy of them lives here.
+  var TIERS = S.tiers || [0];
   var NEED = S.checkinNeededFrom || 3;
   var PER_DAY = S.countedPerDay || 3;
   function isSoldOut(i) { return i > 0 && (S.soldOut || []).indexOf(NAMES[i]) > -1; }
@@ -91,7 +94,7 @@
   // One object under one key. Kiosk never touches storage; a blocked browser keeps a memory copy for this visit.
   var st = null, blocked = false;
   function fresh() {
-    return { v: 1, deck: (firstDeck() || {}).id || 'travel', relaxed: false, practiced: {}, lastIds: {}, day: today(), counted: 0,
+    return { v: 1, deck: (firstDeck() || {}).id || '', relaxed: false, practiced: {}, lastIds: {}, day: today(), counted: 0,
              best: null, runs: [], collected: null };
   }
   function load() {
@@ -134,9 +137,11 @@
   }
 
   // ---- Prefs and counted shifts ----
+  // v4: one practice card the first time on this phone, whichever app: any practised deck counts for all.
+  function practisedAny() { var k; for (k in st.practiced) if (st.practiced.hasOwnProperty(k) && st.practiced[k]) return true; return false; }
   function getPref(k) {
     sync();
-    if (k.indexOf('practiced.') === 0) return KIOSK ? false : !!st.practiced[k.slice(10)];   // kiosk: practice every time
+    if (k === 'practiced' || k.indexOf('practiced.') === 0) return KIOSK ? false : practisedAny();   // kiosk: practice every time
     return st[k];
   }
   function setPref(k, v) {
@@ -203,7 +208,7 @@
   }
   // The prize strip: 4 chips the shell lays out in a row. Built here, so it needs no template:
   // <li class="chip t-teal [is-locked] [is-sold]"><span class="thumbs"><img alt=""></span>
-  //   <span class="chip-txt"><b><em>Teal</em></b><span class="how">450 pts</span></span><span class="sr">reward</span></li>
+  //   <span class="chip-txt"><b><em>Teal</em></b><span class="how">{TIERS[1]} pts</span></span><span class="sr">reward</span></li>
   function make(tag, cls, s, slot) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -246,11 +251,55 @@
         ' best tier counts. Your best of ' + fmt(PER_DAY) + ' rounds today counts.' + (MERCH.note ? ' ' + MERCH.note + '.' : ''));
   }
   function refreshBrief() {
+    leaveReport();
     stopTicket();
     clearTimeout(idleTimer);
     if (KIOSK) st = null;   // a booth tablet: every return to the brief is the next visitor
     sync();
     renderHeader(); renderWelcome(); renderLadder();
+  }
+
+  // ---- Medal ----
+  // objects.js draws the medal (GL or 2D); rewards.js says which tier, once Results show (a hidden box has no size).
+  var repTier = 0, medalOn = false;
+  function mountMedal() {
+    var el = $('rep-medal'), o = window.CurateObjects;
+    if (!el) return;
+    el.setAttribute('data-tier', NAMES[repTier] || 'free');   // the shell tints the glow behind it
+    if (!o || !o.medal) return;
+    try { o.medal(el, repTier); medalOn = true; } catch (e) { medalOn = false; }   // a medal failure never blocks Results
+  }
+  function leaveReport() {
+    var o = window.CurateObjects;
+    if (!medalOn) return;
+    medalOn = false;
+    if (o && o.medal) { try { o.medal(null); } catch (e) { /* already gone */ } }
+  }
+  // The ticket’s small medal: a static 2D coin in the tier colour, drawn here so it never touches the GL one.
+  var COIN = ['#cfc4f2', '#7ff0e0', '#b77bff', '#f2c46d'];
+  function coin(i, css) {
+    var cv = document.createElement('canvas'), x = cv.getContext ? cv.getContext('2d') : null, col = COIN[i] || COIN[0], r, g;
+    if (!x) return null;
+    cv.width = cv.height = Math.round(css * Math.min(3, window.devicePixelRatio || 1));
+    cv.setAttribute('aria-hidden', 'true');
+    cv.style.cssText = 'width:' + css + 'px;height:' + css + 'px;vertical-align:-4px;margin-right:6px;border-radius:50%;' +
+      'box-shadow:0 0 8px ' + col;
+    r = cv.width / 2;
+    // Tier-colour face, a lit highlight and two dark rings (rim and inner edge): enough to read as metal at 18 px.
+    g = x.createRadialGradient(r * 0.7, r * 0.6, 0, r, r, r);
+    g.addColorStop(0, '#fff'); g.addColorStop(0.45, col); g.addColorStop(1, col);
+    x.fillStyle = g; x.beginPath(); x.arc(r, r, r, 0, 7); x.fill();
+    x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = Math.max(1, r * 0.1);
+    x.beginPath(); x.arc(r, r, r * 0.9, 0, 7); x.stroke();
+    x.beginPath(); x.arc(r, r, r * 0.55, 0, 7); x.stroke();
+    return cv;
+  }
+  // #t-tier keeps its text as textContent (the check script reads it); the coin goes in front of it.
+  function tierLabel(s, i) {
+    var el = txt('t-tier', s), cv;
+    if (i == null || !el || !el.insertBefore) return;
+    cv = coin(i, 18);
+    if (cv) el.insertBefore(cv, el.firstChild);
   }
 
   // ---- Report ----
@@ -282,6 +331,7 @@
     save();
     renderReport(run, sum.misses);   // the stored run keeps only 3 misses; the report counts them all
     UI.show('report');
+    mountMedal();
     var h = $('rep-title');
     if (h) { try { h.focus({ preventScroll: true }); } catch (e) { h.focus(); } }
     countUp(run.final || 0);
@@ -304,6 +354,7 @@
   }
   function markerAt(p) {
     var i = tierFor(p);
+    if (TIERS.length < 4) return 0;
     if (i >= 3) return Math.min(1, 0.75 + 0.25 * (p - TIERS[3]) / Math.max(1, TIERS[3] - TIERS[2]));
     return (i + (p - TIERS[i]) / Math.max(1, TIERS[i + 1] - TIERS[i])) / 4;
   }
@@ -343,13 +394,17 @@
     var el = $(id), b = el && el.querySelector('b');
     if (b) b.textContent = v; else txt(id, label + ' ' + v.replace(/ /g, '\u00a0'));
   }
-  // The payoff follows the trust band, like the headline and the quote; a deck may bring its own lines.
-  var PAYOFFS = ['{client} kept {trust}% of travellers’ trust, so they keep using it and it keeps earning.',
-    '{client} kept {trust}% of travellers’ trust. Each fake that got listed cost it travellers.',
-    '{client} lost travellers’ trust (down to {trust}%): fakes reached them, and it stops earning until the lists are clean.'];
-  var QUOTES = ['“Travellers only saw real entries today. Come back tomorrow?”',
+  // Headline, quote and payoff follow the trust band (≥90 / 70–89 / <70) and come from the app’s deck copy.
+  // App-neutral lines cover a deck that lacks one, so no app shows another app’s story.
+  var HEADLINES = ['Clean list. Users are safe.', 'Mostly clean. A few fakes slipped in.', 'Leaky list. Fakes reached users.'];
+  var PAYOFFS = ['{client} kept {trust}% of its users’ trust, so they keep using it and it keeps earning.',
+    '{client} kept {trust}% of its users’ trust. Each fake that got listed cost it users.',
+    '{client} lost users’ trust (down to {trust}%): fakes reached them, and it stops earning until the list is clean.'];
+  var QUOTES = ['“Our users only saw real entries today. Come back tomorrow?”',
     '“A few fakes got through. We filed removal requests.”',
-    '“Travellers went to fake places. We’re pausing the lists until they’re clean.”'];
+    '“Fakes reached our users. We’re pausing the list until it’s clean.”'];
+  function band3(list, fb, band) { var s = list && list[band]; return s ? String(s) : fb[band]; }
+  function fill(s, d, trust) { return String(s).split('{client}').join(d.client || '').split('{trust}').join(String(trust)); }
   // Ranks by tier when no check-in name; settings.js wins when it has them.
   var RANKS = ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'];
   function againText(c) {
@@ -361,17 +416,17 @@
         band = trust >= 90 ? 0 : trust >= 70 ? 1 : 2, final = sum.final || 0, ci = checkin(),
         g0 = tierFor(final), g = g0, info, next = '', c = canCount(), pending;
     if (KIOSK) g = Math.min(g, kioskCap());
+    repTier = g;   // the medal shows the tier this round earns here (capped on a booth tablet)
     txt('rep-kicker', 'Results · ' + d.client + (sum.counted ? '' : ' · Practice round: not counted today'));
-    txt('rep-title', ['Clean lists. Travellers are safe.', 'Mostly clean. A few fakes slipped in.',
-      'Leaky lists. Travellers got fooled.'][band]);
-    txt('rep-sub', fmt(sum.reviewed) + ' of ' + fmt(sum.entries || S.entries || 20) + ' entries reviewed');
+    txt('rep-title', band3(copy.headlines, HEADLINES, band));
+    txt('rep-sub', fmt(sum.reviewed) + ' of ' + fmt(sum.entries || S.entries || sum.reviewed) + ' entries reviewed');
     stat('rep-caught', 'Fakes caught', fmt(sum.caught) + ' of ' + fmt(sum.fakesSeen));
     stat('rep-listed', 'Good entries listed', fmt(sum.listed) + ' of ' + fmt(sum.goodsSeen));
     stat('rep-evidence', 'Sharp evidence', fmt(sum.evidence));
     stat('rep-wrong', 'Wrong challenges', fmt(sum.wrong));
-    txt('rep-quote', (copy.quotes || QUOTES)[band] || '');
+    txt('rep-quote', fill(band3(copy.quotes, QUOTES, band), d, trust));
     txt('rep-quote-by', copy.quoteBy || (d.client ? d.client + ' (fictional)' : ''));
-    txt('rep-payoff', ((copy.payoffs || [])[band] || PAYOFFS[band]).replace('{client}', d.client).replace('{trust}', trust) +
+    txt('rep-payoff', fill(band3(copy.payoffs, PAYOFFS, band), d, trust) +
         (sum.caught > 0 ? ' Your bounties came from the fakers’ deposits.' : ' Catch a fake and its deposit becomes your bounty.'));
     renderMeter(final, g);
     info = tierInfo(g);
@@ -389,7 +444,7 @@
     renderMisses([].concat(misses || sum.misses || []));
     txt('to-ticket', 'Show my merch ticket');
     txt('again', againText(c));
-    txt('rep-switch', '');   // one mixed deck: the shell keeps #rep-switch hidden
+    txt('rep-switch', 'Try another app');   // game.js wires it back to the title screen
     txt('rep-fine', 'Points are for booth merch, not real money. Real challenge windows last days; here you get seconds.' +
         (MERCH.note ? ' ' + MERCH.note + '.' : ''));
   }
@@ -500,7 +555,7 @@
     vis('t-img', live || m.state === 'collected');
     thumbs($('t-img'), live || m.state === 'collected' ? info.img : []);
     if (live) {
-      txt('t-tier', tierTitle(m.t)); txt('t-reward', info.reward); txt('t-hint', hintFor(m));
+      tierLabel(tierTitle(m.t), m.t); txt('t-reward', info.reward); txt('t-hint', hintFor(m));
       txt('t-note', noteFor(m));
     } else if (m.state === 'collected') {
       txt('t-tier', 'Collected · ' + tierTitle(m.t) + ' · ' + hhmm(st.collected.at));
@@ -580,6 +635,7 @@
     if (staffFor) closeStaff(false);
   }
   function showTicket() {
+    leaveReport();
     sync();
     clearTimeout(idleTimer);
     stopTicket();
@@ -593,6 +649,7 @@
     clockTimer = setInterval(onTick, 1000);
   }
   function kioskReset() {
+    leaveReport();
     stopTicket();
     clearTimeout(idleTimer);
     st = null;   // the next visitor starts clean
@@ -744,6 +801,13 @@
     on('staff-ok', 'click', confirmStaff);
     on('staff-cancel', 'click', function () { closeStaff(); });
     on('undo-btn', 'click', undoCollect);
+    // Any way out of Results releases the medal: #report getting hidden, or game.js’s two buttons.
+    on('again', 'click', leaveReport);
+    on('rep-switch', 'click', leaveReport);
+    var rep = $('report');
+    if (rep && window.MutationObserver) {
+      new MutationObserver(function () { if (rep.hidden) leaveReport(); }).observe(rep, { attributes: true, attributeFilter: ['hidden'] });
+    }
     document.addEventListener('keydown', onDocKey);
     document.addEventListener('pointerdown', function () {
       var r = $('report');

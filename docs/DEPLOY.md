@@ -9,7 +9,7 @@ Pick one:
 - **From GitHub (recommended, redeploys on every push).** Netlify › *Add new site* › *Import an existing project* › GitHub › `weiwei-ooi/kleros-devcon-checkin`. Leave the build command empty; the publish directory is `site` (set by `netlify.toml`).
 - **Drag and drop.** Netlify › *Add new site* › *Deploy manually*, then drop the `site` folder from this package. To update later: the site's *Deploys* tab › drop the folder again.
 
-The Curate game (`/curate`) is part of `site/` (`site/curate/`): nothing extra to deploy or configure.
+The Curate game (`/curate`) is part of `site/` (`site/curate/`, including its photos in `site/curate/img/` and their credits in `site/curate/credits.js`): nothing extra to deploy or configure.
 
 Then the domain:
 
@@ -17,7 +17,7 @@ Then the domain:
 2. Cloudflare (kleros.io's DNS) › DNS › add `CNAME devcon → <site-name>.netlify.app`, **DNS only** (grey cloud) to start with, so Netlify can issue the HTTPS certificate.
 3. Back in Netlify, wait for the certificate (a few minutes), then open https://devcon.kleros.io.
 
-Note: the live record is not DNS only today. https://devcon.kleros.io answers with `server: cloudflare` (and Cloudflare's `cf-ray` header), so Cloudflare proxies in front of Netlify and can cache. That is why `site/_headers` serves the versionless scripts (`config.js`, `matching.js`, `quiz.js`, `curate/*.js`) with `no-cache`. After a deploy, test on the real domain.
+Note: the live record is not DNS only today. https://devcon.kleros.io answers with `server: cloudflare` (and Cloudflare's `cf-ray` header), so Cloudflare proxies in front of Netlify and can cache. That is why `site/_headers` serves the versionless scripts (`config.js`, `matching.js`, `quiz.js`, `curate/*.js`, including `curate/credits.js`) with `no-cache`. The game's photos (`curate/img/*.jpg`) keep the default caching. After a deploy, test on the real domain.
 
 The printed booth QR codes point to devcon.kleros.io, so this must be live before Devcon (3 Nov). The team dashboard is at https://devcon.kleros.io/admin.html (needs the dashboard key); the Curate game is at https://devcon.kleros.io/curate/.
 
@@ -42,9 +42,10 @@ On a phone: open the site, check in with a real email, confirm the Kleros blog e
 
 Then the game, on the same phone:
 
-1. On the check-in's final screen, tap **Play Curate** (*Spot the fakes in 60 s. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header, and *Start verifying* is visible without scrolling.
-2. Tap *Start verifying* and play a round to the end (the cards mix waving flags, landmark models and Mumbai sights). See the Results, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
-3. Check the back-link under the ticket (*Back to your check-in ticket →*): it opens the check-in page.
-4. Confirm the check-in is unaffected: the same ticket, tier and code as before the game, and no new row in the Sheet.
+1. On the check-in's final screen, tap **Play Curate** (*Help an app keep its list clean. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header, showing *Pick an app to help* and three cards, each with a picture (a real photo, a flag, a record sleeve).
+2. Tap a card and play its round to the end: 10 entries in 40 s, after one practice card the first time on this phone. On Sightseeing, the photos load. See the Results with the spinning medal in your tier's colour, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
+3. Open *How it works*: the *Photo credits* list shows every photo's author and licence, with working links.
+4. Check the back-link under the ticket (*Back to your check-in ticket →*): it opens the check-in page.
+5. Confirm the check-in is unaffected: the same ticket, tier and code as before the game, and no new row in the Sheet.
 
 More detail: `README.md`.

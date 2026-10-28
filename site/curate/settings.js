@@ -3,13 +3,13 @@
 // After changing points, windows or tiers, run `node scripts/curate-check.js --sim` to see the new tier shares.
 window.CURATE_SETTINGS = {
   v: 1,
-  seconds: 60, relaxedSeconds: 90, entries: 20, fakes: 8,
-  windows: [[0, 7], [20, 5.5], [40, 4.5]],   // [from elapsed s, window s]; relaxed: none
-  rushAt: 40, graceMs: 1000,
+  seconds: 40, relaxedSeconds: 60, entries: 10, fakes: 4,   // v4: a shorter round
+  windows: [[0, 6], [15, 5], [28, 4]],       // [from elapsed s, window s]; relaxed: none
+  rushAt: 28, graceMs: 1000,                 // rush toast: Final 12 s
   points: { catch: 100, evidence: 25, letThrough: 25, autoListed: 10, wrongChallenge: -75, leak: -75,
             streakEvery: 5, streakBonus: 50, perSecondLeft: 5, bonusMaxMistakes: 2 },
   trust: { leak: -15, wrongChallenge: -5 },
-  tiers: [0, 450, 950, 1450],                // Everyone, Teal, Purple, Gold
+  tiers: [0, 250, 555, 800],                 // Everyone, Teal, Purple, Gold (v4: fitted by --sim for 10 entries in 40 s)
   checkinNeededFrom: 3,                      // 3 = Gold only; 1 = every tier above Everyone
   countedPerDay: 3,
   kioskMaxTier: 1, kioskResetMs: 20000, kioskIdleMs: 60000,

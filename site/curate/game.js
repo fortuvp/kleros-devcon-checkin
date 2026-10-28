@@ -1,8 +1,6 @@
-// Curate game engine: brief, practice, the 60-second round and the hand-off to the report. Internal names
-// still say "shift" (mode, startShift, #end-shift); only the copy says round.
-// One rAF loop drives the clock, the per-entry windows and drag frames. Rules come from rules.js, items are
-// painted by objects.js, and rewards.js owns storage, the report and the ticket: this file never touches
-// localStorage. User text goes in through textContent only.
+// Curate game engine: the app picker, practice, the 40-second round and the hand-off to the report. Internal
+// names still say "shift"; only the copy says round. One rAF loop drives the clock, windows and drags. rules.js
+// judges, objects.js paints, rewards.js owns storage, report and ticket (never localStorage here). textContent only.
 (function () {
   var S = window.CURATE_SETTINGS, D = window.CURATE_DECKS, R = window.CurateRules;
   var KIOSK = /[?&]kiosk=1\b/.test(location.search);
@@ -10,11 +8,6 @@
   var LITE = /[?&]lite=1\b/.test(location.search) || !!(navigator.connection && navigator.connection.saveData);
   var MINUS = '−', GUARD = 120;
 
-  // Practice coach facts per deck (P1 is India with capital Mumbai, P2 the Eiffel Tower in Paris); the rest of
-  // the coach copy is shared. A deck without an entry falls back to its practice cards' own lines.
-  var COACH = {
-    travel: { fact: 'India’s capital is New Delhi.', good: 'the Eiffel Tower is in Paris.' }
-  };
 
   // ---- Helpers ----
   function $(id) { return document.getElementById(id); }
@@ -29,7 +22,7 @@
   function Rw() { return window.CurateRewards; }
   function O() { return window.CurateObjects; }
   // Calls into objects.js / rewards.js, which may be missing while packages are built apart.
-  function ob(fn, a, b, c) { var o = O(); return o ? o[fn](a, b, c) : null; }
+  function ob(fn, a, b, c) { var o = O(); return o && typeof o[fn] === 'function' ? o[fn](a, b, c) : null; }
   function rw(fn, a, b) { var r = Rw(); return r ? r[fn](a, b) : null; }
   // Restarts a one-shot CSS animation class.
   function bump(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
@@ -45,11 +38,15 @@
   function clearTimers() { while (timers.length) clearTimeout(timers.pop()); }
 
   // ---- Decks ----
-  // The default deck is the first key of CURATE_DECKS (travel). A stored id that no longer exists (an old
-  // deck pref) falls back to it; with one deck the switch buttons stay hidden.
+  // One deck per app, picked on the title screen. An unknown stored id (v3's travel) falls back to the first.
   function deckIds() { var a = [], k; for (k in D) if (D.hasOwnProperty(k)) a.push(k); return a; }
   function firstDeck() { return deckIds()[0] || ''; }
-  function multiDeck() { return deckIds().length > 1; }
+  // Entries per round for a deck: the sum of its split, else the settings default.
+  function deckEntries(d) {
+    var n = 0, k, sp = d && d.split;
+    if (sp) for (k in sp) if (sp.hasOwnProperty(k)) n += sp[k][0];
+    return n || S.entries;
+  }
 
   // ---- State ----
   var deckId = '', deck = null, relaxed = false;
@@ -60,7 +57,7 @@
   var said30 = false, said10 = false, rushed = false;
   var raf = 0, drag = null, press = null, flying = null, keyboard = false;
   var pStep = 0, pT0 = 0, pHinted = false;
-  var heroDeck = '', chalArrow = '', sayT = 0;
+  var chalArrow = '', sayT = 0;
   var announcedTier = 0;     // highest tier toasted this shift: re-crossing a threshold stays quiet
   var focusFirst = false;    // focus the next card that lands (after Start), so focus never sits on <body>
 
@@ -76,9 +73,12 @@
     // Keep modifier classes, replace the v-* one.
     b.className = (b.className.replace(/(^|\s)v-\S+/g, '') + ' v-' + view).replace(/^\s+/, '');
     if (view !== 'play') { show('paused', false); show('explain', false); body('is-paused', false); }
-    // rewards.js fills #rep-switch on the report; with one deck neither switch ever shows.
-    if (!multiDeck()) { show('deck-switch', false); show('rep-switch', false); }
-    ob(view === 'report' || view === 'ticket' ? 'pause' : 'resume');
+    // The app cards replace the v3 deck switch; on Results #rep-switch goes back to them (set after rewards.js
+    // renders the report).
+    show('deck-switch', false);
+    if (view === 'report') { txt('rep-switch', 'Try another app'); show('rep-switch', true); }
+    // Objects keep running on Results for the spinning medal.
+    ob(view === 'ticket' ? 'pause' : 'resume');
     try { window.scrollTo(0, 0); } catch (e) {}
   }
   // The live region re-reads identical text only after it was emptied; texts said together are joined.
@@ -97,27 +97,88 @@
     deckId = id && D.hasOwnProperty(id) ? id : firstDeck();
     deck = D[deckId];
   }
-  function practised() { return !KIOSK && !!rw('getPref', 'practiced.' + deckId); }
+  // rewards.js answers any practiced.* key with "practised any app on this phone" (never in kiosk).
+  function practised() { return !KIOSK && !!rw('getPref', 'practiced.any'); }
   function renderBrief() {
-    var c = deck.copy, rb = $('relaxed');
-    txt('story-1', c.story1);
-    txt('payoff', c.payoff);
-    txt('deck-switch', c.switchTo || '');
-    txt('rep-switch', c.repSwitch || '');
-    show('deck-switch', multiDeck() && !!c.switchTo);
-    if (!multiDeck()) show('rep-switch', false);
+    var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d;
     if (rb) {
       rb.textContent = 'Relaxed timing: ' + (relaxed ? 'On' : 'Off');
       rb.setAttribute('aria-pressed', relaxed ? 'true' : 'false');
     }
-    // The title promises the round length: 90 s with Relaxed timing.
-    var secs = String(relaxed ? S.relaxedSeconds : S.seconds);
+    // The title and every app card promise the round length: 60 s with Relaxed timing.
     txt('brief-secs', secs);
-    txt('under-secs', secs);
+    metas = document.querySelectorAll('#picker .pick');
+    for (i = 0; i < metas.length; i++) {
+      d = D[metas[i].getAttribute('data-deck')];
+      if (d && slot(metas[i], 'meta')) slot(metas[i], 'meta').textContent = deckEntries(d) + ' entries · ' + secs + ' s';
+    }
     body('is-relaxed', relaxed);
     show('practice-again', practised());
-    // The hero keeps its SVG placeholder when objects.js is missing.
-    if (O() && heroDeck !== deckId && $('hero-objs')) { O().hero($('hero-objs'), deck.hero); heroDeck = deckId; }
+  }
+  // ---- App picker ----
+  // One card per deck, in CURATE_DECKS order, built once at boot. The picture is decoration (the card's
+  // text names the app): a photo, a flat flag (_flag's canvas, at a size no card uses) or a painted sleeve.
+  function pickPic(d) {
+    var p = d.pick || {}, v = p.sleeve || {}, el = null;
+    if (p.img) {
+      el = document.createElement('img');
+      el.src = p.img; el.alt = ''; el.decoding = 'async'; el.draggable = false;
+    } else if (p.flag) el = ob('_flag', p.flag, 240, 160);
+    else if (p.sleeve || d.id === 'music') {
+      el = ob('create', { shape: 'sleeve', color: v.color || '#6c3cf0', color2: v.color2 || '#ff6fb5', mark: v.mark || '♪' },
+              { size: 'card' });
+    }
+    if (el) el.setAttribute('aria-hidden', 'true');
+    return el;
+  }
+  function renderPicker() {
+    var box = $('picker'), tpl = $('tpl-pick'), ids = deckIds(), i, d, el, pic, ps, sub;
+    if (!box || !tpl) return;
+    box.textContent = '';
+    for (i = 0; i < ids.length; i++) {
+      d = D[ids[i]];
+      el = tpl.content.firstElementChild.cloneNode(true);
+      el.setAttribute('data-deck', ids[i]);
+      if (slot(el, 'app')) slot(el, 'app').textContent = (d.pick && d.pick.app) || d.client;
+      if (slot(el, 'need')) slot(el, 'need').textContent = (d.pick && d.pick.need) || '';
+      sub = slot(el, 'sub');
+      if (sub) { sub.textContent = (d.pick && d.pick.sub) || ''; sub.hidden = !(d.pick && d.pick.sub); }
+      ps = slot(el, 'pic');
+      pic = ps ? pickPic(d) : null;
+      if (pic) ps.appendChild(pic);
+      box.appendChild(el);
+    }
+  }
+  // A tap on an app card picks it and starts at once (practice first, the very first time).
+  function onPick(e) {
+    var b = e.target.closest ? e.target.closest('.pick[data-deck]') : null;
+    if (!b || mode !== 'brief') return;
+    keyboard = e.detail === 0;
+    setDeck(b.getAttribute('data-deck'));
+    rw('setPref', 'deck', deckId);
+    startFlow(false);
+  }
+  // ---- Photo credits ----
+  // How it works credits every photo. https links only; plain text in kiosk, which hides the docs link too.
+  function link(label, href) {
+    var a;
+    if (KIOSK || !/^https:\/\//.test(href || '')) { a = document.createElement('span'); a.textContent = label; return a; }
+    a = document.createElement('a');
+    a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = label;
+    return a;
+  }
+  function renderCredits() {
+    var ul = $('credits-list'), c = window.CURATE_CREDITS || [], i, li;
+    if (!ul) return;
+    ul.textContent = '';
+    for (i = 0; i < c.length; i++) {
+      li = document.createElement('li');
+      li.appendChild(document.createTextNode(c[i].subject + ': ' + c[i].author + ', '));
+      li.appendChild(link(c[i].license, c[i].licenseUrl));
+      li.appendChild(document.createTextNode(', via '));
+      li.appendChild(link('Wikimedia Commons', c[i].source));
+      ul.appendChild(li);
+    }
   }
   // focus: when the control that led here is gone (report, pause overlay, kiosk reset).
   function goBrief(focus) {
@@ -126,13 +187,6 @@
     rw('refreshBrief');
     showView('brief');
     if (focus) park('brief-title');
-  }
-  // Cycles to the next deck; a no-op with one deck (the buttons are hidden then anyway).
-  function switchDeck() {
-    var ids = deckIds();
-    if (ids.length < 2) return;
-    setDeck(ids[(ids.indexOf(deckId) + 1) % ids.length]);
-    rw('setPref', 'deck', deckId);
   }
   function toggleRelaxed() {
     relaxed = !relaxed;
@@ -168,8 +222,8 @@
     if (!obj) { obj = document.createElement('div'); obj.className = 'obj'; obj.setAttribute('aria-hidden', 'true'); }
     objSlot.appendChild(obj);
     el._obj = obj;
-    // The 3D object is evidence too, for any list with an objField (Flag, Model): tapping it toggles that row.
-    // The row holds a short text description, which is also the object's accessible name.
+    // The picture (photo, flag, sleeve) is evidence too for a list with an objField: tapping it toggles that
+    // row, whose short text description is also the picture's accessible name.
     if (list.objField) {
       objSlot.setAttribute('data-f', list.objField);
       objSlot.setAttribute('role', 'button');
@@ -186,7 +240,7 @@
     slot(el, 'secs').textContent = secs;
   }
   function secsText(ms) { var s = Math.max(0, Math.ceil(ms / 1000)); return ' · 0:' + (s < 10 ? '0' : '') + s; }
-  // Untimed chip suffix (practice and relaxed). Kept short so it fits beside the list name and a 20/20 counter at 360 px.
+  // Untimed chip suffix (practice and relaxed), short enough for the list name and a 10/10 counter at 360 px.
   var OPEN_SUFFIX = ' · open';
   function cardLabel(el, winMs) {
     var item = el._item, f = listOf(item).fields, s = 'Entry ' + el._n + ' of ' + el._of + ', ' + listWord(item) + '. ', i;
@@ -216,7 +270,16 @@
       stack.insertBefore(el, stack.firstChild);
       cards.push(el);
     }
+    preload(idx + cards.length, 1);
     restack();
+  }
+  // Loads run[from..from+n-1]'s photos ahead, so no card lands blank.
+  function preload(from, n) {
+    var i, o;
+    for (i = from; i < from + n && i < run.length; i++) {
+      o = run[i] && run[i].obj;
+      if (o && o.shape === 'photo') ob('preload', o);
+    }
   }
   function clearStack() {
     finishFly();
@@ -311,8 +374,8 @@
     if (t.quiet) el.setAttribute('aria-hidden', 'true');
     box.insertBefore(el, box.firstChild);
     while (box.children.length > 2) box.removeChild(box.lastChild);
-    // Two tall toasts can reach the top card's third row on a tall phone: drop the older one. The card's
-    // bottom comes from layout (a dragged card is rotated); #toasts is a static child of .dock, so rects.
+    // Two tall toasts can reach the top card's third row: drop the older one (card bottom from layout, as
+    // a dragged card is rotated).
     c = cards[0];
     c = c ? $('stack').getBoundingClientRect().top + c.offsetTop + c.offsetHeight - 18 : 0;
     while (c && box.children.length > 1 && box.getBoundingClientRect().top < c) box.removeChild(box.lastChild);
@@ -413,7 +476,7 @@
     else setChip(el, 'st-listed', 'Listed', '');
     ob('state', el._obj, OBJ_STATE[o.kind]);
     el.setAttribute('aria-hidden', 'true'); el.setAttribute('inert', '');
-    // The fly-* classes carry the 240 ms exit (a 24 px fade under reduced motion) from where the drag left it.
+    // fly-* carries the 240 ms exit (a fade under reduced motion) from where the drag left it.
     el.classList.add(dir < 0 ? 'fly-left' : 'fly-right');
     flying = { el: el, t: setTimeout(finishFly, RM ? 130 : 250) };
   }
@@ -428,69 +491,63 @@
   }
 
   // ---- Practice ----
-  // Two untimed cards that cannot be failed: a wrong move springs the card back with a coach line.
+  // One untimed card that cannot be failed: a wrong move springs it back with a coach line. It is the deck's
+  // first practice item, a fake (a good one teaches Verify). pStep is 0 while it is live.
   function coach(s) { txt('coach', s); }
-  function coachFacts() {
-    var p = deck.practice || [];
-    return COACH[deckId] || { fact: (p[0] && p[0].why) || '', good: '' };
-  }
+  function pItem() { return (deck.practice || [])[0] || {}; }
+  // The practice hint: the item's own, else the deck's coach.fact, else the item's why line.
+  function coachFact() { var p = pItem(); return p.hint || (deck.coach || {}).fact || p.why || ''; }
   function practiceCard() {
     pT0 = now(); pHinted = false;
-    coach(pStep === 0 ? 'Something on this entry breaks the policy. Tap the line that’s wrong.'
+    coach(pItem().bad ? 'Something on this entry breaks the policy. Tap the line that’s wrong.'
                       : 'Every line checks out. Swipe right to verify it.');
   }
   function sharp(item, key) { return key === item.bad || (item.also || []).indexOf(key) > -1; }
   function coachEv(card) {
-    if (pStep !== 0) return;
+    if (pStep !== 0 || !card._item.bad) return;
     pT0 = now();
     if (card._ev) coach(sharp(card._item, card._ev) ? 'That’s your evidence. Now swipe left, or press Challenge.'
                                                     : 'Look again: one line doesn’t match.');
   }
   function practiceFrame(t) {
     var top = cards[0], marks, i;
-    if (pStep !== 0 || pHinted || !top || top._ev || t - pT0 < 4000) return;
+    if (pStep !== 0 || pHinted || !top || !top._item.bad || top._ev || t - pT0 < 4000) return;
     pHinted = true;
-    // The row, and the 3D object when the faulty field is the objField.
+    // The row, and the picture too when the faulty field is the objField.
     marks = top.querySelectorAll('[data-f="' + top._item.bad + '"]');
     for (i = 0; i < marks.length; i++) marks[i].classList.add('hint');
-    coach('Hint: ' + coachFacts().fact);
+    coach('Hint: ' + coachFact());
   }
   function practiceDecide(top, action) {
-    var item = top._item, c = coachFacts(), o, r, step = pStep;
-    if (step === 0 && action !== 'challenge') { coach('Careful: that would list a fake. ' + c.fact); return false; }
-    if (step === 1 && action === 'challenge') {
-      coach((c.good ? 'Every line is true: ' + c.good : 'Every line is true.') + ' A wrong challenge costs your stake.');
-      return false;
-    }
+    var item = top._item, o, r;
+    if (pStep !== 0) return false;
+    if (item.bad && action !== 'challenge') { coach('Careful: that would list a fake. ' + coachFact()); return false; }
+    if (!item.bad && action === 'challenge') { coach('Every line is true. A wrong challenge costs your stake.'); return false; }
     o = R.judge(item, action, top._ev);
     r = ruling(o, item); r.quiet = true;
     toast(r); say(r.title);
     if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o, false);
-    pStep++;
-    if (step === 0) {
-      coach(o.evidence === 'sharp' ? 'Bounty won. It comes from the faker’s deposit.' : 'Tip: tap the wrong line first for +25.');
-      cards.shift(); idx++; fillStack(); topLanded();
-      // The second card is live at once; its coach line follows once the first lesson has been read.
-      later(function () { if (mode === 'practice' && pStep === 1) practiceCard(); }, 1800);
-    } else {
-      coach('Nobody challenged it, so it joins the list. That’s Curate in a nutshell.');
-      cards.shift(); idx++;
-      endPractice(true);
-    }
+    pStep = 1;
+    if (item.bad) coach(o.evidence === 'sharp' ? 'Bounty won. It comes from the faker’s deposit.' : 'Tip: tap the wrong line first for +25.');
+    else coach('Nobody challenged it, so it joins the list. That’s Curate in a nutshell.');
+    cards.shift(); idx++;
+    endPractice(true);
     return true;
   }
   function startPractice() {
     mode = 'practice';
-    run = deck.practice.slice(); idx = 0; pStep = 0; score = null;
+    run = (deck.practice || []).slice(0, 1); idx = 0; pStep = 0; score = null;
+    if (!run.length) { beginShift(); return; }
     body('is-practice', true);
     show('practice-bar', true); show('coach', true);
     hudScore(0); hudClock(total * 1000);
     fillStack(); topLanded(); practiceCard();
     startLoop();
   }
+  // Practice counts as done once on this phone, for every app; kiosk never stores it.
   function endPractice(done) {
-    if (!KIOSK) rw('setPref', 'practiced.' + deckId, true);
+    if (!KIOSK) rw('setPref', 'practiced.any', true);
     mode = 'between';
     if (done) later(beginShift, 1800); else beginShift();
   }
@@ -508,13 +565,15 @@
     if ($('toasts')) $('toasts').textContent = '';
     edges(0, 0);
   }
-  // Brief → (practice) → round. Practice runs the first time per deck, and every time in kiosk.
+  // App card → (practice) → round. Practice runs the first time on this phone, and every time in kiosk.
   function startFlow(forcePractice) {
+    var k;
     freshPlay();
     total = relaxed ? S.relaxedSeconds : S.seconds;
-    heroDeck = '';   // the hero is repainted on the way back, so the GL object returns to it
     hudClock.s = -1;
     txt('client-name', deck.client);
+    // The HUD shows this app's list while practice or the banners run, not the last app's.
+    for (k in deck.lists) if (deck.lists.hasOwnProperty(k)) { txt('list-name', deck.lists[k].name); txt('policy', deck.lists[k].policy); break; }
     showView('play');
     focusFirst = true;   // Start is gone: the first card that lands takes focus
     if (forcePractice || !practised()) startPractice(); else beginShift();
@@ -524,13 +583,19 @@
     mode = 'banner';
     // The banner has no control: focus waits on #play, then moves to the first card when it lands.
     park('play'); focusFirst = true;
-    show('practice-bar', false); show('coach', false);
+    show('practice-bar', false); show('coach', false); setChalLabel(null);
     run = R.buildRun(deckId, rw('lastIds', deckId) || []).items; idx = 0;
     rw('saveLastIds', deckId, run.map(function (x) { return x.id; }));
     score = R.newScore(); announcedTier = 0; info = null; elapsed = 0; graceNext = false;
     said30 = said10 = rushed = false;
     hudScore(0); hudClock(total * 1000);
     preloadThumbs();
+    preload(0, 4);   // the stack's three and the next, while the banners show
+    // The app's mission for 900 ms, then Go.
+    if (deck.copy && deck.copy.mission) { say(deck.copy.mission); banner(deck.copy.mission, 900, go); } else go();
+  }
+  function go() {
+    if (mode !== 'banner') return;
     banner('Go · ' + total + ' s', 600, function () {
       // The clock starts when the first real card lands; the shift counts from here.
       mode = 'shift';
@@ -545,8 +610,7 @@
     var left, fb, d = drag;
     if (mode !== 'shift') return;
     left = Math.max(0, total * 1000 - elapsed);
-    // The discarded card drops its drag pose and stamp, so nothing suggests the move counted. Before mode
-    // changes, so the chip gets its normal window text back.
+    // The discarded card drops its drag pose and stamp (before mode changes, so its chip text comes back).
     if (d) { drag = null; if (d.on) springBack(d.card); else edges(0, 0); }
     mode = 'ended'; clockOn = false;
     fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
@@ -573,17 +637,15 @@
     say('Round over. ' + fmt(s.final) + ' points.');
     if (Rw()) Rw().finishShift(sum); else goBrief(true);
   }
-  // Kiosk "next curator", and a clean slate for debugging: back to the brief with fresh state.
+  // Kiosk "next curator", and a clean slate: back to the brief with fresh state.
   function reset() {
     freshPlay();
     mode = 'brief'; score = null; info = null; run = []; idx = 0;
     if (KIOSK) { relaxed = false; setDeck(firstDeck()); } else loadPrefs();
-    heroDeck = '';
     closeHow();
     goBrief(true);
   }
-  // A How it works sheet left open on the report or ticket must not cover the next visitor's title screen.
-  // The open attribute, not .open: where showModal is missing the shell sets the attribute only.
+  // A How it works sheet left open must not cover the next title screen. The attribute, as without showModal.
   function closeHow() {
     var h = $('how');
     if (!h || !h.hasAttribute('open')) return;
@@ -591,8 +653,7 @@
   }
 
   // ---- Loop ----
-  // One rAF loop while playing: drag frames, the shift clock, windows and the practice hint.
-  // It stops when paused, hidden or off the play view; paused time never reaches elapsed.
+  // One rAF loop while playing; it stops when paused, hidden or off play, so paused time never counts.
   function startLoop() {
     if (raf || paused || document.hidden) return;
     lastT = 0;
@@ -628,8 +689,8 @@
     if (w <= 0) decide('timeout');
   }
   // ---- Gestures ----
-  // Pointer Events on #stack. Taps are left to the native click (so rows stay real buttons); a drag starts
-  // past 8 px of mostly horizontal travel and captures the pointer. Move handling is batched into the rAF loop.
+  // Pointer Events on #stack. Taps stay native clicks (rows are real buttons); a drag starts past 8 px of
+  // mostly horizontal travel and captures the pointer. Moves are batched into the rAF loop.
   function canPlay() { return (mode === 'shift' || mode === 'practice') && !paused && !explainOpen; }
   function onDown(e) {
     var top = cards[0], t = now();
@@ -770,9 +831,10 @@
   function on(id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); }
   function wire() {
     var st = $('stack');
+    // The v4 shell has no #start (the app cards start the round).
     on('start', function (e) { keyboard = e.detail === 0; startFlow(false); });
     on('practice-again', function (e) { keyboard = e.detail === 0; startFlow(true); });
-    on('deck-switch', function () { switchDeck(); goBrief(); });
+    on('picker', onPick);
     on('relaxed', toggleRelaxed);
     on('skip-practice', function (e) { keyboard = e.detail === 0; if (mode === 'practice') endPractice(false); });
     on('b-chal', function (e) { keyboard = e.detail === 0; decide('challenge'); });
@@ -783,15 +845,15 @@
     on('explain-ok', closeExplain);
     on('err-reload', function () { location.reload(); });
     on('again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
-    on('rep-switch', function () { switchDeck(); goBrief(true); });
+    on('rep-switch', function () { goBrief(true); });   // Try another app: back to the picker
+    on('t-switch', function () { goBrief(true); });
     on('t-again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
     if (st) {
       st.addEventListener('pointerdown', onDown);
       st.addEventListener('pointermove', onMove);
       st.addEventListener('pointerup', onUp);
       st.addEventListener('pointercancel', onCancel);
-      // Only #stack's own capture loss counts: a touch's implicit capture on the child is handed over when the
-      // drag captures on #stack, and that handoff fires lostpointercapture at the child (it bubbles here).
+      // Only #stack's own capture loss counts: handing a touch's implicit capture over fires it at the child.
       st.addEventListener('lostpointercapture', function (e) { if (e.target === st) onCancel(e); });
       st.addEventListener('click', onClick);
     }
@@ -879,6 +941,8 @@
     rw('init', ui);
     ob('init', { reduced: RM, lite: LITE });
     loadPrefs();
+    renderPicker();
+    renderCredits();
     wire();
     goBrief();
   }
