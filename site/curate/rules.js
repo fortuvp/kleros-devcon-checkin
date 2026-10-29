@@ -1,8 +1,7 @@
 // Curate game rules. Pure functions (no DOM, no storage): scripts/curate-check.js runs this code in Node.
 (function () {
   var LATE_FROM = 5, MAX_F = 2, MAX_G = 3, TRIES = 200,
-    COUNT = { catch: 'caught', listed: 'listed', autoListed: 'listed', wrongChallenge: 'wrong', leak: 'leaks',
-      leakTimeout: 'leaks' };
+    COUNT = { catch: 'caught', listed: 'listed', wrongChallenge: 'wrong', leak: 'leaks' };
   function S() { return window.CURATE_SETTINGS; }
 
   // ---- Helpers ----
@@ -56,7 +55,7 @@
     return { ok: true, items: seq };
   }
   // Spec §2.4: easy opening with a card-tell fake at 1 or 2; late list from 5. A deck with no easy
-  // card-tell fake (Music: every fake takes knowing the song) opens on any easy fake instead.
+  // card-tell fake opens on any easy fake instead.
   function buildRun(deckId, lastIds, rand) {
     var D = window.CURATE_DECKS, deck = D[deckId], items, split;
     var last = lastIds || [], seen = {}, open = [], rest = [], got = {}, k, r, t;
@@ -87,25 +86,21 @@
   }
 
   // ---- Window ----
-  // 0 = no window. game.js adds graceMs after a mistake.
-  function windowFor(elapsedSec, relaxed) {
-    var w = S().windows, s = 0, i;
-    if (relaxed) return 0;
-    for (i = 0; i < w.length; i++) if (elapsedSec >= w[i][0]) s = w[i][1];
-    return s;
-  }
+  // v5: no per-card window. Kept only so an older caller reads 0 (= no window); new code need not call it.
+  function windowFor() { return 0; }
 
   // ---- Score ----
   function newScore() {
     return { raw: 0, streak: 0, bestStreak: 0, trust: 100, caught: 0, fakesSeen: 0, listed: 0, goodsSeen: 0,
       evidence: 0, wrong: 0, leaks: 0, reviewed: 0, mistakes: 0, misses: [], tier: 0 };
   }
-  // Jurors rule on the entry, not the reason: wrong evidence still wins the catch.
-  function judge(item, action, evidenceField) {
-    var P = S().points, ev = evidenceField || '', bad = item.bad, out = action === 'timeout', ch = action === 'challenge',
-      k = ch ? (bad ? 'catch' : 'wrongChallenge') : bad ? (out ? 'leakTimeout' : 'leak') : out ? 'autoListed' : 'listed',
+  // action: 'challenge' or anything else (a verify). pickedField: the part picked in pick mode.
+  // Jurors rule on the entry, not the reason: a wrong pick still wins the catch ('sharp' = fake spotted).
+  function judge(item, action, pickedField) {
+    var P = S().points, ev = pickedField || '', bad = item.bad, ch = action === 'challenge',
+      k = ch ? (bad ? 'catch' : 'wrongChallenge') : bad ? 'leak' : 'listed',
       ok = !!bad === ch, e = !ev || !ch ? 'none' : bad && (ev === bad || (item.also || []).indexOf(ev) > -1) ? 'sharp' : 'wrong',
-      pk = k === 'listed' ? 'letThrough' : k === 'leakTimeout' ? 'leak' : k;
+      pk = k === 'listed' ? 'letThrough' : k;
     return { kind: k, correct: ok, evidence: e, points: P[pk] + (e === 'sharp' ? P.evidence : 0),
       trust: ok ? 0 : S().trust[pk] };
   }
@@ -127,7 +122,7 @@
       score.mistakes++;
       list = listOf(item.list);
       key = k === 'wrongChallenge' ? '' : item.bad || '';
-      // Name: the first field, skipping the drawn object’s description (Flag, Model).
+      // Name: the first field, skipping the picture’s description (Photo, Flag, Logo).
       list.fields.forEach(function (fd) {
         if (!name && fd[0] !== list.objField) name = item.f[fd[0]];
         if (fd[0] === key) lab = fd[1];
@@ -138,11 +133,11 @@
     score.tier = tierFor(score.raw);
     return { streakBonus: bonus, tierFrom: from, tierTo: score.tier };
   }
-  // The time bonus (relaxed: a flat finish bonus) is added to raw. It needs few mistakes and at least one
-  // sharp catch, so blind fast swiping never earns it.
+  // The time bonus (relaxed: seconds left beyond its extra time) is added to raw. It needs all entries decided, few mistakes
+  // and enough fakes spotted, so blind fast swiping rarely earns it.
   function finish(score, secondsLeft, allDecided, relaxed) {
     var P = S().points, bonus = !allDecided || score.mistakes > P.bonusMaxMistakes || score.evidence < (P.bonusMinEvidence || 0) ? 0 :
-      relaxed ? (P.relaxedBonus || 0) : P.perSecondLeft * Math.floor(Math.max(0, secondsLeft));
+      P.perSecondLeft * Math.floor(Math.max(0, secondsLeft - (relaxed ? S().relaxedSeconds - S().seconds : 0)));
     score.timeBonus = bonus;
     score.raw += bonus;
     score.final = Math.max(0, score.raw);

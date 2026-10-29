@@ -3,7 +3,7 @@
 Visitors scan the booth QR, check in on their phone, confirm their Kleros blog subscription, and get a personalised "Picked for you" screen with their merch tier. More steps unlock better merch: Teal for checking in, Purple for joining the Kleros Telegram and following Kleros on X and LinkedIn, Gold for also getting the Kleros 101 quiz right. Staff hand over merch by the colour on the screen. Every check-in lands in a Google Sheet, matched to a Kleros use case with a priority and a suggested next step.
 
 - **Site:** static HTML/JS in `site/`, no build step. Goes live at **https://devcon.kleros.io** (same URL every Devcon; the printed QR codes point there).
-- **Game:** **https://devcon.kleros.io/curate/** (`site/curate/`) is a 40-second Kleros Curate game and a second way up the same merch ladder: pick an app and help it keep its list clean. Static like the rest: no backend, nothing sent anywhere. See [Curate game (/curate)](#curate-game-curate).
+- **Game:** **https://devcon.kleros.io/curate/** (`site/curate/`) is a 60-second Kleros Curate game and a second way up the same merch ladder: pick an app and help it keep its list clean. Static like the rest: no backend, nothing sent anywhere. See [Curate game (/curate)](#curate-game-curate).
 - **Backend:** Google Apps Script web app in `apps-script/`, writing to a Google Sheet in the weiwei@kleros.io Drive.
 - **Preview:** https://kleros-devcon.pages.dev (temporary copy on Wei Wei's Cloudflare account, for review only).
 
@@ -28,15 +28,15 @@ Short version: [`docs/DEPLOY.md`](docs/DEPLOY.md). `bash scripts/package.sh` bui
 | `site/quiz.js` | The three Kleros 101 questions, with why each answer is right or wrong |
 | `site/assets/merch/` | Merch thumbnails for the tiers (from the Web3Merch mock-ups) |
 | `site/curate/index.html` | Curate game page (`/curate/`), a standalone page with its own look: markup, styles and templates; loads `/config.js` and the scripts below |
-| `site/curate/settings.js` | Every game knob: clock, windows, points, tier thresholds, the check-in rule, sold-out tiers and substitutes ([stock runbook](#curate-game-curate)) |
-| `site/curate/decks.js` | The entries: one deck per app (Sightseeing, Countries, Music), each with its picker card, practice card, mission and report copy |
-| `site/curate/rules.js` | Pure game rules: deck order, challenge windows, judging, points, tiers (also run by `scripts/curate-check.js`) |
-| `site/curate/objects.js` | The card pictures (real photos, flat flags, painted record sleeves) and the 2D Results medal; loads `gl.js` |
+| `site/curate/settings.js` | Every game knob: clock, points, tier thresholds, the check-in rule, sold-out tiers and substitutes ([stock runbook](#curate-game-curate)) |
+| `site/curate/decks.js` | The entries: one deck per app (Sightseeing, Countries, Tokens), each with its picker card, practice card, mission and report copy |
+| `site/curate/rules.js` | Pure game rules: deck order, judging (including the part picked on a challenge), points, tiers (also run by `scripts/curate-check.js`) |
+| `site/curate/objects.js` | The card pictures (real photos, flat flags, flat painted token logos) and the 2D Results medal; loads `gl.js` |
 | `site/curate/gl.js` | Optional in-house WebGL renderer for the spinning 3D Results medal (no library), loaded after first paint; never fetched with `?lite=1`, Save-Data, low-memory phones or no WebGL |
 | `site/curate/credits.js` | Photo credits (author, licence, Commons page) for every file in `site/curate/img/`, listed in *How it works* |
 | `site/curate/img/` | The Sightseeing photos (Wikimedia Commons, free licences, 640 px JPEGs) |
 | `site/curate/rewards.js` | Merch ladder, Results, ticket, staff stamp and counted rounds; the only game code that reads the check-in or writes storage |
-| `site/curate/game.js` | Game engine: title screen, practice, round, swipes, buttons and keys, toasts, pause, relaxed timing |
+| `site/curate/game.js` | Game engine: title screen, practice, round, swipes, pick mode, buttons and keys, toasts, pause, relaxed timing |
 | `site/_headers`, `site/robots.txt` | No-cache for `config.js`/`matching.js`/`quiz.js` and the `site/curate/` scripts, dashboard kept out of search engines |
 | `apps-script/Code.gs` | Backend: check-ins, Sheet tabs and views, research-agent API, blog gate, merch tiers, Telegram bot |
 | `apps-script/Matching.gs` | Copy of `site/matching.js` for the backend (kept in sync by the bundle script) |
@@ -142,33 +142,32 @@ Bot profile (name, description, picture `docs/telegram-bot-avatar.png`) is set i
 
 https://devcon.kleros.io/curate/ teaches Kleros Curate by doing it, and is a second way up the merch ladder. Visitors reach it from the **Play Curate** card on their final screen or from its own QR poster. It is plain static files in `site/curate/`, sharing `/config.js` (merch names and pictures) and `/assets/` with the check-in.
 
-**Its own page.** `/curate/` is a standalone game, not the check-in with a game on top: no check-in header, gold frame, starfield, icosahedrons or tagline. The full-height title screen (Kleros colours, *These apps need clean lists.*) asks visitors to **pick an app to help**: three big cards, each with a real picture, the app, what it needs and *10 entries · 40 s*. Tapping a card starts that app's round straight away; there is no separate start button. Under the cards sit the prize strip (the four merch tiers as chips), the *Relaxed timing* toggle, the practice link and a link back to the check-in; *How it works* opens as a sheet from the top bar and ends with the photo credits. The play, Results and ticket screens use the same frame.
+**Its own page.** `/curate/` is a standalone game, not the check-in with a game on top: no check-in header, gold frame, starfield, icosahedrons or tagline. The full-height title screen (Kleros colours, *These apps need clean lists.*) asks visitors to **pick an app to help**: three big cards, each with a picture (a photo, a flag, painted token logos), the app, what it needs and *10 entries · 60 s*. Tapping a card starts that app's round straight away; there is no separate start button. Under the cards sit the prize strip (the four merch tiers as chips), the *Relaxed timing* toggle, the practice link and a link back to the check-in; *How it works* opens as a sheet from the top bar and ends with the photo credits. The play, Results and ticket screens use the same frame.
 
-**How to play.** Three apps (all fictional) show lists to their users, and fakers put down a deposit to sneak fakes in. Each card on the title screen is one app with one list, nothing web3, in the spirit of the old Curate game:
+**How to play.** Three apps (all fictional) show lists to their users, and fakers put down a deposit to sneak fakes in. Each card on the title screen is one app with one list, in the spirit of the old Curate game. Every entry has **4 parts**: the picture and three lines.
 
 | App (card) | Its need | Each entry | Picture |
 |---|---|---|---|
-| Travel guide app (Sightseeing) | needs real sights on its map | Photo, name, location | A real photo from Wikimedia Commons: 12 world landmarks and 6 Mumbai sights |
-| Atlas app for schools (Countries) | needs the right flags and capitals | Flag, country, capital | The real flag, flat |
-| Music streaming app (Music) | needs songs credited to the right artist | Song, artist, year released | A painted record sleeve (album art is copyrighted) |
+| Travel guide app (Sightseeing) | needs real sights on its map | Photo, name, city, country | A real photo from Wikimedia Commons: 12 world landmarks and 6 Mumbai sights |
+| Atlas app for schools (Countries) | needs the right flags and capitals | Flag, country, capital, web domain (`.it`, `.jp`, `.ch`) | The real flag, flat |
+| Crypto exchange app (Tokens) | needs only real tokens in its listing | Logo, name, ticker, website | A flat logo coin painted in the token's brand colour (no downloaded logos); the title card shows Bitcoin, Ethereum and USDC |
 
-In a fake, exactly one line is wrong (the Taj Mahal in *Mumbai, India*, India with Mumbai as its capital, a famous song credited to the wrong artist or the wrong year). A Music fake is mostly a fake upload under a famous name, which steals the artist's pay. Before the round, the app's mission shows for a moment, then *Go · 40 s* (*Go · 60 s* with relaxed timing).
+The tokens are easy, famous ones (Bitcoin, Ethereum, Tether, USDC, Dogecoin, Solana and the like, plus Kleros PNK), with no prices and no investment talk; websites are plain text, never links. In a fake, exactly one of the four parts is wrong: the Taj Mahal in the wrong city, Austria with the web domain `.au` (it is `.at`), Ethereum listed as `ETC` (that is Ethereum Classic), a lookalike website such as `etherium.org`, or a picture of another sight or token under this name. Before the round, the app's mission shows for a moment, then *Go · 60 s* (*Go · 90 s* with relaxed timing).
 
-- One **round** is 40 s and 10 entries, 4 of them fake. The cards are from the app you picked.
-- Swipe left (or *← Challenge*) to challenge a fake: you win the faker's deposit as your bounty. Swipe right (or *Verify →*) to verify a good entry.
-- Tapping a line, or the photo or flag, marks it as evidence (+50 when it is the faulty line). It never decides the entry.
-- Each entry has a short challenge window (6 s, then 5 s from 15 s, then 4 s for the final 12 s, when the toast says *Final 12 s · entries close faster*). When it runs out, the entry is listed, fake or not.
-- The very first round on a phone (whichever app) starts with one untimed practice card with a coach hint, which can be skipped. *Relaxed timing* gives 60 s with no per-entry countdown.
-- Keyboard: ← or A challenges, → or D verifies, 1–3 mark evidence, Esc or P pauses.
+- One **round** is 60 s and 10 entries, 4 of them fake. The cards are from the app you picked. There is no per-entry countdown: an entry waits until you decide it. When the clock runs out the round ends, and the card on screen is not counted either way.
+- Swipe right (or *Verify →*) to verify a good entry.
+- Swipe left (or *← Challenge*) to challenge a fake. The card springs back to the centre in **pick mode**: *What’s fake here? Tap it.*, with its 4 parts outlined and numbered 1–4. Tap the fake part to decide the challenge; *Cancel* (or Esc) goes back without deciding. Swiping is off while picking. A caught fake wins the faker's deposit as your bounty, and +50 more when you tapped the part that is fake (*fake spotted*). Outside pick mode, tapping a part does nothing.
+- The very first round on a phone (whichever app) starts with one untimed practice card, a fake, with a coach: swipe left, then tap the fake part (after 4 s the fake part pulses). It can be skipped. *Relaxed timing* simply gives more time (90 s).
+- Keyboard: → or D verifies, ← or A challenges, then 1–4 picks the part; Esc cancels a pick (or pauses), P pauses.
 
 | Outcome | Points |
 |---|---|
-| Fake challenged | +75, plus 50 with the right evidence (the photo, flag or line that is wrong) |
-| Good entry verified | +25 (+10 when its window ran out) |
+| Fake challenged | +75 bounty, plus 50 when you tapped the fake part (fake spotted) |
+| Good entry verified | +25 |
 | Good entry challenged | −75 (Trust −5) |
 | Fake listed | −75 (Trust −15) |
 | Every 5 right in a row | +50 |
-| All 10 decided early with 2 mistakes or fewer (standard timing only) | +5 per second left |
+| All 10 decided early with 2 mistakes or fewer and at least one fake spotted (standard timing only) | +5 per second left |
 
 Trust (the app's users' trust in its list) only drives the Results headline; it never ends a round. The final score is never below 0.
 
@@ -181,11 +180,11 @@ Trust (the app's users' trust in its list) only drives the Results headline; it 
 | Tier | Game route | Check-in route (unchanged) | Merch (today's `config.js`) |
 |---|---|---|---|
 | Everyone | Finish a round | Visit the booth | Stickers and metallic tattoos |
-| Teal | `tiers[1]` points (185) | Check in | Kleros flip-flops |
-| Purple | `tiers[2]` points (490) | + Telegram, X and LinkedIn | Copper bottle or gamcha |
-| Gold | `tiers[3]` points (765) **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
+| Teal | `tiers[1]` points (390) | Check in | Kleros flip-flops |
+| Purple | `tiers[2]` points (690) | + Telegram, X and LinkedIn | Copper bottle or gamcha |
+| Gold | `tiers[3]` points (925) **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
 
-The thresholds (`tiers` in `site/curate/settings.js`, the only place they are set: the ladder, meter and copy read them from there) come from a simulation of player profiles on the 10-entry, 40-second round (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Verifying everything, challenging everything or doing nothing never reaches Teal. Random fast taps (10 coin flips) reach Teal in about 6% of rounds; the sim reports this but does not fail on it. To keep blind swiping down, a caught fake is worth more with the right evidence (+75, or +125 with it), and the time bonus (and the relaxed finish bonus) also needs at least one fake caught with evidence (`points.bonusMinEvidence`). `node scripts/curate-check.js --fit` prints thresholds fitted to those shares, and `--sim` checks them. A relaxed round has no time bonus; finishing it with 2 mistakes or fewer adds a flat `points.relaxedBonus` (50), so only a flawless relaxed round, with sharp evidence on every fake, reaches Gold. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
+The thresholds (`tiers` in `site/curate/settings.js`, the only place they are set: the ladder, meter and copy read them from there) come from a simulation of player profiles on the 10-entry, 60-second round with pick mode (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Every simulated challenge includes a pick: a player who rightly challenges a fake taps the right part with a per-profile probability (from 95% for an expert to 50% for a novice), otherwise a wrong one, and the pick adds about 0.8 s. Verifying everything, challenging everything or doing nothing never reaches Teal. Random fast swiping (a coin flip and a random part, right only 1 time in 4) reaches Teal in about 4% of rounds; the sim reports this but does not fail on it. To keep blind swiping down, a caught fake is worth more when the fake part is spotted (+75, or +125 with it), and the time bonus also needs at least one fake spotted (`points.bonusMinEvidence`). `node scripts/curate-check.js --fit` prints thresholds fitted to those shares, and `--sim` checks them. Relaxed timing only adds time (90 s instead of 60): its time bonus counts the seconds left as if the round were 60 s long, so it scores exactly like a standard round and is never an easier road to Gold. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
 
 **Gold needs a check-in.** A Gold score needs a confirmed check-in on the same phone (`checkinNeededFrom: 3`), read from the check-in's own storage with the same confirmation rule as the check-in page. Until then the ticket shows Purple with a gold strip linking to `/`; coming back to `/curate/` after checking in upgrades it. So every Gold ticket carries a K- code the merch desk can dedupe. Teal and Purple need no check-in ("scan and play"); `checkinNeededFrom: 1` makes every tier above Everyone need one.
 
@@ -219,7 +218,7 @@ Edit `site/curate/settings.js` and deploy. The `no-cache` header (`site/_headers
 
 **No backend.** No Apps Script change, no Sheet tab and no request to the backend: game scores are not in the Sheet or the dashboard. The only outside requests are the Google Fonts the check-in already uses. `?lite=1` forces the flat 2D Results medal (no WebGL), which is also the automatic fallback. The photos are served from `site/curate/img/` on the same domain; the only links to other sites are the Kleros docs link and the photo credits.
 
-**Checks.** Run `node scripts/curate-check.js` after editing `decks.js`, `rules.js` or `settings.js`. It validates the three decks (unique ids, every fake has its fix and a short why, no links or markup, a practice card, sleeve specs, every photo file exists in `site/curate/img/` and has a credits entry), checks the copy for banned job and web3 words, builds 2,000 rounds of each deck to check the deck order rules (fakes per round, each photo once, easy start), reports file sizes (photos are left out of the eager budget and reported as a total), and lints `site/curate/*.js` for ES5. `node scripts/curate-check.js --sim` also reruns the tier calibration and prints the tier shares; it fails if lazy play ever reaches Teal or the shares drift more than 4 points from the ones above.
+**Checks.** Run `node scripts/curate-check.js` after editing `decks.js`, `rules.js` or `settings.js`. It validates the three decks (unique ids, 4 parts per entry with the picture first, every fake has exactly one odd part, its fix and a short why, no links or markup, a practice card, painted logo specs with an allowed mark, every photo file exists in `site/curate/img/` and has a credits entry), checks the copy for banned job words and for web3 words (allowed only in the Tokens deck's own data and the crypto card), builds 2,000 rounds of each deck to check the deck order rules (fakes per round, each photo once, easy start), reports file sizes (photos are left out of the eager budget and reported as a total), and lints `site/curate/*.js` for ES5. `node scripts/curate-check.js --sim` also reruns the tier calibration and prints the tier shares; it fails if lazy play ever reaches Teal or the shares drift more than 4 points from the ones above.
 
 ## The Sheet
 
@@ -246,7 +245,7 @@ After changing it: redeploy the site and the backend, then Sheet menu *Kleros �
 
 1. `site/config.js`: `edition`, `city`, `event`, Community Hubs.
 2. `site/matching.js`: move `focus: true` to that year's pipelines; adjust keywords.
-3. `site/curate/decks.js`: the game's content is per edition. Swap the six Mumbai sights for the new host city's (photos in `site/curate/img/` with their `credits.js` entries, see *Photos and credits*), re-check every country, sight and song entry (capitals, cities and release years change rarely, but check), then run `node scripts/curate-check.js --sim`.
+3. `site/curate/decks.js`: the game's content is per edition. Swap the six Mumbai sights for the new host city's (photos in `site/curate/img/` with their `credits.js` entries, see *Photos and credits*), re-check every sight, country and token entry (cities, capitals, web domains and official token websites change rarely, but check), then run `node scripts/curate-check.js --sim`.
 4. A fresh Sheet (new Apps Script project, "From scratch") or keep one and filter on **Event**.
 5. Redeploy. The QR codes stay the same.
 
@@ -257,7 +256,7 @@ After changing it: redeploy the site and the backend, then Sheet menu *Kleros �
 The Curate game has its own poster set, written beside the check-in one without touching it (keep the trailing slash in the address):
 
 ```bash
-python3 qr/make_qr.py https://devcon.kleros.io/curate/ --name=curate-kleros-qr --headline="Play Kleros Curate" --perk="Help an app clean its list in 40 s, win merch"
+python3 qr/make_qr.py https://devcon.kleros.io/curate/ --name=curate-kleros-qr --headline="Play Kleros Curate" --perk="Help an app clean its list in 60 s, win merch"
 ```
 
 It writes `curate-kleros-qr-poster.png`, `curate-kleros-qr-poster-a4.png` and `.pdf`, `curate-kleros-qr-square.png`, `curate-kleros-qr-plain.png` and `curate-kleros-qr-plain.svg` (QR version 4 at ECC H), and runs the same scan check. `--name=` sets the file prefix (lower-case letters, digits and `-`), `--headline=` and `--perk=` the two top lines. Without these flags the script writes the check-in set exactly as before. The game posters aren't in the repo yet: generate them on a machine with the Python packages above, and never regenerate the check-in posters just for this.

@@ -42,8 +42,8 @@ On a phone: open the site, check in with a real email, confirm the Kleros blog e
 
 Then the game, on the same phone:
 
-1. On the check-in's final screen, tap **Play Curate** (*Help an app keep its list clean. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header, showing *Pick an app to help* and three cards, each with a picture (a real photo, a flag, a record sleeve).
-2. Tap a card and play its round to the end: 10 entries in 40 s, after one practice card the first time on this phone. On Sightseeing, the photos load. See the Results with the spinning medal in your tier's colour, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
+1. On the check-in's final screen, tap **Play Curate** (*Help an app keep its list clean. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header, showing *Pick an app to help* and three cards, each with a picture (a real photo, a flag, painted token logos): Travel guide app, Atlas app for schools, Crypto exchange app.
+2. Tap a card and play its round to the end: 10 entries in 60 s with no per-entry countdown, after one practice card the first time on this phone. Swipe left on a card: it springs back and asks *What’s fake here? Tap it.*; tapping a part decides it, and *Cancel* goes back. On Sightseeing, the photos load; on the Crypto exchange app, the logos are painted coins and the websites are plain text. See the Results with the spinning medal in your tier's colour, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
 3. Open *How it works*: the *Photo credits* list shows every photo's author and licence, with working links.
 4. Check the back-link under the ticket (*Back to your check-in ticket →*): it opens the check-in page.
 5. Confirm the check-in is unaffected: the same ticket, tier and code as before the game, and no new row in the Sheet.

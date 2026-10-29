@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0620">
 <title>Kleros Curate · Clean lists</title>
-<meta name="description" content="Pick an app and help keep its list clean in 40 seconds: verify the real entries, challenge the fakes, win booth merch.">
+<meta name="description" content="Pick an app and help keep its list clean in 60 seconds: verify the real entries, challenge the fakes, point at what’s fake, win booth merch.">
 <link rel="icon" href="/assets/kleros-symbol-white-flat.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@700&family=Inter:wght@400;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -99,10 +99,17 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   box-shadow:0 14px 30px -18px var(--cta-glow),inset 0 1px 0 var(--cta-sheen); transition:transform .1s,box-shadow .2s; }
 .pick:active { transform:scale(.985); }
 @media (hover:hover) { .pick:hover { box-shadow:0 16px 34px -14px var(--cta-glow),inset 0 1px 0 var(--cta-highlight); } }
-/* The picture: a real photo, a flat flag or a painted sleeve, 3:2 with rounded corners (paint flags at 192x128) */
+/* The picture: a real photo, a flat flag or a painted logo coin, 3:2 with rounded corners (paint flags at 192x128) */
 .pick-pic { display:block; position:relative; width:96px; height:64px; border-radius:12px; overflow:hidden; background:radial-gradient(closest-side,rgba(192,132,255,.28),rgba(29,16,80,.9)); box-shadow:0 0 0 1px rgba(255,255,255,.14),0 8px 18px -10px rgba(0,0,0,.8); }
 .pick-pic > img, .pick-pic > canvas { display:block; width:100%; height:100%; object-fit:cover; }
-/* Tight line heights: the need wraps to two lines at 375 px, and Music adds a sub line, yet each card stays under about 96 px */
+/* Crypto exchange app: the painted coin (or trio) is round, so it sits whole on a warm glow rather than being cropped to fill */
+.pick[data-deck=tokens] .pick-pic { background:radial-gradient(closest-side,rgba(247,147,26,.30),rgba(98,126,234,.16) 62%,rgba(29,16,80,.94)); }
+/* A single coin fills the box (objects.js paints it round, centred). A trio (game.js .coin-trio) overlaps three smaller coins;
+   !important beats the inline box objects.js gives each .obj */
+.coin-trio { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+.coin-trio > .obj { position:relative !important; flex:none; width:38px !important; height:38px !important; margin:0 -5px; }
+.coin-trio > .obj:nth-child(2) { z-index:1; width:44px !important; height:44px !important; }   /* the middle coin leads */
+/* Tight line heights: the need wraps to two lines at 375 px, and an app may add a sub line, yet each card stays under about 96 px */
 .pick-txt { display:flex; flex-direction:column; gap:1px; min-width:0; }
 .pick-app { font:700 15.5px/1.1 Inter,sans-serif; color:#fff; }
 .pick-need { font-size:12.5px; line-height:1.2; color:#ddd3ff; }
@@ -210,10 +217,12 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #stack { position:relative; width:100%; max-width:420px; height:100%; margin:0 auto; touch-action:none; }
 .acts { height:64px; display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:end; max-width:436px; width:100%; margin:0 auto; }
 /* Decision buttons: CTA glass with a coloured lit edge */
-.act { height:56px; border-radius:16px; cursor:pointer; font:700 clamp(14px,4vw,16px) Inter,sans-serif; color:#fff; border:1.5px solid transparent; line-height:1.15; overflow:hidden; padding:0 8px; /* long evidence labels wrap to 2 lines */
+.act { height:56px; border-radius:16px; cursor:pointer; font:700 clamp(14px,4vw,16px) Inter,sans-serif; color:#fff; border:1.5px solid transparent; line-height:1.15; overflow:hidden; padding:0 8px;
   box-shadow:0 10px 26px -14px var(--cta-glow),inset 0 1px 0 var(--cta-highlight); transition:transform .1s; }
 #b-chal { background:linear-gradient(180deg,var(--cta-top),var(--cta-bottom)) padding-box,linear-gradient(120deg,#ffc46b,#de4fd0) border-box; }
 #b-keep { background:linear-gradient(180deg,var(--cta-top),var(--cta-bottom)) padding-box,linear-gradient(120deg,#65dc7f,#27cdfe) border-box; }
+/* Pick mode leaves one full-width Cancel: a quiet edge, since it is a way back, not a decision */
+#b-cancel { grid-column:1 / -1; color:var(--text); background:linear-gradient(180deg,var(--cta-top),var(--cta-bottom)) padding-box,linear-gradient(120deg,rgba(255,255,255,.5),rgba(255,255,255,.14)) border-box; }
 .act:active { transform:scale(.97); }
 .edge { position:fixed; top:0; bottom:0; width:90px; pointer-events:none; opacity:0; z-index:3; }
 #edge-l { left:0; background:linear-gradient(90deg,rgba(255,196,107,.55),transparent); }
@@ -237,53 +246,63 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .card.fly-left, .card.fly-right { pointer-events:none; transition:transform .24s var(--ease-exit),opacity .24s var(--ease-exit); }
 .card.fly-left { transform:translateX(-130vw) rotate(-22deg) !important; }
 .card.fly-right { transform:translateX(130vw) rotate(22deg) !important; }
-.card.timeout { border-color:rgba(108,197,255,.6); }
 .c-head { height:28px; display:flex; align-items:center; gap:8px; }
 /* The list name keeps its width; the chip (‘Pending · open’) fits, and only ellipsises as a fallback on very narrow screens */
 .c-head .state { min-width:0; }
 .c-head .state span { font-variant-numeric:tabular-nums; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .c-list { font:600 11px Inter,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-left:auto; white-space:nowrap; flex:none; }
 .c-n { font:600 12px var(--mono); color:var(--muted); font-variant-numeric:tabular-nums; }
-.rail { height:4px; border-radius:2px; background:rgba(255,255,255,.08); overflow:hidden; margin:2px 0 0; }
-.rail i { display:block; height:100%; background:linear-gradient(90deg,rgba(108,197,255,.3),#6cc5ff); box-shadow:0 0 10px rgba(108,197,255,.6); transform:scaleX(var(--w,1)); transform-origin:left; }
-.is-relaxed .rail { visibility:hidden; }
-/* The stage grows into the height left after the HUD, client, card parts, toast dock and buttons (590px), never below 19svh.
-   svh, so the toolbar never resizes it; the earlier lines are fallbacks for older browsers. */
+/* Every card is the picture (one field) plus three 44 px rows. The stage grows into the height left after the play padding, HUD, list row,
+   client, the card's fixed parts (head, three rows, footer: 194 px), the toast gap and the buttons (584 px), never below 19svh.
+   At 375x548 that is 104 px (the card is 298 px in a 364 px arena); at 375x812 it is 228 px. svh, so the toolbar never resizes it;
+   the earlier lines are fallbacks for older browsers. */
 .obj-slot { position:relative; height:clamp(84px,19vh,190px); height:clamp(84px,19svh,190px);
-  height:clamp(84px,max(19svh,calc(100svh - 590px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),300px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
+  height:clamp(84px,max(19svh,calc(100svh - 584px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),320px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
 /* Short screens in practice: the coach sits over the bottom of the arena, so the stage gives up its height and the coach is tighter,
-   keeping the whole card (footer included) above it at 375x548. 468 px = play padding, HUD, list row, client, buttons, arena padding, fixed card parts, dock and a two-line coach */
-/* A picture that is a field (photo, flag) replaces a 44 px text row, so its stage gets those 44 px back */
-.pic-field .obj-slot { height:clamp(128px,calc(19vh + 44px),234px); height:clamp(128px,calc(19svh + 44px),234px);
-  height:clamp(128px,max(calc(19svh + 44px),calc(100svh - 546px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),344px); }
+   keeping the whole card (footer included) above it at 375x548. 462 px = play padding, HUD, list row, client, buttons, arena padding, fixed card parts, dock and a two-line coach */
 @media (max-height:639px) {
-  .is-practice .obj-slot { height:80px; height:clamp(56px,min(19svh,calc(100svh - 468px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),190px); }
-  .is-practice .pic-field .obj-slot { height:124px; height:clamp(100px,min(calc(19svh + 44px),calc(100svh - 424px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),234px); }
+  .is-practice .obj-slot { height:80px; height:clamp(60px,min(19svh,calc(100svh - 462px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),190px); }
   .is-practice #coach { padding:6px 10px; font-size:12.5px; line-height:1.3; }
 }
-.obj-slot[data-f] { cursor:pointer; }
-.obj-slot.is-ev { outline:1.5px solid var(--st-contested); outline-offset:-2px; }
-/* With no text row for the picture, the picture carries the Evidence tag and the practice hint itself */
-.obj-slot.is-ev::after { content:'Evidence'; position:absolute; z-index:3; left:10px; top:10px; padding:1px 7px; border-radius:999px; font:700 10px/14px Inter,sans-serif; color:#1d1050; background:var(--st-contested); }
-.obj-slot.hint { animation:hintpic 1.2s ease-in-out infinite; }
-@keyframes hintpic { 0%, 100% { box-shadow:0 0 0 0 rgba(255,196,107,0); } 50% { box-shadow:0 0 0 3px rgba(255,196,107,.7); } }
 .obj { position:absolute; inset:0; }
 /* Card pictures. Photo: a real photo, about 16:10, cropped to fill, rounded. It gives up width before height on tall stages. */
 .obj-slot:has(.obj-photo) { background:none; }   /* objects.js sizes, rounds and shades the photo box itself */
-/* Painted sleeve: a soft shadow lifts it off the card (the flat flag carries its own) */
-.obj-sleeve canvas { filter:drop-shadow(0 10px 14px rgba(0,0,0,.45)); }
-.obj-slot.is-ev .obj-photo .obj-2d { outline:2px solid var(--st-contested); outline-offset:2px; }
 .rows { list-style:none; margin:0; padding:0; }
-.row { position:relative; display:flex; flex-direction:column; justify-content:center; width:100%; height:44px; padding:0 10px; margin:0; text-align:left; background:none; border:0; border-top:1px solid rgba(255,255,255,.07); border-radius:10px; cursor:pointer; color:var(--text); }
+.row { position:relative; display:flex; flex-direction:column; justify-content:center; width:100%; height:44px; padding:0 10px; margin:0; text-align:left; background:none; border:0; border-top:1px solid rgba(255,255,255,.07); border-radius:10px; cursor:default; color:var(--text); }   /* parts only take a tap in pick mode */
 .r-lab { font:600 11px Inter,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
 .r-val { font:600 16.5px/1.25 Inter,sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .r-val.mono, .mono .r-val { font:600 15px/1.25 var(--mono); font-size:clamp(13px,4vw,15px); }   /* a domain's end stays in view on 320px screens */
-/* The tag sits on the label line, so values use the full width and marking never reflows them */
-.ev-tag { display:none; position:absolute; right:8px; top:4px; padding:1px 6px; border-radius:999px; font:700 10px/14px Inter,sans-serif; color:#1d1050; background:var(--st-contested); }
-.row.is-ev { outline:1.5px solid var(--st-contested); outline-offset:-1.5px; background:rgba(255,196,107,.08); }
-.row.is-ev .ev-tag { display:block; }
-.row.hint { animation:hint 1.2s ease-in-out infinite; }
-@keyframes hint { 0%, 100% { background:transparent; } 50% { background:rgba(255,196,107,.16); } }
+/* Pick mode: after a left swipe the card springs back and asks which part is fake. game.js adds .picking to the card, .is-picking to body,
+   data-n 1-4 on the parts (picture first) and shows #b-cancel. The banner sits over the card's head row, so no part moves or hides. */
+.pick-banner { display:none; position:absolute; z-index:4; top:5px; left:10px; right:10px; height:28px; align-items:center; justify-content:center; padding:0 10px; border-radius:999px;
+  background:#1e0a42; border:1px solid var(--st-contested); color:var(--st-contested); font:700 14px/1 var(--display); letter-spacing:.01em; white-space:nowrap; pointer-events:none; }
+.picking .pick-banner { display:flex; animation:rise .2s var(--ease); }
+.card.picking { border-color:rgba(255,196,107,.55); }
+.picking .c-head { visibility:hidden; }   /* the banner takes its place; the row keeps its height so nothing moves */
+.picking .stamp { opacity:0; }
+.picking [data-f] { cursor:pointer; outline:2px solid var(--st-contested); }
+.picking .obj-slot[data-f] { outline-offset:2px; }
+.picking .row[data-f] { outline-offset:-3px; padding-right:42px; }   /* room for the badge on the right */
+.picking [data-f]:focus-visible { outline:3px solid var(--teal); }
+@media (hover:hover) { .picking [data-f]:hover { background-color:rgba(255,196,107,.12); } }
+/* Number badges for the 1-4 keys: on the picture's top-left corner, at the right end of each row */
+.picking [data-n]::before { content:attr(data-n); position:absolute; z-index:3; width:24px; height:24px; border-radius:50%; display:grid; place-items:center;
+  font:700 13px/1 Inter,sans-serif; color:#1d1050; background:var(--st-contested); box-shadow:0 2px 8px rgba(0,0,0,.45); pointer-events:none; }
+.picking .obj-slot[data-n]::before { left:8px; top:8px; }
+.picking .row[data-n]::before { right:10px; top:10px; }
+/* The pulse is a glow on ::after that fades in and out. Only opacity animates, so the card layer is not repainted every frame.
+   z-index:-1 keeps it under the row text; the card (will-change) is the stacking context. */
+.picking [data-f]::after { content:''; position:absolute; inset:0; z-index:-1; border-radius:inherit; pointer-events:none; opacity:0; animation:pickglow 1.8s ease-in-out infinite; }
+.picking .obj-slot[data-f]::after { box-shadow:0 0 0 5px rgba(255,196,107,.3); }
+.picking .row[data-f]::after { box-shadow:inset 0 0 14px 0 rgba(255,196,107,.3); }
+/* Practice hint: the fake part glows faster and fills */
+.picking [data-f].hint { background-color:rgba(255,196,107,.16); outline-color:#ffd99a; }
+.picking [data-f].hint::after { animation-duration:.9s; }   /* practice hint: the fake part glows faster */
+@keyframes pickglow { 0%, 100% { opacity:0; } 50% { opacity:1; } }
+/* Everything but the card dims while picking; the policy line stays readable */
+.hud, .mrow, .client { transition:opacity .2s; }   /* back cards keep their spring transition */
+.is-picking .hud, .is-picking .mrow, .is-picking .card.is-back1, .is-picking .card.is-back2 { opacity:.3; }
+.is-picking .client { opacity:.6; }
 .c-foot { height:18px; font-size:11px; color:#9d92c4; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
 .stamp, .verdict { position:absolute; top:44px; padding:4px 10px; border:2.5px solid; border-radius:10px; font:700 20px var(--display); letter-spacing:.06em; pointer-events:none; background:rgba(7,0,26,.55); }
 .stamp { opacity:0; }
@@ -298,8 +317,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   .is-kiosk #play { grid-template-columns:minmax(0,640px); }
   .is-kiosk #stack, .is-kiosk .card, .is-kiosk .dock { max-width:600px; }
   .is-kiosk .acts { max-width:616px; }
-  .is-kiosk .obj-slot { height:clamp(84px,calc(100vh - 560px),520px); height:clamp(84px,calc(100svh - 560px),520px); }
-  .is-kiosk .pic-field .obj-slot { height:clamp(128px,calc(100vh - 516px),564px); height:clamp(128px,calc(100svh - 516px),564px); }
+  .is-kiosk .obj-slot { height:clamp(84px,calc(100vh - 554px),520px); height:clamp(84px,calc(100svh - 554px),520px); }
 }
 /* ---- Toasts and overlays ---- */
 /* Toasts and the practice coach share one dock, so toasts sit in the gap above the buttons, or just above the coach, and the card's state chip stays readable */
@@ -474,8 +492,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   .ticket-wrap.flipped .face.back { opacity:1; pointer-events:auto; }
   .card.fly-left { transform:translateX(-24px) !important; opacity:0; }
   .card.fly-right { transform:translateX(24px) !important; opacity:0; }
-  .row.hint { background:rgba(255,196,107,.16); outline:1.5px dashed var(--st-contested); outline-offset:-1.5px; }   /* the pulse is off, so the hint row needs a static cue */
-  .obj-slot.hint { animation:none; outline:1.5px dashed var(--st-contested); outline-offset:-2px; }
+  .picking [data-f].hint { background-color:rgba(255,196,107,.18); outline-style:dashed; outline-width:2.5px; }   /* the pulse is off, so the hint part needs a static cue */
 }
 </style>
 </head>
@@ -493,7 +510,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <!-- ---- Title screen ---- -->
 <section id="brief" aria-labelledby="brief-title">
   <div class="title">
-    <div class="kicker">Kleros Curate · <span id="brief-secs">40</span> seconds</div>
+    <div class="kicker">Kleros Curate · <span id="brief-secs">60</span> seconds</div>
     <h1 id="brief-title" tabindex="-1">These apps need clean lists.</h1>
   </div>
   <p class="lead" id="brief-lead">Help one out. Verify what’s real, challenge the fakes, and win the fakers’ deposits. A clean list keeps users happy and the app earning.</p>
@@ -515,7 +532,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     </section>
     <div class="links">
       <button type="button" class="ghost" id="relaxed" aria-pressed="false" aria-describedby="relaxed-note">Relaxed timing: Off</button>
-      <span class="sr" id="relaxed-note">60 seconds, no per-entry countdown.</span>
+      <span class="sr" id="relaxed-note">90 seconds instead of 60.</span>
       <button type="button" class="ghost" id="practice-again" aria-pressed="false" aria-describedby="practice-note" hidden>Practice again</button>
       <span class="sr" id="practice-note">Adds one practice card before the app you pick.</span>
       <a id="hdr-link" href="/">Booth check-in →</a>
@@ -533,7 +550,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <div id="rep-panel">
     <div><b id="rep-score">0</b><span class="unit">points</span></div>
     <p id="rep-sub"></p>
-    <div class="stats"><div id="rep-caught"><b></b><span>Fakes caught</span></div><div id="rep-listed"><b></b><span>Good entries listed</span></div><div id="rep-evidence"><b></b><span>Sharp evidence</span></div><div id="rep-wrong"><b></b><span>Wrong challenges</span></div></div>
+    <div class="stats"><div id="rep-caught"><b></b><span>Fakes caught</span></div><div id="rep-listed"><b></b><span>Good entries listed</span></div><div id="rep-evidence"><b></b><span>Fake parts spotted</span></div><div id="rep-wrong"><b></b><span>Wrong challenges</span></div></div>
   </div>
   <blockquote id="rep-quote"></blockquote>
   <p id="rep-quote-by"></p>
@@ -591,7 +608,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <!-- ---- Play ---- -->
 <section id="play" hidden aria-label="Curate round" tabindex="-1">
   <div class="hud">
-    <div class="ring"><svg id="clock" viewBox="0 0 44 44" role="timer" aria-label="Time left"><circle class="trk" cx="22" cy="22" r="19"/><circle id="clock-arc" cx="22" cy="22" r="19" pathLength="100"/></svg><span id="clock-s">40</span></div>
+    <div class="ring"><svg id="clock" viewBox="0 0 44 44" role="timer" aria-label="Time left"><circle class="trk" cx="22" cy="22" r="19"/><circle id="clock-arc" cx="22" cy="22" r="19" pathLength="100"/></svg><span id="clock-s">60</span></div>
     <div class="score"><b id="score-v">0</b><small>pts</small></div>
     <div id="streak" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
     <button type="button" id="pause" aria-label="Pause"><svg viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/></svg></button>
@@ -613,8 +630,9 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     </div>
   </div>
   <div class="acts">
-    <button type="button" class="act" id="b-chal"><span id="b-chal-label">← Challenge</span></button>
+    <button type="button" class="act" id="b-chal">← Challenge</button>
     <button type="button" class="act" id="b-keep">Verify →</button>
+    <button type="button" class="act cancel" id="b-cancel" hidden>Cancel</button>   <!-- pick mode: the only action; Esc does the same -->
   </div>
   <div class="edge" id="edge-l" aria-hidden="true"></div><div class="edge" id="edge-r" aria-hidden="true"></div>
 </section>
@@ -644,6 +662,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
       <li>Challenged? Randomly drawn Kleros jurors decide. The winner takes the loser’s deposit, minus court fees. For a challenger, that’s the bounty.</li>
       <li>Any app can show a Curate list to its users.</li>
     </ol>
+    <p>In this game, swipe left to challenge, then tap the part that’s fake: spotting it earns extra points.</p>
     <p>Fun fact: Curate’s first live test, in 2018, was a list of doge pictures: Doges on Trial.</p>
     <p class="not-kiosk"><a class="link" href="https://docs.kleros.io/products/curate" target="_blank" rel="noopener">Read about Kleros Curate →</a></p>
     <h3 id="credits-title">Photo credits</h3>
@@ -676,13 +695,13 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <template id="tpl-card"><article class="card" role="group" aria-roledescription="entry" tabindex="-1">
   <header class="c-head"><span class="state st-window" data-s="state"><i></i><b data-s="state-label">Pending</b><span data-s="secs"></span></span>
     <span class="c-list" data-s="list"></span><span class="c-n" data-s="n"></span></header>
-  <div class="rail" data-s="rail"><i></i></div>
+  <div class="pick-banner" data-s="pick" aria-live="polite">What’s fake here? Tap it.</div>
   <div class="obj-slot" data-s="obj"></div>
   <ul class="rows" data-s="rows"></ul>
   <footer class="c-foot" data-s="foot"></footer>
   <span class="stamp s-keep" aria-hidden="true">VERIFY</span><span class="stamp s-chal" aria-hidden="true">CHALLENGE</span>
   <span class="verdict" data-s="verdict" aria-hidden="true"></span></article></template>
-<template id="tpl-row"><li><button type="button" class="row" data-f="" aria-pressed="false"><span class="r-lab" data-s="lab"></span><span class="r-val" data-s="val"></span><span class="ev-tag" aria-hidden="true">Evidence</span></button></li></template>
+<template id="tpl-row"><li><button type="button" class="row" data-f=""><span class="r-lab" data-s="lab"></span><span class="r-val" data-s="val"></span></button></li></template>
 <template id="tpl-toast"><div class="toast" data-tone="info"><span class="t-dot" aria-hidden="true"></span><div class="t-body"><b data-s="title"></b><span class="t-line" data-s="line" hidden></span><span class="t-fix" data-s="fix" hidden><span data-s="fixlab"></span> · <s data-s="was"></s> → <span data-s="is"></span></span></div><span class="jurors" data-s="jurors" aria-hidden="true" hidden><i></i><i></i><i></i></span><img class="t-thumb" data-s="thumb" alt="" width="24" height="24" hidden></div></template>
 <template id="tpl-pick"><button type="button" class="pick"><span class="pick-pic" data-s="pic" aria-hidden="true"></span>
   <span class="pick-txt"><b class="pick-app" data-s="app"></b><span class="pick-need" data-s="need"></span><span class="pick-sub" data-s="sub"></span><span class="pick-meta" data-s="meta"></span></span>

@@ -77,7 +77,7 @@
   function tierTitle(i) { return i === 0 ? 'Everyone' : baseTier(i).name + ' tier'; }
 
   // ---- Check-in (read-only) ----
-  // Mirrors index.html’s returning-visitor gate (:1567-1569) and tierOf() (:1131).
+  // Mirrors index.html’s returning-visitor gate and tierOf().
   // merchOf() is never called or copied: it mutates the record.
   function read(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
   function checkin() {
@@ -114,8 +114,8 @@
     if (KIOSK || !st) return;
     if (store(KEY, st) !== true) blocked = true;
   }
-  // Another tab, or this page back from the bfcache, may have written since this page last read. Every entry
-  // point re-reads storage and saves in the same task, so a stale copy never overwrites newer shifts or a stamp.
+  // Another tab (or a bfcache restore) may have written since: every entry point re-reads and saves in the same
+  // task, so a stale copy never overwrites newer shifts or a stamp.
   function sync() {
     if (KIOSK || blocked) { if (!st) load(); return; }   // kiosk and blocked browsers: the memory copy is the truth
     load();
@@ -243,7 +243,7 @@
       while (list.firstChild) list.removeChild(list.firstChild);
       for (i = 0; i < 4; i++) list.appendChild(chip(i));
     }
-    // Brief copy leads with the one-item rule; skip it only when the configured merch note already says it, so it never repeats or disappears.
+    // Lead with the one-item rule unless the merch note already says it.
     var once = /one item per person/i.test(MERCH.note || '');
     // A booth tablet has no "best of 3": every round is the next visitor.
     if (KIOSK) txt('ladder-fine', 'Booth tablet: one round per visitor, up to Teal. Play on your own phone for Purple and Gold.');
@@ -385,7 +385,7 @@
       set('kind', leak ? 'Fake listed' : 'Good entry challenged');
       if (leak) { set('lab', m.fieldLabel); set('was', m.shown); set('is', m.fix); } else if (line) line.hidden = true;
       set('name', m.name);
-      set('why', m.why);
+      set('why', m.why);   // a wrong-part catch is a correct call: its lesson stays in the ruling toast
       list.appendChild(li);
     });
   }
@@ -394,8 +394,8 @@
     var el = $(id), b = el && el.querySelector('b');
     if (b) b.textContent = v; else txt(id, label + ' ' + v.replace(/ /g, '\u00a0'));
   }
-  // Headline, quote and payoff follow the trust band (≥90 / 70–89 / <70) and come from the app’s deck copy.
-  // App-neutral lines cover a deck that lacks one, so no app shows another app’s story.
+  // Headline, quote and payoff follow the trust band (≥90 / 70–89 / <70) from the deck copy; neutral lines
+  // cover a deck that lacks one.
   var HEADLINES = ['Clean list. Users are safe.', 'Mostly clean. A few fakes slipped in.', 'Leaky list. Fakes reached users.'];
   var PAYOFFS = ['{client} kept {trust}% of its users’ trust, so they keep using it and it keeps earning.',
     '{client} kept {trust}% of its users’ trust. Each fake that got listed cost it users.',
@@ -422,7 +422,7 @@
     txt('rep-sub', fmt(sum.reviewed) + ' of ' + fmt(sum.entries || S.entries || sum.reviewed) + ' entries reviewed');
     stat('rep-caught', 'Fakes caught', fmt(sum.caught) + ' of ' + fmt(sum.fakesSeen));
     stat('rep-listed', 'Good entries listed', fmt(sum.listed) + ' of ' + fmt(sum.goodsSeen));
-    stat('rep-evidence', 'Sharp evidence', fmt(sum.evidence));
+    stat('rep-evidence', 'Fake parts spotted', fmt(sum.evidence) + ' of ' + fmt(sum.fakesSeen));
     stat('rep-wrong', 'Wrong challenges', fmt(sum.wrong));
     txt('rep-quote', fill(band3(copy.quotes, QUOTES, band), d, trust));
     txt('rep-quote-by', copy.quoteBy || (d.client ? d.client + ' (fictional)' : ''));
@@ -434,7 +434,7 @@
     if (g < 3 && !(KIOSK && g >= (kioskCap()))) {
       next = ' ' + fmt(TIERS[g + 1] - final) + ' points to ' + baseTier(g + 1).name + '.';
     }
-    // The marker stays at the real score, so say why a kiosk score above the cap gets the cap’s reward.
+    // The marker stays at the real score: say why a kiosk gets the cap’s reward.
     if (KIOSK && g0 > g) next = ' The booth tablet tops out at ' + baseTier(g).name + '. Play on your own phone for ' + kioskAbove() + '.';
     // A duplicate check-in already holds this person's one item, so the score names no reward.
     txt('rep-tier-line', ci && ci.claimed ? 'Merch goes with your first check-in. Play for fun.' : tierTitle(g) + ' · ' + info.reward + '.' + next);
@@ -446,7 +446,7 @@
     txt('to-ticket', 'Show my merch ticket');
     txt('again', againText(c));
     txt('rep-switch', 'Try another app');   // game.js wires it back to the title screen
-    txt('rep-fine', 'Points are for booth merch, not real money. Real challenge windows last days; here you get seconds.' +
+    txt('rep-fine', 'Points are for booth merch, not real money. Real Curate challengers get days; here it’s one quick round.' +
         (MERCH.note ? ' ' + MERCH.note + '.' : ''));
   }
   function armIdle() {
@@ -521,7 +521,7 @@
   function noteFor(m) {
     var from;
     if (blocked) return 'This browser won’t keep your ticket if you close it.';
-    if (m.soldFrom > 0) {   // no generated plural: rewards read 'Copper bottle or gamcha', 'Kleros flip-flops'
+    if (m.soldFrom > 0) {   // no generated plural: rewards are free text
       from = baseTier(m.soldFrom);
       return from.reward + ': gone for today. Your ' + from.name + ' score gets ' + tierInfo(m.t).short + '.';
     }
@@ -532,7 +532,7 @@
     txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Round ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' today · ') +
         'Played ' + hhmm(b.at) + ' · ' + deckOf(b.deck).client);
     txt('tb-stats', !b ? '' : fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes · ' +
-        fmt(b.evidence) + ' sharp evidence · trust ' + (b.trust == null ? 100 : b.trust) + '%');
+        fmt(b.evidence) + ' of ' + fmt(b.fakesSeen) + ' parts spotted · trust ' + (b.trust == null ? 100 : b.trust) + '%');
     txt('tb-code', !b || !live ? '' : 'Game code ' + (b.code || '') + (ci && ci.ok ? ' · Check-in ' + ci.ticket : ''));
     vis('tb-staff', staff);
     txt('tb-staff', 'Staff: hold the code for ' + Math.round((S.staffHoldMs || 2000) / 1000) +

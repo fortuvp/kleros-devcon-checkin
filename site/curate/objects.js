@@ -1,8 +1,7 @@
 // Curate card pictures and the Results medal.
-// Cards: a real photo (sights), a flat flag painted here (countries) or a painted record sleeve (music). They are
-// plain DOM and 2D canvas, so a card never waits on WebGL. Results: a lit metal medal in the tier colour. Its 2D
-// paint shows at once; gl.js is fetched in idle time once a round starts (never in lite) but only set up when a
-// medal is mounted. It registers with _glReady(api), then spins the medal in 3D while the 2D paint fades out.
+// Cards: a real photo, a flat painted flag or a flat painted logo coin, all plain DOM and 2D canvas, so a card never
+// waits on WebGL. Results: a metal medal in the tier colour, painted in 2D at once; gl.js loads in idle time once a
+// round starts (never in lite), is set up only when a medal is mounted, then spins it in 3D over the 2D paint.
 // gl.js api: init({ reduced }) -> ok, medal(el | null, { color, mark }).
 // Any GL failure (_static() or the mode event) goes back to the 2D paint for the rest of the session.
 (function () {
@@ -11,7 +10,6 @@
     els = [], ro = null, cache = {}, keys = [], imgs = {}, imgKeys = [], PI = Math.PI;
   // Medal colours by tier: Everyone, Teal, Purple, Gold
   var TIER = ['#cfc4f2', '#7ff0e0', '#b77bff', '#f2c46d'];
-  var FONT = 'px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
 
   // ---- Colour ----
   function rgb(h) {
@@ -48,12 +46,6 @@
     x.save(); x.translate(cx, cy); x.scale(1, (ry || rx) / rx);
     x.beginPath(); x.arc(0, 0, rx, a0 || 0, a1 || 7);
     x.restore();
-  }
-  // Rounded rectangle path (arcTo works everywhere; roundRect does not)
-  function rr(x, x0, y0, w, h, r) {
-    x.beginPath(); x.moveTo(x0 + r, y0);
-    x.arcTo(x0 + w, y0, x0 + w, y0 + h, r); x.arcTo(x0 + w, y0 + h, x0, y0 + h, r);
-    x.arcTo(x0, y0 + h, x0, y0, r); x.arcTo(x0, y0, x0 + w, y0, r); x.closePath();
   }
   function F(x, f) { x.fillStyle = f; x.fill(); }
   function S(x, w, s) { x.lineWidth = w; x.strokeStyle = s; x.stroke(); }
@@ -110,12 +102,12 @@
       }
     }
   }
-  // A fresh w × h canvas with the flag (the title screen’s Countries card puts it in the DOM, so never shared)
-  function flag(f, w, h) {
+  // A fresh w × h canvas painted by fn (the title screen’s app cards put it in the DOM, so never shared)
+  function fresh(fn, s, w, h) {
     var cv = document.createElement('canvas'), x;
     cv.width = Math.max(1, Math.round(w || 96)); cv.height = Math.max(1, Math.round(h || 64));
     x = cv.getContext('2d');
-    if (x) try { flagPaint(x, f, cv.width, cv.height); } catch (e) { /* a blank flag beats a broken card */ }
+    if (x) try { fn(x, s || {}, cv.width, cv.height, 1); } catch (e) { /* a blank picture beats a broken card */ }
     return cv;
   }
 
@@ -178,61 +170,102 @@
     x.lineCap = 'round'; ell(x, 0, y, rx * .9, ry * .9, 3.4, 4.45); S(x, 4, W(.75));   // specular arc
     x.fillStyle = rad(x, -34, y - 34, 0, -34, y - 34, 30, [0, W(.32), 1, W(0)]); x.fillRect(-64, y - 64, 60, 60);
   }
-  // A record sleeve centred on a w × h canvas, its vinyl peeking out on the right. Original artwork (album art is
-  // copyrighted): a gradient from color to color2, one motif picked from the initials so sleeves differ, the initials.
-  function sleeve(x, s, w, h) {
-    var c1 = s.color || '#6a3df0', c2 = s.color2 || '#ff6fae', m = String(s.mark || '').slice(0, 3).toUpperCase(),
-      Q = Math.min(h * .84, w / 1.4), r = Q * .45, off = Q * .4, x0 = (w - (Q * .5 + off + r)) / 2, y0 = (h - Q) / 2,
-      cx = x0 + Q / 2 + off, cy = h / 2, hs = 7, mid = shA(rgb(c1), 0), i, k, n = rgb(c2);
-    for (i = 0; i < 3; i++) mid[i] = (mid[i] + n[i]) / 2;
-    for (i = 0; i < m.length; i++) hs = (hs * 31 + m.charCodeAt(i)) % 9973;
-    // The vinyl: a soft shadow, the disc, grooves, two sheen wedges, the label and its hole
-    x.save(); x.shadowColor = 'rgba(7,0,26,.5)'; x.shadowBlur = Q * .08; x.shadowOffsetY = Q * .03;
-    x.beginPath(); x.arc(cx, cy, r, 0, 7); F(x, rad(x, cx, cy, r * .2, cx, cy, r, [0, '#2a2533', .7, '#141119', 1, '#060509']));
-    x.restore();
-    x.beginPath();
-    for (k = .42; k < .97; k += .055) { x.moveTo(cx + r * k, cy); x.arc(cx, cy, r * k, 0, 7); }
-    S(x, Math.max(.5, r * .008), 'rgba(255,255,255,.08)');
-    for (k = 0; k < 2; k++) {
-      x.beginPath(); x.moveTo(cx, cy); x.arc(cx, cy, r * .97, -1 + k * PI, -.55 + k * PI); x.closePath(); F(x, W(.07));
-    }
-    x.beginPath(); x.arc(cx, cy, r * .3, 0, 7); F(x, rad(x, cx - r * .08, cy - r * .1, 0, cx, cy, r * .3, [0, sh(c2, .25), 1, sh(c2, -.2)]));
-    x.beginPath(); x.arc(cx, cy, r * .035, 0, 7); F(x, '#060509');
-    // The sleeve
-    x.save(); x.shadowColor = 'rgba(7,0,26,.55)'; x.shadowBlur = Q * .1; x.shadowOffsetY = Q * .04;
-    rr(x, x0, y0, Q, Q, Q * .03); F(x, lin(x, x0, y0, x0 + Q, y0 + Q, [0, c1, 1, c2]));
-    x.restore();
-    x.save(); rr(x, x0, y0, Q, Q, Q * .03); x.clip();
-    x.beginPath();
-    if (hs % 3 === 0) {   // rings from the lower right corner
-      for (k = 1; k < 7; k++) { x.moveTo(x0 + Q + Q * k * .16, y0 + Q); x.arc(x0 + Q, y0 + Q, Q * k * .16, 0, 7); }
-      S(x, Q * .025, W(.13));
-    } else if (hs % 3 === 1) {   // a band of diagonal stripes
-      for (k = 0; k < 5; k++) { x.moveTo(x0 + Q * (k * .13 - .1), y0 + Q); x.lineTo(x0 + Q * (k * .13 + .55), y0); }
-      S(x, Q * .045, W(.12));
-    } else {   // a low sun, cut by bars
-      x.arc(x0 + Q * .66, y0 + Q * .4, Q * .24, 0, 7); F(x, W(.18));
-      x.fillStyle = lin(x, x0, y0, x0 + Q, y0 + Q, [0, c1, 1, c2]);   // the bars show the sleeve through
-      for (k = 0; k < 4; k++) x.fillRect(x0 + Q * .3, y0 + Q * (.47 + k * .055), Q * .7, Q * .02);
-    }
-    x.fillStyle = rad(x, x0 + Q * .2, y0 + Q * .15, 0, x0 + Q * .2, y0 + Q * .15, Q * .9, [0, W(.2), 1, W(0)]);
-    x.fillRect(x0, y0, Q, Q);
-    x.fillStyle = lin(x, x0, 0, x0 + Q * .07, 0, [0, 'rgba(7,0,26,.28)', 1, 'rgba(7,0,26,0)']);   // the open edge
-    x.fillRect(x0, y0, Q * .07, Q);
-    x.restore();
-    rr(x, x0 + .5, y0 + .5, Q - 1, Q - 1, Q * .03); S(x, 1, W(.16));
-    if (!m) return;
-    x.font = '800 ' + Math.round(Q * (m.length > 2 ? .26 : .32)) + FONT;
-    x.textAlign = 'left'; x.textBaseline = 'alphabetic';
-    x.fillStyle = lum(mid) > 165 ? 'rgba(26,7,61,.9)' : '#fff';
-    x.save(); x.shadowColor = 'rgba(7,0,26,.35)'; x.shadowBlur = Q * .03; x.shadowOffsetY = Q * .01;
-    x.fillText(m, x0 + Q * .09, y0 + Q * .88);
+  // ---- Token logos ----
+  // Flat painted logo coins (never downloaded) with a soft shadow like the flags. TOK: mark -> [disc, glyph]
+  // colours, which spec.color and color2 override (Solana keeps its purple-to-teal bars).
+  var TOK = {
+    btc: ['#f7931a'], eth: ['#627eea'], usdt: ['#26a17b'], usdc: ['#2775ca'], doge: ['#c2a633'], sol: ['#0c0a12'],
+    ada: ['#0033ad'], link: ['#2a5ada'], uni: ['#ff007a'], pol: ['#8247e5'], avax: ['#e84142'], ton: ['#0098ea'],
+    shib: ['#e8490f'], bnb: ['#141519', '#f0b90b'], pnk: ['#9013fe']
+  };
+  // Subpaths in the glyph’s unit box (the disc has radius 1)
+  function pl(x, p) {
+    for (var i = 0; i < p.length; i += 2) x[i ? 'lineTo' : 'moveTo'](p[i], p[i + 1]);
+    x.closePath();
+  }
+  function hex(x, cx, cy, r, a) {
+    for (var i = 0; i < 6; i++) x[i ? 'lineTo' : 'moveTo'](cx + r * Math.cos(a + i * PI / 3), cy + r * Math.sin(a + i * PI / 3));
+    x.closePath();
+  }
+  function dot(x, cx, cy, r) { x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, 7); }
+  function dia(x, cx, cy, s) { pl(x, [cx, cy - s, cx + s, cy, cx, cy + s, cx - s, cy]); }
+  // A bold letter s units tall, set at 100× (canvas text misbehaves at sub-pixel sizes)
+  function txt(x, t, s, dy) {
+    x.save(); x.scale(.01, .01);
+    x.font = '800 ' + Math.round(s * 100) + 'px system-ui, -apple-system, Roboto, Arial, sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(t, 0, dy * 100);
     x.restore();
   }
+  // The glyph for mark m in the current fill and stroke; c is the disc colour (for cut-outs)
+  function glyph(x, m, c) {
+    var i, a, o, g = x.fillStyle;
+    x.beginPath(); x.lineCap = 'butt'; x.lineJoin = 'miter';
+    if (m === 'btc') {   // the leaning B with two strokes above and below
+      x.rotate(.24);
+      x.rect(-.2, -.64, .1, .26); x.rect(.02, -.64, .1, .26); x.rect(-.2, .38, .1, .26); x.rect(.02, .38, .1, .26); x.fill();
+      txt(x, 'B', 1.12, .05);
+    } else if (m === 'eth') {   // two stacked rhombi, the right facets lighter
+      pl(x, [0, -.68, 0, .18, -.41, -.05]); pl(x, [0, .28, -.41, .05, 0, .68]); x.fill();
+      x.globalAlpha = .62; x.beginPath(); pl(x, [0, -.68, .41, -.05, 0, .18]); pl(x, [0, .28, .41, .05, 0, .68]); x.fill();
+    } else if (m === 'usdt') {   // the T with an oval bar across its stem
+      x.rect(-.5, -.52, 1, .2); x.rect(-.13, -.52, .26, 1.08); x.fill();
+      ell(x, 0, -.1, .52, .15); S(x, .08, g);
+    } else if (m === 'usdc') {   // $ in a ring broken at the top and bottom
+      x.arc(0, 0, .7, PI * .64, PI * 1.36); x.moveTo(.7 * Math.cos(PI * .36), -.7 * Math.sin(PI * .36));
+      x.arc(0, 0, .7, -PI * .36, PI * .36); S(x, .1, g);
+      txt(x, '$', 1.02, .04);
+    } else if (m === 'doge') {   // the D with a bar through its stem
+      x.moveTo(-.28, -.44); x.lineTo(-.06, -.44); x.arc(-.06, 0, .44, -PI / 2, PI / 2); x.lineTo(-.28, .44); x.closePath();
+      S(x, .17, g); x.fillRect(-.5, -.07, .42, .14);
+    } else if (m === 'sol') {   // three slanted bars
+      x.fillStyle = lin(x, -.5, .45, .5, -.45, [0, '#9945ff', 1, '#14f195']);
+      pl(x, [-.3, -.44, .52, -.44, .3, -.22, -.52, -.22]); pl(x, [-.52, -.11, .3, -.11, .52, .11, -.3, .11]);
+      pl(x, [-.3, .22, .52, .22, .3, .44, -.52, .44]); x.fill();
+    } else if (m === 'ada') {   // rings of dots, smaller further out
+      for (i = 0; i < 24; i++) {
+        a = i * PI / 6; o = [[.43, .064], [.2, .08], [.68, .042], [.45, .06]][i % 2 + (i > 11) * 2];
+        dot(x, o[0] * Math.cos(a), o[0] * Math.sin(a), o[1]);
+      }
+      x.fill();
+    } else if (m === 'link') {   // a hexagon outline
+      hex(x, 0, 0, .5, -PI / 2); S(x, .15, g);
+    } else if (m === 'pol') {   // two linked hexagons
+      hex(x, -.18, .1, .3, 0); hex(x, .18, -.1, .3, 0); S(x, .11, g);
+    } else if (m === 'avax') {   // a big and a small triangle
+      pl(x, [-.18, -.44, .18, .36, -.54, .36]); pl(x, [.4, -.02, .57, .36, .23, .36]); x.fill();
+    } else if (m === 'ton') {   // a triangle pointing down, split down the middle
+      x.lineJoin = 'round'; pl(x, [-.46, -.36, .46, -.36, 0, .5]); x.moveTo(0, -.36); x.lineTo(0, .5); S(x, .1, g);
+    } else if (m === 'shib') {   // a dog’s head; the mirrored ears wind opposite ways, so each part is filled alone
+      pl(x, [-.5, -.04, -.42, -.6, -.08, -.32]); x.fill();
+      x.beginPath(); pl(x, [.5, -.04, .42, -.6, .08, -.32]); x.fill();
+      x.beginPath(); dot(x, 0, .06, .44); x.fill();
+      x.fillStyle = c; x.beginPath(); dot(x, -.17, -.02, .065); dot(x, .17, -.02, .065); dot(x, 0, .22, .075); x.fill();
+    } else if (m === 'bnb') {   // three diamonds, a chevron above and below
+      dia(x, 0, 0, .14); dia(x, -.42, 0, .1); dia(x, .42, 0, .1); x.fill();
+      x.beginPath(); x.moveTo(-.31, -.11); x.lineTo(0, -.42); x.lineTo(.31, -.11);
+      x.moveTo(-.31, .11); x.lineTo(0, .42); x.lineTo(.31, .11); S(x, .13, g);
+    } else if (m === 'pnk') mark(x, 1.04, 0);   // the Kleros mark, as on the medal
+    else txt(x, String(m || '?').charAt(0).toUpperCase(), 1.1, .05);
+  }
+  // One coin of radius R on (cx, cy); d is the canvas scale, as shadows ignore the transform
+  function token(x, s, cx, cy, R, d) {
+    var t = TOK[s.mark] || [], c = s.color || t[0] || '#9013fe';
+    x.save();
+    x.shadowColor = 'rgba(7,0,26,.5)'; x.shadowBlur = R * d * .2; x.shadowOffsetY = R * d * .08;
+    x.beginPath(); x.arc(cx, cy, R, 0, 7); F(x, c);
+    x.restore();
+    x.save(); x.translate(cx, cy); x.scale(R, R);
+    x.beginPath(); x.arc(0, 0, .975, 0, 7); S(x, .025, W(lum(rgb(c)) < 60 ? .22 : .16));   // a rim for dark discs
+    x.fillStyle = x.strokeStyle = s.color2 || t[1] || '#fff';
+    glyph(x, s.mark, c);
+    x.restore();
+  }
+  // One coin, centred in w × h
+  function tokens(x, s, w, h, d) { token(x, s, w / 2, h * .46, Math.min(w, h) * .4, d); }
 
   // ---- Elements ----
   // A card picture: .obj fills the card’s slot and centres .obj-2d (el._co.cv), the box that tilts. Photo: a div
-  // with the <img>; flag: a canvas exactly the flag’s size; sleeve: a canvas over the whole slot. The medal is a
+  // with the <img>; flag: a canvas exactly the flag’s size; coin: a canvas just round the coin. The medal is a
   // .obj-medal box with its 2D canvas; gl.js adds its own canvas on top.
   var BOX = 'display:block;flex:none;position:relative;width:100%;height:100%;transform-origin:50% 50%';
   // The photo placeholder while it loads or when it fails: a dusk gradient and a small landscape glyph
@@ -301,15 +334,19 @@
     if (o.kind === 'flag') {
       a = flagAspect(o.spec.flag); bh = Math.min(h * .8, w * .9 / a); bw = Math.round(bh * a); bh = Math.round(bh);
       v.style.width = bw + 'px'; v.style.height = bh + 'px';
+    } else if (o.kind === 'coin') {
+      // Just round the coin, so the tilt pivots on it; painted up to 3× as it is small
+      bh = Math.round(Math.min(h * .92, 300, w * .96)); bw = bh;
+      v.style.width = bw + 'px'; v.style.height = bh + 'px';
     }
-    d = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(700000 / (bw * bh)));
+    d = Math.min(window.devicePixelRatio || 1, o.kind === 'coin' ? 3 : 2, Math.sqrt(700000 / (bw * bh)));
     v.width = Math.round(bw * d); v.height = Math.round(bh * d);
     x = v.getContext('2d');
     if (!x) return;
     x.setTransform(d, 0, 0, d, 0, 0);
     try {
       if (o.kind === 'flag') flagPaint(x, o.spec.flag, bw, bh);
-      else if (o.kind === 'sleeve') sleeve(x, o.spec, bw, bh);
+      else if (o.kind === 'coin') tokens(x, o.spec, bw, bh, d);
       else { k = Math.min(bw, bh) * .96 / 200; x.translate(bw / 2, bh / 2); x.scale(k, k); coin(x, o.spec); }
     } catch (e) { /* never break a card */ }
   }
@@ -416,10 +453,10 @@
         if (e.detail && e.detail.mode === 'static' && CO.mode === 'gl') toStatic(true);
       });
     },
-    // spec: { shape: 'photo', src, alt, pos? } | { shape: 'flag', flag } | { shape: 'sleeve', color, color2, mark }
+    // spec: { shape: 'photo', src, alt, pos? } | { shape: 'flag', flag } | { shape: 'coin', mark, color?, color2? }
     create: function (spec) {
       spec = spec || {};
-      var kind = spec.shape === 'flag' || spec.shape === 'sleeve' ? spec.shape : 'photo', el = make(kind);
+      var kind = spec.shape === 'flag' || spec.shape === 'coin' ? spec.shape : 'photo', el = make(kind);
       el._co.spec = spec;
       if (kind === 'photo') photo(el, spec);
       track(el);
@@ -460,12 +497,11 @@
       return medalEl;
     },
     hero: function () { return null; },   // v3’s title hero is gone; kept so an older caller does nothing
-    // Kept for game.js. Cards do not animate, and rewards.js releases the medal whenever Results hide (gl.js also
-    // stops while the page is hidden), so there is nothing to pause
+    // Kept for game.js: cards do not animate and rewards.js releases the medal when Results hide
     pause: function () {},
     resume: function () {},
     // Shared: the flag painter (a fresh canvas); the medal emblem for gl.js
-    _flag: flag,
+    _flag: function (f, w, h) { return fresh(flagPaint, f, w, h); },
     _emblem: emblem,
     _glReady: function (a) {
       if (reg || dead || isLite || !a || !CO._on) return false;
