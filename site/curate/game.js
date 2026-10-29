@@ -541,7 +541,7 @@
     if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o, false);
     pStep = 1;
-    if (item.bad) coach(o.evidence === 'sharp' ? 'Bounty won. It comes from the faker’s deposit.' : 'Tip: tap what’s wrong first for +25.');
+    if (item.bad) coach(o.evidence === 'sharp' ? 'Bounty won. It comes from the faker’s deposit.' : 'Tip: tap what’s wrong first for ' + signed(S.points.evidence) + '.');
     else coach('Nobody challenged it, so it joins the list. That’s Curate in a nutshell.');
     cards.shift(); idx++;
     setChalLabel(null);   // empty arena until the round
@@ -629,10 +629,12 @@
     fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
     hudScore(score.raw);
     if (by === 'done') {
-      if (relaxed && score.mistakes <= S.points.bonusMaxMistakes) toast({ tone: 'good', ms: 1300, title: 'All done · ' + signed(fb.timeBonus) + ' finish bonus' });
-      else if (relaxed) toast({ tone: 'info', ms: 2600, title: 'All done', line: 'Finish bonus needs ' + S.points.bonusMaxMistakes + ' mistakes or fewer.' });
-      else if (score.mistakes <= S.points.bonusMaxMistakes) toast({ tone: 'good', ms: 1300, title: 'All done early · ' + signed(fb.timeBonus) + ' time bonus' });
-      else toast({ tone: 'info', ms: 2600, title: 'All done early', line: 'Time bonus needs ' + S.points.bonusMaxMistakes + ' mistakes or fewer.' });
+      // Same conditions as R.finish(): few mistakes and at least one fake caught with the right evidence.
+      var tooMany = score.mistakes > S.points.bonusMaxMistakes, noEv = score.evidence < (S.points.bonusMinEvidence || 0);
+      var done = relaxed ? 'All done' : 'All done early', kind = relaxed ? 'finish bonus' : 'time bonus';
+      if (!tooMany && !noEv) toast({ tone: 'good', ms: 1300, title: done + ' · ' + signed(fb.timeBonus) + ' ' + kind });
+      else toast({ tone: 'info', ms: 2600, title: done, line: (relaxed ? 'Finish' : 'Time') + ' bonus needs ' +
+        (tooMany ? S.points.bonusMaxMistakes + ' mistakes or fewer.' : 'a fake caught with evidence: tap what’s wrong, then challenge.') });
       later(function () { handOff(by); }, 1300);
     } else if (by === 'time') {
       if (cards[0]) cards[0].setAttribute('inert', '');

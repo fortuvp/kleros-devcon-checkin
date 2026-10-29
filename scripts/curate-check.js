@@ -42,7 +42,7 @@ function checkSettings() {
   if (!S) return fail('settings.js: window.CURATE_SETTINGS is missing');
   keys.forEach(function (k) { if (S[k] === undefined) fail('settings.js: missing ' + k); });
   ['catch', 'evidence', 'letThrough', 'autoListed', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus',
-    'perSecondLeft', 'bonusMaxMistakes', 'relaxedBonus'].forEach(function (k) {
+    'perSecondLeft', 'bonusMaxMistakes', 'bonusMinEvidence', 'relaxedBonus'].forEach(function (k) {
     if (typeof S.points[k] !== 'number') fail('settings.js: points.' + k + ' is not a number');
   });
   ['leak', 'wrongChallenge'].forEach(function (k) {
@@ -625,7 +625,7 @@ function checkCopy() {
 // a card loads its photo when dealt; only the Sightseeing pick card shows one (taj-mahal.jpg) on the title screen.
 var KB = 1024, IMG_MAX = 60 * KB;
 var BUDGETS = {
-  'settings.js': [2.4 * KB, 0, true], 'decks.js': [29 * KB, 9 * KB, true], 'rules.js': [8.9 * KB, 0, true],
+  'settings.js': [2.6 * KB, 0, true], 'decks.js': [29 * KB, 9 * KB, true], 'rules.js': [8.9 * KB, 0, true],
   'credits.js': [5.75 * KB, 2.25 * KB, true],
   'objects.js': [27 * KB, 10.25 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [46.5 * KB, 15.25 * KB],
   'rewards.js': [43.5 * KB, 14.75 * KB], 'index.html': [62.5 * KB, 17.5 * KB]

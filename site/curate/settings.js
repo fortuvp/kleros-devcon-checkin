@@ -6,11 +6,12 @@ window.CURATE_SETTINGS = {
   seconds: 40, relaxedSeconds: 60, entries: 10, fakes: 4,   // v4: a shorter round
   windows: [[0, 6], [15, 5], [28, 4]],       // [from elapsed s, window s]; relaxed: none
   rushAt: 28, graceMs: 1000,                 // rush toast: Final 12 s
-  points: { catch: 100, evidence: 25, letThrough: 25, autoListed: 10, wrongChallenge: -75, leak: -75,
-            streakEvery: 5, streakBonus: 50, perSecondLeft: 5, bonusMaxMistakes: 2, relaxedBonus: 50 },
+  points: { catch: 75, evidence: 50, letThrough: 25, autoListed: 10, wrongChallenge: -75, leak: -75,
+            streakEvery: 5, streakBonus: 50, perSecondLeft: 5, bonusMaxMistakes: 2, bonusMinEvidence: 1, relaxedBonus: 50 },
   // relaxedBonus: no clock when relaxed, so a clean finish gets this flat bonus (flawless relaxed reaches Gold)
+  // bonusMinEvidence: the time bonus also needs this many sharp catches (blind swiping never earns it)
   trust: { leak: -15, wrongChallenge: -5 },
-  tiers: [0, 250, 555, 800],                 // Everyone, Teal, Purple, Gold (v4: fitted by --sim for 10 entries in 40 s)
+  tiers: [0, 185, 490, 765],                 // Everyone, Teal, Purple, Gold (fitted by --fit: catch 75 + evidence 50)
   checkinNeededFrom: 3,                      // 3 = Gold only; 1 = every tier above Everyone
   countedPerDay: 3,
   kioskMaxTier: 1, kioskResetMs: 20000, kioskIdleMs: 60000,

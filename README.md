@@ -156,14 +156,14 @@ In a fake, exactly one line is wrong (the Taj Mahal in *Mumbai, India*, India wi
 
 - One **round** is 40 s and 10 entries, 4 of them fake. The cards are from the app you picked.
 - Swipe left (or *← Challenge*) to challenge a fake: you win the faker's deposit as your bounty. Swipe right (or *Verify →*) to verify a good entry.
-- Tapping a line, or the photo or flag, marks it as evidence (+25 when it is the faulty line). It never decides the entry.
+- Tapping a line, or the photo or flag, marks it as evidence (+50 when it is the faulty line). It never decides the entry.
 - Each entry has a short challenge window (6 s, then 5 s from 15 s, then 4 s for the final 12 s, when the toast says *Final 12 s · entries close faster*). When it runs out, the entry is listed, fake or not.
 - The very first round on a phone (whichever app) starts with one untimed practice card with a coach hint, which can be skipped. *Relaxed timing* gives 60 s with no per-entry countdown.
 - Keyboard: ← or A challenges, → or D verifies, 1–3 mark evidence, Esc or P pauses.
 
 | Outcome | Points |
 |---|---|
-| Fake challenged | +100, plus 25 with the right evidence line |
+| Fake challenged | +75, plus 50 with the right evidence (the photo, flag or line that is wrong) |
 | Good entry verified | +25 (+10 when its window ran out) |
 | Good entry challenged | −75 (Trust −5) |
 | Fake listed | −75 (Trust −15) |
@@ -181,11 +181,11 @@ Trust (the app's users' trust in its list) only drives the Results headline; it 
 | Tier | Game route | Check-in route (unchanged) | Merch (today's `config.js`) |
 |---|---|---|---|
 | Everyone | Finish a round | Visit the booth | Stickers and metallic tattoos |
-| Teal | `tiers[1]` points (250) | Check in | Kleros flip-flops |
-| Purple | `tiers[2]` points (555) | + Telegram, X and LinkedIn | Copper bottle or gamcha |
-| Gold | `tiers[3]` points (800) **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
+| Teal | `tiers[1]` points (185) | Check in | Kleros flip-flops |
+| Purple | `tiers[2]` points (490) | + Telegram, X and LinkedIn | Copper bottle or gamcha |
+| Gold | `tiers[3]` points (765) **and** a confirmed check-in on this phone | + Kleros 101 | Kleros kurta |
 
-The thresholds (`tiers` in `site/curate/settings.js`, the only place they are set: the ladder, meter and copy read them from there) come from a simulation of player profiles on the 10-entry, 40-second round (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Verifying everything, challenging everything or doing nothing never reaches Teal. Random fast taps (10 coin flips) reach Teal in about 7% of rounds; the sim reports this but does not fail on it. `node scripts/curate-check.js --fit` prints thresholds fitted to those shares, and `--sim` checks them. A relaxed round has no time bonus; finishing it with 2 mistakes or fewer adds a flat `points.relaxedBonus` (50), so only a flawless relaxed round, with sharp evidence on every fake, reaches Gold. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
+The thresholds (`tiers` in `site/curate/settings.js`, the only place they are set: the ladder, meter and copy read them from there) come from a simulation of player profiles on the 10-entry, 40-second round (about 27% Everyone, 36% Teal, 30% Purple and 7% Gold scores; real Gold is lower because of the check-in rule). Verifying everything, challenging everything or doing nothing never reaches Teal. Random fast taps (10 coin flips) reach Teal in about 6% of rounds; the sim reports this but does not fail on it. To keep blind swiping down, a caught fake is worth more with the right evidence (+75, or +125 with it), and the time bonus (and the relaxed finish bonus) also needs at least one fake caught with evidence (`points.bonusMinEvidence`). `node scripts/curate-check.js --fit` prints thresholds fitted to those shares, and `--sim` checks them. A relaxed round has no time bonus; finishing it with 2 mistakes or fewer adds a flat `points.relaxedBonus` (50), so only a flawless relaxed round, with sharp evidence on every fake, reaches Gold. Each phone gets **3 counted rounds per day**; a round counts as soon as its clock starts (quitting doesn't refund it), and the ticket shows today's best counted round. Later rounds say *Practice round: not counted today*.
 
 **Gold needs a check-in.** A Gold score needs a confirmed check-in on the same phone (`checkinNeededFrom: 3`), read from the check-in's own storage with the same confirmation rule as the check-in page. Until then the ticket shows Purple with a gold strip linking to `/`; coming back to `/curate/` after checking in upgrades it. So every Gold ticket carries a K- code the merch desk can dedupe. Teal and Purple need no check-in ("scan and play"); `checkinNeededFrom: 1` makes every tier above Everyone need one.
 

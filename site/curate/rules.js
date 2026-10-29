@@ -138,9 +138,10 @@
     score.tier = tierFor(score.raw);
     return { streakBonus: bonus, tierFrom: from, tierTo: score.tier };
   }
-  // The time bonus (relaxed: a flat finish bonus) is added to raw.
+  // The time bonus (relaxed: a flat finish bonus) is added to raw. It needs few mistakes and at least one
+  // sharp catch, so blind fast swiping never earns it.
   function finish(score, secondsLeft, allDecided, relaxed) {
-    var P = S().points, bonus = !allDecided || score.mistakes > P.bonusMaxMistakes ? 0 :
+    var P = S().points, bonus = !allDecided || score.mistakes > P.bonusMaxMistakes || score.evidence < (P.bonusMinEvidence || 0) ? 0 :
       relaxed ? (P.relaxedBonus || 0) : P.perSecondLeft * Math.floor(Math.max(0, secondsLeft));
     score.timeBonus = bonus;
     score.raw += bonus;
