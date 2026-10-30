@@ -52,7 +52,11 @@
   // settings.js owns the thresholds (tuned with curate-check --sim): no copy of them lives here.
   var TIERS = S.tiers || [0];
   var NEED = S.checkinNeededFrom || 3;
-  var PER_DAY = S.countedPerDay || 3;
+  var PER_DAY = S.countedPerDay || 2;
+  // v6: the tries copy, said the same way on the title, Results and the ticket.
+  function triesLeft(n) { return n + (n === 1 ? ' try' : ' tries') + ' left today'; }
+  function count(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many); }   // “1 fake”, “3 fakes”
+  function allUsed() { return PER_DAY === 1 ? 'Today’s try is used' : (PER_DAY === 2 ? 'Both' : 'All ' + PER_DAY) + ' tries used today'; }
   function isSoldOut(i) { return i > 0 && (S.soldOut || []).indexOf(NAMES[i]) > -1; }
   function baseTier(i) {
     var t = i === 0 ? (MERCH.free || (S.fallbackMerch || {}).free || {}) : (MERCH.tiers[i - 1] || {});
@@ -153,17 +157,18 @@
   function lastIds(deckId) { sync(); return (st.lastIds[deckId] || []).slice(); }
   function saveLastIds(deckId, ids) { sync(); st.lastIds[deckId] = [].concat(ids || []); save(); }
   // A booth tablet counts every visitor’s shift in memory; the reset wipes it for the next one.
+  // next: the try number the next counted round gets (game.js builds “Try 1 of 2 · Go!” from it and perDay).
   function canCount() {
     sync();
-    if (KIOSK) return { counted: true, left: 1, reason: 'kiosk' };
+    if (KIOSK) return { counted: true, left: 1, reason: 'kiosk', next: 1, perDay: 1 };
     rollDay();
-    if (st.collected) return { counted: false, left: 0, reason: 'collected' };
-    if (st.counted >= PER_DAY) return { counted: false, left: 0, reason: 'limit' };
-    return { counted: true, left: PER_DAY - st.counted, reason: '' };
+    if (st.collected) return { counted: false, left: 0, reason: 'collected', next: 0, perDay: PER_DAY };
+    if (st.counted >= PER_DAY) return { counted: false, left: 0, reason: 'limit', next: 0, perDay: PER_DAY };
+    return { counted: true, left: PER_DAY - st.counted, reason: '', next: st.counted + 1, perDay: PER_DAY };
   }
   // Called when the clock starts, so quitting does not refund the shift.
   function startShift(deckId) {
-    var c = canCount(), r = { counted: c.counted, shiftNo: 0, code: null };
+    var c = canCount(), r = { counted: c.counted, shiftNo: 0, code: null, perDay: c.perDay };
     if (KIOSK) { st.best = null; st.runs = []; }   // one kiosk shift is one visitor: never show an earlier best
     st.deck = deckId || st.deck;
     if (c.counted) { st.counted++; r.shiftNo = st.counted; r.code = code(); }
@@ -185,13 +190,12 @@
     var m = model(), ci = m.ci, best = st.best, line = '', go = '', n;
     if (!KIOSK) {
       if (st.collected) line = 'Merch collected. Play for fun.';
-      else if (ci && ci.claimed) line = 'You already checked in at the booth, so your merch goes with that check-in. Play for fun.';
+      else if (ci && ci.claimed) line = 'You already checked in at the booth. Play for fun.';
       else if (best && m.state === 'live' && m.t > 0) { line = 'Your ' + baseTier(m.t).name + ' ticket is ready ·'; go = 'Show staff →'; }
-      else if (best) { line = 'Your best today: ' + fmt(best.final) + ' pts ·'; go = 'Show ticket →'; }
-      else if (st.counted >= PER_DAY) line = fmt(PER_DAY) + ' of ' + fmt(PER_DAY) + ' rounds counted today. Play for fun, or come back tomorrow.';
+      else if (best) { line = 'Best today: ' + fmt(best.final) + ' pts ·'; go = 'Show ticket →'; }
       else if (ci && ci.ok && ci.tier > 0 && ci.tier < 3) {
         n = ci.tier + 1;
-        line = 'You’re checked in: ' + baseTier(ci.tier).name + '. Score ' + fmt(TIERS[n]) + ' to move up to ' + baseTier(n).name + '.';
+        line = 'Checked in: ' + baseTier(ci.tier).name + '. Score ' + fmt(TIERS[n]) + ' for ' + baseTier(n).name + '.';
       }
     }
     vis('welcome', !!line);
@@ -238,17 +242,24 @@
     return li;
   }
   function renderLadder() {
-    var list = $('ladder-list'), i;
+    var list = $('ladder-list'), i, c = canCount(), ci = checkin(), lead;
     if (list) {
       while (list.firstChild) list.removeChild(list.firstChild);
       for (i = 0; i < 4; i++) list.appendChild(chip(i));
     }
-    // Lead with the one-item rule unless the merch note already says it.
-    var once = /one item per person/i.test(MERCH.note || '');
-    // A booth tablet has no "best of 3": every round is the next visitor.
-    if (KIOSK) txt('ladder-fine', 'Booth tablet: one round per visitor, up to Teal. Play on your own phone for Purple and Gold.');
-    else txt('ladder-fine', (once ? 'From the game or check-in, your' : 'One item per person, from the game or check-in: your') +
-        ' best tier counts. Your best of ' + fmt(PER_DAY) + ' rounds today counts.' + (MERCH.note ? ' ' + MERCH.note + '.' : ''));
+    // v6: the tries rule under the strip, then the one-item rule once (the merch note may already say it).
+    var once = /one item per person/i.test(MERCH.note || ''),
+        rule = (once ? '' : ' One item per person.') + (MERCH.note ? ' ' + MERCH.note + '.' : '');
+    // A booth tablet has no tries: every round is the next visitor.
+    if (KIOSK) txt('ladder-fine', 'Booth tablet: one try each, up to ' + baseTier(kioskCap()).name + '.' + rule);
+    else {
+      // v6: follows today’s tries, so a fun round never passes for a counted one.
+      if (c.reason === 'limit') lead = allUsed() + '. Play for fun.';
+      else if (c.counted && c.left < PER_DAY && !(ci && ci.claimed)) lead = c.left + ' of ' + fmt(PER_DAY) + ' tries left today.';   // “1 of 2 tries”: PER_DAY ≥ 2 here
+      // None used, collected or a duplicate check-in: the welcome chip says the rest.
+      else lead = (PER_DAY === 1 ? '1 try a day counts' : fmt(PER_DAY) + ' tries a day count') + ' for merch.';
+      txt('ladder-fine', lead + rule);
+    }
   }
   function refreshBrief() {
     leaveReport();
@@ -352,102 +363,95 @@
     el.textContent = '0';
     cuRaf = requestAnimationFrame(step);
   }
-  function markerAt(p) {
-    var i = tierFor(p);
-    if (TIERS.length < 4) return 0;
-    if (i >= 3) return Math.min(1, 0.75 + 0.25 * (p - TIERS[3]) / Math.max(1, TIERS[3] - TIERS[2]));
-    return (i + (p - TIERS[i]) / Math.max(1, TIERS[i + 1] - TIERS[i])) / 4;
-  }
-  function renderMeter(final, g) {
-    var meter = $('rep-meter'), segs, labs, i, mk = $('rep-marker');
-    if (meter) {
-      segs = meter.querySelectorAll('i[data-t]');
-      for (i = 0; i < segs.length; i++) {
-        var t = +segs[i].getAttribute('data-t');
-        segs[i].setAttribute('data-tier', t <= g ? NAMES[t] : 'none');   // reached segments take their tier colour
-        if (KIOSK && t > kioskCap()) segs[i].setAttribute('data-locked', ''); else segs[i].removeAttribute('data-locked');
-      }
-    }
-    if (mk) mk.style.setProperty('--at', String(Math.max(0, markerAt(final)).toFixed(4)));
-    labs = $('rep-meter-labels');
-    if (labs) for (i = 0; i < labs.children.length && i < 4; i++) labs.children[i].textContent = fmt(TIERS[i]);
-  }
   function renderMisses(misses) {
     var n = misses.length, det = vis('rep-missed', n > 0), list = $('rep-misses'), tpl = $('tpl-miss');
     if (!det) return;
     txt('rep-missed-sum', 'What you missed (' + n + ')');
-    det.open = n >= 1 && n <= 3;
+    det.open = false;   // v6: collapsed, so Results stay short
     if (!list || !tpl || !tpl.content) return;
     while (list.firstChild) list.removeChild(list.firstChild);
     misses.slice(0, 3).forEach(function (m) {
       var li = tpl.content.firstElementChild.cloneNode(true), leak = m.kind === 'leak', line = li.querySelector('.m-line');
       function set(s, v) { var el = li.querySelector('[data-s="' + s + '"]'); if (el) el.textContent = v || ''; }
-      set('kind', leak ? 'Fake listed' : 'Good entry challenged');
+      set('kind', leak ? 'Fake marked correct' : 'Real marked wrong');
       if (leak) { set('lab', m.fieldLabel); set('was', m.shown); set('is', m.fix); } else if (line) line.hidden = true;
       set('name', m.name);
-      set('why', m.why);   // a wrong-part catch is a correct call: its lesson stays in the ruling toast
+      set('why', m.why);   // a wrong-part catch is a correct call: its lesson stays in the flash
       list.appendChild(li);
     });
   }
-  // A stat tile: the figure goes in its <b> when the shell has one; otherwise no-break spaces keep it whole.
-  function stat(id, label, v) {
-    var el = $(id), b = el && el.querySelector('b');
-    if (b) b.textContent = v; else txt(id, label + ' ' + v.replace(/ /g, '\u00a0'));
+  // v6: Results show only what helps: the old quote, payoff, stats grid and fine print stay hidden.
+  var REP_GONE = ['rep-quote', 'rep-quote-by'];
+  function hideOld() {
+    var g = $('rep-caught');
+    REP_GONE.forEach(function (id) { vis(id, false); });
+    if (g && g.parentNode && g.parentNode.className === 'stats') g.parentNode.hidden = true;
+    else ['rep-caught', 'rep-listed', 'rep-evidence', 'rep-wrong'].forEach(function (id) { vis(id, false); });
   }
-  // Headline, quote and payoff follow the trust band (≥90 / 70–89 / <70) from the deck copy; neutral lines
-  // cover a deck that lacks one.
-  var HEADLINES = ['Clean list. Users are safe.', 'Mostly clean. A few fakes slipped in.', 'Leaky list. Fakes reached users.'];
-  var PAYOFFS = ['{client} kept {trust}% of its users’ trust, so they keep using it and it keeps earning.',
-    '{client} kept {trust}% of its users’ trust. Each fake that got listed cost it users.',
-    '{client} lost users’ trust (down to {trust}%): fakes reached them, and it stops earning until the list is clean.'];
-  var QUOTES = ['“Our users only saw real entries today. Come back tomorrow?”',
-    '“A few fakes got through. We filed removal requests.”',
-    '“Fakes reached our users. We’re pausing the list until it’s clean.”'];
+  // A line the shell may not have yet: its own element, else an old one this file no longer fills.
+  function slot(id, old, s) {
+    var el = $(id);
+    if (el) vis(old, false); else el = $(old);
+    if (!el) return;
+    el.textContent = s || '';
+    el.hidden = !s;
+  }
+  // The headline follows the trust band (≥90 / 70–89 / <70) from the deck copy; these cover a deck without one.
+  var HEADLINES = ['Well done', 'Not bad', 'Too many fakes got in'];   // the brief’s “Great job” trips the job-word check
+  // The one company line: did any fake reach the app’s users? [clean, leaky], from the deck copy when it has them.
+  var COMPANY = ['Clean list: the app keeps earning.', 'Fakes got in: the app lost users.'];
   function band3(list, fb, band) { var s = list && list[band]; return s ? String(s) : fb[band]; }
-  function fill(s, d, trust) { return String(s).split('{client}').join(d.client || '').split('{trust}').join(String(trust)); }
   // Ranks by tier when no check-in name; settings.js wins when it has them.
   var RANKS = ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'];
   function againText(c) {
-    return KIOSK ? 'Next curator' : c.reason === 'collected' || c.left === 0 ? 'Play again for fun' :
-      'Play again · ' + c.left + ' of ' + PER_DAY + ' counted rounds left today';
+    return KIOSK ? 'Next curator' : c.counted ? 'Play again' : 'Play for fun';
   }
+  // “Try 1 of 2 · 1 try left today”, “Both tries used today”, or why this round was just for fun.
+  // left comes from storage now, so a try another tab started since is already taken off.
+  function triesText(sum, c) {
+    if (KIOSK || !sum) return '';
+    if (!sum.counted) return st.collected ? 'Merch collected · just for fun' : 'Just for fun · ' + lowerFirst(allUsed());
+    if (c.left > 0) return 'Try ' + (sum.shiftNo || 1) + ' of ' + PER_DAY + ' · ' + triesLeft(c.left);
+    return allUsed();
+  }
+  var repSum = null;   // the round on Results, for the tries line when another tab changes the count
   function renderReport(sum, misses) {
     var d = deckOf(sum.deck), copy = d.copy || {}, trust = sum.trust == null ? 100 : sum.trust,
         band = trust >= 90 ? 0 : trust >= 70 ? 1 : 2, final = sum.final || 0, ci = checkin(),
-        g0 = tierFor(final), g = g0, info, next = '', c = canCount(), pending;
+        g0 = tierFor(final), g = g0, info, next = '', c = canCount(), pending, fun = !sum.counted && !KIOSK,
+        right = (sum.caught || 0) + (sum.listed || 0), of = sum.entries || S.entries || sum.reviewed || 0,
+        // Trust only drops on mistakes, so a round timed out or ended early is capped by the count right too.
+        early = sum.endedBy === 'time' || sum.endedBy === 'quit',
+        cb = !early ? 0 : right >= of - 1 ? 0 : right >= Math.ceil(of * 0.7) ? 1 : 2;
     if (KIOSK) g = Math.min(g, kioskCap());
     repTier = g;   // the medal shows the tier this round earns here (capped on a booth tablet)
-    txt('rep-kicker', 'Results · ' + d.client + (sum.counted ? '' : ' · Practice round: not counted today'));
-    txt('rep-title', band3(copy.headlines, HEADLINES, band));
-    txt('rep-sub', fmt(sum.reviewed) + ' of ' + fmt(sum.entries || S.entries || sum.reviewed) + ' entries reviewed');
-    stat('rep-caught', 'Fakes caught', fmt(sum.caught) + ' of ' + fmt(sum.fakesSeen));
-    stat('rep-listed', 'Good entries listed', fmt(sum.listed) + ' of ' + fmt(sum.goodsSeen));
-    stat('rep-evidence', 'Fake parts spotted', fmt(sum.evidence) + ' of ' + fmt(sum.fakesSeen));
-    stat('rep-wrong', 'Wrong challenges', fmt(sum.wrong));
-    txt('rep-quote', fill(band3(copy.quotes, QUOTES, band), d, trust));
-    txt('rep-quote-by', copy.quoteBy || (d.client ? d.client + ' (fictional)' : ''));
-    txt('rep-payoff', fill(band3(copy.payoffs, PAYOFFS, band), d, trust) +
-        (sum.caught > 1 ? ' Your bounties came from the fakers’ deposits.' :
-         sum.caught ? ' Your bounty came from the faker’s deposit.' : ' Catch a fake and its deposit becomes your bounty.'));
-    renderMeter(final, g);
+    repSum = sum;
+    hideOld();
+    txt('rep-kicker', d.client);
+    // Capped by the count, not by fakes: say why.
+    txt('rep-title', cb === 2 && band < 2 ? (sum.endedBy === 'time' ? 'Out of time' : 'Ended early') :
+      band3(copy.headlines, HEADLINES, Math.max(band, cb)));
+    // A fake marked Wrong is right even with the wrong part picked: the part only changes the points.
+    txt('rep-sub', fmt(right) + ' of ' + fmt(of) + ' right');
+    // A round cut short with few cards seen says nothing about the list, so it gets no company line.
+    slot('rep-company', 'rep-payoff', cb === 2 && !sum.leaks ? '' : (sum.leaks > 0 ? (copy.company || [])[1] || COMPANY[1] : (copy.company || [])[0] || COMPANY[0]));
     info = tierInfo(g);
-    if (g < 3 && !(KIOSK && g >= (kioskCap()))) {
-      next = ' ' + fmt(TIERS[g + 1] - final) + ' points to ' + baseTier(g + 1).name + '.';
-    }
-    // The marker stays at the real score: say why a kiosk gets the cap’s reward.
-    if (KIOSK && g0 > g) next = ' The booth tablet tops out at ' + baseTier(g).name + '. Play on your own phone for ' + kioskAbove() + '.';
+    if (g < 3 && !fun && !(KIOSK && g >= kioskCap())) next = ' · ' + fmt(TIERS[g + 1] - final) + ' pts to ' + baseTier(g + 1).name;
+    // The score may be past the cap: say why a kiosk gets the cap’s reward.
+    if (KIOSK && g0 > g) next = ' · Own phone for ' + kioskAbove();
     // A duplicate check-in already holds this person's one item, so the score names no reward.
-    txt('rep-tier-line', ci && ci.claimed ? 'Merch goes with your first check-in. Play for fun.' : tierTitle(g) + ' · ' + info.reward + '.' + next);
-    thumbs($('rep-thumbs'), ci && ci.claimed ? [] : info.img);
+    // A round just for fun wins nothing, so it names only the tier the score reached.
+    txt('rep-tier-line', ci && ci.claimed ? 'Merch goes with your first check-in. Play for fun.' :
+      fun ? (g > 0 ? baseTier(g).name + ' score' : '') : tierTitle(g) + ' · ' + info.reward + next);
+    thumbs($('rep-thumbs'), (ci && ci.claimed) || fun ? [] : info.img);
     // The strip shows only when this counted round earned a gated tier that a check-in would unlock.
     pending = sum.counted && !KIOSK && g >= NEED && !(ci && (ci.ok || ci.claimed)) && !st.collected && !isSoldOut(g) ? g : 0;
     renderGold('rep-gold', 'rep-gold-go', pending, ci);
     renderMisses([].concat(misses || sum.misses || []));
+    slot('rep-tries', 'rep-fine', triesText(sum, c));
     txt('to-ticket', 'Show my merch ticket');
     txt('again', againText(c));
     txt('rep-switch', 'Try another app');   // game.js wires it back to the title screen
-    txt('rep-fine', 'Points are for booth merch, not real money. Real Curate challengers get days; here it’s one quick round.' +
-        (MERCH.note ? ' ' + MERCH.note + '.' : ''));
   }
   function armIdle() {
     clearTimeout(idleTimer);
@@ -513,10 +517,8 @@
     return a.join(' and ');
   }
   function hintFor(m) {
-    if (KIOSK) return 'Booth tablet: play on your own phone for ' + kioskAbove() + '.';
-    if (m.t === 0) return 'Show this screen at the booth for ' + tierInfo(0).short + '. Score ' +
-      fmt(TIERS[1]) + ' for ' + tierInfo(1).short + '.';
-    return 'Show this screen at the booth to claim your merch';
+    if (KIOSK) return 'Show this at the booth. Own phone for ' + kioskAbove() + '.';
+    return 'Show this at the booth.';
   }
   function noteFor(m) {
     var from;
@@ -529,19 +531,19 @@
   }
   function renderBack(m) {
     var b = m.best, ci = m.ci, live = m.state === 'live', staff = live && !KIOSK && m.t > 0;   // Everyone: nothing to stamp
-    txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Round ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' today · ') +
-        'Played ' + hhmm(b.at) + ' · ' + deckOf(b.deck).client);
-    txt('tb-stats', !b ? '' : fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes · ' +
-        fmt(b.evidence) + ' of ' + fmt(b.fakesSeen) + ' parts spotted · trust ' + (b.trust == null ? 100 : b.trust) + '%');
+    txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Try ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' · ') +
+        hhmm(b.at) + ' · ' + deckOf(b.deck).client);
+    txt('tb-stats', !b ? '' : fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + count(b.fakesSeen, 'fake', 'fakes') + ' · ' +
+        count(b.evidence, 'part', 'parts') + ' spotted · trust ' + (b.trust == null ? 100 : b.trust) + '%');
     txt('tb-code', !b || !live ? '' : 'Game code ' + (b.code || '') + (ci && ci.ok ? ' · Check-in ' + ci.ticket : ''));
     vis('tb-staff', staff);
-    txt('tb-staff', 'Staff: hold the code for ' + Math.round((S.staffHoldMs || 2000) / 1000) +
-        ' seconds, or use the button below, to mark as collected.');
+    txt('tb-staff', 'Staff: hold the code ' + Math.round((S.staffHoldMs || 2000) / 1000) + ' s, or tap below.');
     if (vis('tb-staff-btn', staff)) txt('tb-staff-btn', 'Mark as collected');
   }
   function renderTicket() {
-    var m = model(), ci = m.ci, b = m.best, live = m.state === 'live', tk = $('ticket'), info = tierInfo(m.t),
-        thanks = 'Thanks for curating. Play again for fun.', who, ck;
+    // canCount() first: model() re-reads storage last, so b below is the live best that save() writes.
+    var c = canCount(), m = model(), ci = m.ci, b = m.best, live = m.state === 'live', tk = $('ticket'), info = tierInfo(m.t),
+        thanks = 'Thanks for playing. Play again for fun.', who, ck;
     current = m;
     if (tk) {
       tk.setAttribute('data-tier', live ? NAMES[m.t] : m.state === 'expired' ? 'expired' : 'claimed');
@@ -562,26 +564,25 @@
       txt('t-tier', 'Collected · ' + tierTitle(m.t) + ' · ' + hhmm(st.collected.at));
       txt('t-reward', info.reward);
       // A game handout never shows on the check-in desk, so say it before they check in for another item.
-      txt('t-hint', ci && ci.ok ? thanks : 'Thanks for curating. One item per person, check-in included. Play again for fun.');
+      txt('t-hint', ci && ci.ok ? thanks : 'One item per person, check-in included. Play again for fun.');
       txt('t-note', '');
     } else if (m.state === 'checkin') {
-      txt('t-tier', 'Your merch comes with your check-in ticket');
-      txt('t-reward', 'One item per person: show your check-in ticket at the booth.');
+      txt('t-tier', 'Your merch comes with your check-in');
+      txt('t-reward', 'Show your check-in ticket at the booth.');
       txt('t-hint', thanks); txt('t-note', '');
     } else if (m.state === 'dup') {
       txt('t-tier', 'Merch goes with your first check-in');
-      txt('t-reward', 'This email or Telegram account already checked in at the booth, so its merch belongs to that ' +
-          'check-in. One item per person.');
+      txt('t-reward', 'You already checked in at the booth. One item per person.');
       txt('t-hint', thanks); txt('t-note', '');
     } else {
-      txt('t-tier', 'From a previous day'); txt('t-reward', ''); txt('t-hint', 'Play a round for today’s ticket.');
+      txt('t-tier', 'From a previous day'); txt('t-reward', ''); txt('t-hint', 'Play today for a new ticket.');
       txt('t-note', '');
     }
     vis('t-note', !!($('t-note') || {}).textContent);
     // The check-in name only when its gate passes; otherwise a rank earned by the score.
     who = ci && ci.ok && ci.name ? ci.name : (S.ranks || RANKS)[b ? tierOf(b) : 0] || '';
     txt('t-who', who);
-    txt('t-org', b ? fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + fmt(b.fakesSeen) + ' fakes caught' : '');
+    txt('t-org', b ? fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + count(b.fakesSeen, 'fake', 'fakes') + ' caught' : '');
     ck = vis('t-code', live);
     if (ck) { ck.textContent = live ? m.code : ''; ck.classList.remove('holding'); ck.style.setProperty('--hold', '0'); }
     renderBack(m);
@@ -592,7 +593,7 @@
       back.textContent = ci ? 'Back to your check-in ticket →' : 'Check in with Kleros →';
     }
     vis('t-next', KIOSK);
-    txt('t-again', KIOSK ? 'Next curator' : 'Play again');   // matches #again on the report
+    txt('t-again', againText(c));   // matches #again on the report
     // A tier that went up since this ticket was last shown (say, after checking in) gets the bump.
     if (live && b && b.shown !== m.t) {
       if (tk && b.shown != null && m.t > b.shown) {
@@ -834,8 +835,8 @@
       cancelHold();
       if (staffFor) closeStaff(false);
       renderTicket();
-    } else if (b && !b.hidden) { renderHeader(); renderWelcome(); }
-    else if (r && !r.hidden) txt('again', againText(canCount()));
+    } else if (b && !b.hidden) { renderHeader(); renderWelcome(); renderLadder(); }   // another tab’s try changes the tries line
+    else if (r && !r.hidden) { m = canCount(); txt('again', againText(m)); slot('rep-tries', 'rep-fine', triesText(repSum, m)); }
   }
   function init(ui) {
     var noop = function () {};

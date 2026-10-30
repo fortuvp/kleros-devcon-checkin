@@ -26,8 +26,8 @@
   // Calls into objects.js / rewards.js, which may be missing while packages are built apart.
   function ob(fn, a, b, c) { var o = O(); return o && typeof o[fn] === 'function' ? o[fn](a, b, c) : null; }
   function rw(fn, a, b) { var r = Rw(); return r ? r[fn](a, b) : null; }
-  // Restarts a one-shot CSS animation class.
-  function bump(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+  // Restarts a one-shot CSS animation class (none under reduced motion, so skip the forced reflow).
+  function bump(el, cls) { if (!el || RM) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
   function focusEl(el) { if (!el) return; try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
   // Parks focus on a non-control (tabindex -1, no ring), so it never drops to <body>.
   function park(id) {
@@ -54,15 +54,15 @@
   var deckId = '', deck = null, relaxed = false;
   var mode = 'brief';        // brief | practice | between | banner | shift | ended
   var run = [], idx = 0, cards = [], score = null, info = null, total = 0;
-  var clockOn = false, elapsed = 0, lastT = 0, paused = false, explainOpen = false;
+  var clockOn = false, elapsed = 0, lastT = 0, paused = false;
   var lastDecide = -1e9, landT = -1e9;
-  var barT = -1e9;           // when the action bar last swapped (Challenge/Verify <-> Cancel)
+  var barT = -1e9;           // when the action bar last swapped (Wrong/Correct <-> Cancel) or a flash went
   var said30 = false, said10 = false;
   var raf = 0, drag = null, press = null, flying = null, keyboard = false;
   var picking = null, pickT = -1e9, pickText = '';   // picking: the top card while in pick mode
   var pStep = 0, pT0 = 0, pHinted = false;
   var sayT = 0;
-  var announcedTier = 0;     // highest tier toasted this shift: re-crossing a threshold stays quiet
+  var announcedTier = 0;     // highest tier shown this shift: re-crossing a threshold stays quiet
   var focusFirst = false;    // focus the next card that lands (after Start), so focus never sits on <body>
   var practiceNext = false;  // Practice again: one practice card before the next app picked
 
@@ -77,7 +77,7 @@
     for (k in VIEWS) show($(VIEWS[k]), k === view);
     // Keep modifier classes, replace the v-* one.
     b.className = (b.className.replace(/(^|\s)v-\S+/g, '') + ' v-' + view).replace(/^\s+/, '');
-    if (view !== 'play') { show('paused', false); show('explain', false); body('is-paused', false); }
+    if (view !== 'play') { show('paused', false); body('is-paused', false); }
     // On Results #rep-switch goes back to the app cards (set after rewards.js renders).
     show('deck-switch', false);
     if (view === 'report') { txt('rep-switch', 'Try another app'); show('rep-switch', !KIOSK); }   // kiosk: Next curator only
@@ -106,12 +106,11 @@
   function renderBrief() {
     var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d, pa;
     if (rb) {
-      rb.textContent = 'Relaxed timing: ' + (relaxed ? 'On' : 'Off');
+      rb.textContent = 'More time: ' + (relaxed ? 'On' : 'Off');
       rb.setAttribute('aria-pressed', relaxed ? 'true' : 'false');
     }
-    // The title and every app card promise the round length (longer with Relaxed timing).
-    txt('brief-secs', secs);
-    // The Relaxed button's description follows settings (index.html keeps a static copy for no-script).
+    // Every app card promises the round length (longer with More time).
+    // The More time button's description follows settings (index.html keeps a static copy for no-script).
     txt('relaxed-note', S.relaxedSeconds + ' seconds instead of ' + S.seconds + '.');
     metas = document.querySelectorAll('#picker .pick');
     for (i = 0; i < metas.length; i++) {
@@ -146,7 +145,7 @@
     return el;
   }
   function renderPicker() {
-    var box = $('picker'), tpl = $('tpl-pick'), ids = deckIds(), i, d, el, pic, ps, sub;
+    var box = $('picker'), tpl = $('tpl-pick'), ids = deckIds(), i, d, el, pic, ps;
     if (!box || !tpl) return;
     box.textContent = '';
     for (i = 0; i < ids.length; i++) {
@@ -155,8 +154,7 @@
       el.setAttribute('data-deck', ids[i]);
       if (slot(el, 'app')) slot(el, 'app').textContent = (d.pick && d.pick.app) || d.client;
       if (slot(el, 'need')) slot(el, 'need').textContent = (d.pick && d.pick.need) || '';
-      sub = slot(el, 'sub');
-      if (sub) { sub.textContent = (d.pick && d.pick.sub) || ''; sub.hidden = !(d.pick && d.pick.sub); }
+      if (slot(el, 'sub')) slot(el, 'sub').hidden = true;   // v6: name, need and meta only
       ps = slot(el, 'pic');
       pic = ps ? pickPic(d) : null;
       if (pic) ps.appendChild(pic);
@@ -220,13 +218,14 @@
   }
   function listWord(item) { var n = listOf(item).name; return /list$/i.test(n) ? n : n + ' list'; }
   function clone(id) { return $(id).content.firstElementChild.cloneNode(true); }
+  // A template slot the v6 shell may have dropped (or kept hidden): writes to it are harmless.
+  function fill(el, name, s) { var x = slot(el, name); if (x) x.textContent = s; }
   function makeCard(item, n, of) {
     var el = clone('tpl-card'), list = listOf(item), rows = slot(el, 'rows'), objSlot = slot(el, 'obj');
     var i, key, li, b, v, obj;
     el._item = item; el._n = n; el._of = of;
-    slot(el, 'list').textContent = list.name;
-    slot(el, 'n').textContent = n + '/' + of;
-    slot(el, 'foot').textContent = 'Submitted with a deposit · #' + ('000' + Math.floor(Math.random() * 10000)).slice(-4);
+    fill(el, 'list', list.name);
+    fill(el, 'n', n + '/' + of);
     for (i = 0; i < list.fields.length; i++) {
       key = list.fields[i][0]; v = String(item.f[key]);
       if (key === list.objField) continue;   // the picture is that field: no text row for it
@@ -249,21 +248,12 @@
       objSlot.setAttribute('role', 'img');   // a button only in pick mode; keeps its aria-label readable
       objSlot.setAttribute('aria-label', labelOf(item, list.objField) + ': ' + item.f[list.objField]);
     }
-    setChip(el, 'st-window', 'Pending', OPEN_SUFFIX);
     return el;
   }
-  function setChip(el, cls, label, secs) {
-    var st = slot(el, 'state'), sc = slot(el, 'secs');
-    st.className = 'state ' + cls;
-    slot(el, 'state-label').textContent = label;
-    if (sc) sc.textContent = secs;
-  }
-  // No per-card countdown: every entry stays open until it is decided or the round ends.
-  var OPEN_SUFFIX = ' · open';
   function cardLabel(el) {
     var item = el._item, f = listOf(item).fields, s = 'Entry ' + el._n + ' of ' + el._of + ', ' + listWord(item) + '. ', i;
     for (i = 0; i < f.length; i++) s += f[i][1] + ': ' + item.f[f[i][0]] + '. ';
-    el.setAttribute('aria-label', s + 'Open to challenge.');
+    el.setAttribute('aria-label', s + 'Correct or wrong?');
   }
 
   // ---- Stack ----
@@ -277,7 +267,7 @@
       c.classList.toggle('is-back2', i === 2);
       // Back cards are out of reach for focus, pointers and screen readers.
       if (i > 0) { c.setAttribute('aria-hidden', 'true'); c.setAttribute('inert', ''); }
-      else { c.removeAttribute('aria-hidden'); if (!explainOpen) c.removeAttribute('inert'); }
+      else { c.removeAttribute('aria-hidden'); c.removeAttribute('inert'); }
     }
   }
   function fillStack() {
@@ -304,7 +294,7 @@
     $('stack').textContent = '';
     ob('live', null);
   }
-  // A new top card: the HUD follows its list.
+  // A new top card: the progress follows it (the hidden v5 list row too, harmlessly).
   function topLanded() {
     var top = cards[0], item;
     if (!top) return;
@@ -312,15 +302,19 @@
     landT = now();
     txt('list-name', listOf(item).name);
     txt('policy', listOf(item).policy);
-    setChip(top, 'st-window', 'Pending', OPEN_SUFFIX);
+    if (mode === 'shift') txt('prog', top._n + '/' + top._of);
     cardLabel(top);
     ob('state', top._obj, 'pending');
     if (!flying) ob('live', top._obj);
-    if ((keyboard || focusFirst) && !explainOpen) { focusFirst = false; focusEl(top); }
+    // Focus waits for the flash, so the card's label does not talk over the spoken verdict.
+    if (keyboard || focusFirst) {
+      focusFirst = false;
+      afterFlash(function () { if (cards[0] === top && !paused) focusEl(top); });
+    }
   }
 
   // ---- Pick mode ----
-  // A challenge points at the fake part: the card springs back, its parts (picture, then rows) get badges 1–4,
+  // Wrong points at the wrong part: the card springs back, its parts (picture, then rows) get badges 1–4,
   // and a tap or key decides. Cancel or Esc leaves. Outside pick mode a tap on a part does nothing.
   function parts(card) {
     var out = [], pic = slot(card, 'obj'), rows = card.querySelectorAll('.row[data-f]'), i;
@@ -344,7 +338,7 @@
     if (!top || picking || !canPlay() || now() - lastDecide < GUARD || now() - landT < GUARD) return false;
     if (mode === 'practice') {
       if (pStep !== 0) return false;
-      if (!top._item.bad) { coach('Everything here is true. A wrong challenge costs your stake.'); return false; }
+      if (!top._item.bad) { coach(P_REAL); return false; }
     }
     ps = parts(top);
     if (!ps.length) return false;
@@ -362,13 +356,12 @@
     b = slot(top, 'pick');
     if (b) {
       if (!pickText) pickText = b.textContent;
-      b.textContent = keyboard ? 'What’s fake here? Press 1–' + ps.length + '.' : pickText;
+      b.textContent = keyboard ? 'What’s wrong? Press 1–' + ps.length + '.' : pickText;
     }
-    setChip(top, 'st-contested', 'Challenging…', '');
     ob('state', top._obj, 'challenge');
     pickButtons(true);
-    say('Pick the fake part: ' + names.join(', ') + '. Escape cancels.');   // the banner says the question
-    if (mode === 'practice') { pT0 = now(); pHinted = false; coach('Tap the part that’s fake.'); }
+    say('Pick the wrong part: ' + names.join(', ') + '. Escape cancels.');   // the banner says the question
+    if (mode === 'practice') { pT0 = now(); pHinted = false; coach('Now tap the wrong part.'); }
     // Focus never stays on a hidden button.
     if (keyboard) focusEl(ps[0]);
     else if (a === $('b-chal') || a === $('b-keep')) focusEl(top);
@@ -398,29 +391,29 @@
   function cancelPick() {
     if (!picking) return;
     exitPick(true);
-    say('Challenge cancelled.');
+    say('Cancelled.');
     if (mode === 'practice') practiceCard();
   }
-  // A tap or key on a part: the challenge, pointing at that part.
+  // A tap or key on a part: Wrong, pointing at that part.
   function choosePart(key) {
     if (!picking || picking !== cards[0] || !key || now() - pickT < GUARD) return;
     decide('challenge', key);
   }
   // ---- HUD ----
-  function hudScore(raw, trustDrop) {
+  // Under the opaque flash a bump is unseen and forces a reflow in the flash's first frame: play it as the flash lifts.
+  function bumpScore() { bump($('score-v'), 'bump'); }
+  function hudScore(raw) {
     var sv = $('score-v'), pips = document.querySelectorAll('#streak i'), segs = document.querySelectorAll('#meter i');
     var t = S.tiers, on = score ? score.streak % S.points.streakEvery : 0, i, k;
     if (sv && sv.textContent !== (raw < 0 ? MINUS : '') + fmt(raw)) {
       sv.textContent = (raw < 0 ? MINUS : '') + fmt(raw);
-      bump(sv, 'bump');
+      if (!flashOn) bumpScore(); else if (flashQ.indexOf(bumpScore) < 0) flashQ.push(bumpScore);
     }
     for (i = 0; i < pips.length; i++) pips[i].classList.toggle('on', i < on);
     for (i = 0; i < segs.length; i++) {
       k = +segs[i].getAttribute('data-t') || i + 1;
       segs[i].style.setProperty('--f', String(clamp((raw - t[k - 1]) / (t[k] - t[k - 1]), 0, 1)));
     }
-    txt('trust', 'Trust ' + (score ? score.trust : 100) + '%');
-    if (trustDrop) bump($('trust'), 'dip');
   }
   function hudClock(leftMs) {
     var secs = Math.max(0, Math.ceil(leftMs / 1000)), arc = $('clock-arc'), ck = $('clock');
@@ -430,62 +423,79 @@
   }
 
   // ---- Toasts ----
-  // t = { tone: good|bad|info|tier, title, line, fix: [label, was, is], jurors, thumb, ms, quiet }
+  // v6: only the rare end-of-round note. t = { tone: good|info, title, line, ms }
   function toast(t) {
-    var box = $('toasts'), el, f, j, i, c;
-    if (!box) return;
+    var box = $('toasts'), el;
+    if (!box || !$('tpl-toast')) return;
     el = clone('tpl-toast');
     el.setAttribute('data-tone', t.tone || 'info');
-    slot(el, 'title').textContent = t.title;
-    if (t.line) { slot(el, 'line').textContent = t.line; slot(el, 'line').hidden = false; }
-    if (t.fix) {
-      f = slot(el, 'fix');
-      slot(f, 'fixlab').textContent = t.fix[0];
-      slot(f, 'was').textContent = t.fix[1];
-      slot(f, 'is').textContent = t.fix[2];
-      f.hidden = false;
-    }
-    if (t.thumb) { slot(el, 'thumb').src = t.thumb; slot(el, 'thumb').hidden = false; }
-    if (t.tier) el.style.setProperty('--tc', 'var(--tier-' + t.tier + ')');
-    // Rulings are read from #say, so their toast stays quiet to avoid a double read.
-    if (t.quiet) el.setAttribute('aria-hidden', 'true');
-    box.insertBefore(el, box.firstChild);
-    while (box.children.length > 2) box.removeChild(box.lastChild);
-    // Two tall toasts can reach the top card's third row: drop the older one (card bottom from layout, as
-    // a dragged card is rotated).
-    c = cards[0];
-    c = c ? $('stack').getBoundingClientRect().top + c.offsetTop + c.offsetHeight - 18 : 0;
-    while (c && box.children.length > 1 && box.getBoundingClientRect().top < c) box.removeChild(box.lastChild);
-    if (t.jurors) {
-      j = slot(el, 'jurors'); j.hidden = false;
-      for (i = 0; i < 3; i++) (function (dot, d) { setTimeout(function () { dot.classList.add('on'); }, d); })(j.children[i], 60 * (i + 1));
-    }
+    fill(el, 'title', t.title);
+    if (t.line && slot(el, 'line')) { fill(el, 'line', t.line); slot(el, 'line').hidden = false; }
+    box.textContent = '';
+    box.appendChild(el);
     setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, t.ms || 1800);
   }
+
+  // ---- Flash ----
+  // v6 §2: after every decision #flash covers the view, green ✓ CORRECT or red ✗ WRONG with the points and one
+  // line. The round clock stops while it shows; a tap or any key skips it (not in the first FLASH_MIN ms, so
+  // the second tap of a double tap does not swallow the feedback). Calls queued with afterFlash run when it goes.
+  var FLASH_MS = { good: 650, soft: 1400, bad: 1400 }, FLASH_MIN = 250;
+  var flashOn = false, flashT0 = 0, flashTimer = 0, flashQ = [];
+  function flashEl(cls) { var f = $('flash'); return f ? f.querySelector('.' + cls) : null; }
+  function flashSet(cls, s) { var x = flashEl(cls); if (x) x.textContent = s; }
+  // f = { tone, pts, line, extra }
+  function flash(f) {
+    var el = $('flash'), ms = FLASH_MS[f.tone] || 650;
+    if (!el) return;
+    killFlash();
+    el.setAttribute('data-tone', f.tone);
+    el.hidden = false;   // un-hiding restarts the CSS scale-in, even when two flashes follow each other
+    flashSet('fl-icon', f.tone === 'bad' ? '✗' : '✓');
+    flashSet('fl-word', f.tone === 'bad' ? 'WRONG' : 'CORRECT');
+    flashSet('fl-pts', f.pts);
+    flashSet('fl-line', f.line || '');
+    flashSet('fl-extra', f.extra || '');
+    // #flash is shown and filled in one task, which screen readers rarely announce; #say carries the verdict (word first).
+    say((f.tone === 'bad' ? 'Wrong.' : 'Correct.') + ' ' + f.pts + ' points.' + (f.line ? ' ' + f.line.replace(/\.?$/, '.') : '') +
+      (f.extra ? ' ' + f.extra.split(' · ').join('. ') + '.' : ''));
+    if (f.extra && f.tone === 'good') ms += 350;   // a streak or a tier needs a beat to read
+    flashOn = true; flashT0 = now();
+    flashTimer = setTimeout(endFlash, ms);
+  }
+  // Hides the flash and runs what waited for it.
+  function endFlash() {
+    var q = flashQ, i, c = ['fl-icon', 'fl-word', 'fl-pts', 'fl-line', 'fl-extra'];
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = 0;
+    show('flash', false);
+    for (i = 0; i < c.length; i++) flashSet(c[i], '');
+    if (!flashOn) return;
+    flashOn = false; flashQ = [];
+    landT = now();   // the card under the flash takes taps only after the guard
+    barT = landT;    // a tap meant for the flash (a double tap's second) must not hit Wrong/Correct underneath
+    while (q.length) q.shift()();
+  }
+  // A view change drops the flash and its queue.
+  function killFlash() { flashQ = []; flashOn = false; endFlash(); }
+  function afterFlash(fn) { if (flashOn) flashQ.push(fn); else fn(); }
+  function skipFlash() { if (flashOn && now() - flashT0 >= FLASH_MIN) endFlash(); }
   // A part's label inside a sentence: 'the web domain', 'the photo'.
   function partName(item, key) { return labelOf(item, key).toLowerCase(); }
-  // Ruling copy (v5 §2). Points come from settings so the copy follows any retune.
-  function ruling(o, item) {
-    var P = S.points, T = S.trust, why = item.why, fix = null, t;
-    if (item.bad) fix = [labelOf(item, item.bad), item.f[item.bad], item.fix];
-    switch (o.kind) {
-      case 'catch':
-        t = { tone: 'good', jurors: true, ms: 1300,
-              title: 'Rejected · Jurors 3–0 · ' + signed(P.catch) + ' bounty' + (o.evidence === 'sharp' ? ' · ' + signed(P.evidence) + ' fake spotted' : '') };
-        // Jurors rule on the entry: a wrong pick still wins the bounty.
-        if (o.evidence === 'wrong') {
-          t.line = 'The fake part was the ' + partName(item, item.bad) + '.';
-          t.fix = fix;
-          t.ms = 2600;
-        }
-        return t;
-      case 'listed': return { tone: 'good', ms: 1300, title: 'Verified · Listed · ' + signed(P.letThrough) };
-      case 'wrongChallenge':
-        return { tone: 'bad', jurors: true, ms: 2600, line: why,
-                 title: 'Jurors 3–0 for the entry · It stays listed · ' + signed(P.wrongChallenge) + ' stake' };
-      default:   // leak
-        return { tone: 'bad', ms: 2600, line: why, fix: fix, title: 'Fake listed · ' + signed(P.leak) + ' · Trust ' + signed(T.leak) + '%' };
-    }
+  // A picture's fix is a description ('White marble dome…'), so mid-sentence it starts lower case; names keep theirs.
+  function fixText(item) {
+    var x = item.fix;
+    return item.bad === listOf(item).objField ? x.charAt(0).toLowerCase() + x.slice(1) : x;
+  }
+  // The flash for an outcome (rules.js judge). Points come from settings so the copy follows any retune.
+  function verdict(o, item, picked) {
+    var f = { tone: o.correct ? 'good' : 'bad', pts: signed(o.points), line: '' };
+    if (o.kind === 'catch') {
+      if (o.evidence === 'sharp') f.line = 'You spotted the ' + partName(item, picked);
+      else if (o.evidence === 'wrong') { f.tone = 'soft'; f.line = 'The wrong part was the ' + partName(item, item.bad) + (item.fix ? ': ' + fixText(item) : '') + '.'; }
+    } else if (o.kind === 'wrongChallenge') f.line = 'This one was real.';
+    else if (o.kind === 'leak') f.line = item.why || '';
+    return f;
   }
   // Chrome logs an intervention error for vibrate() before the first tap (e.g. keyboard-only play).
   function buzz(p) {
@@ -494,12 +504,11 @@
     try { navigator.vibrate(p); } catch (e) {}
   }
   // ---- Decisions ----
-  var VERDICT = { catch: 'REJECTED', listed: 'LISTED', wrongChallenge: 'STAKE LOST', leak: 'FAKE LISTED' };
   var OBJ_STATE = { catch: 'rejected', listed: 'listed', wrongChallenge: 'overruled', leak: 'leak' };
   // action: challenge (pick mode, with the part) | letThrough. False when refused (the caller springs back).
   function decide(action, picked) {
-    var top = cards[0], t = now(), item, o, res, r, a = document.activeElement, held;
-    if (!top || paused || explainOpen) return false;
+    var top = cards[0], t = now(), item, o, res, f, extra = [], ti, a = document.activeElement, held;
+    if (!top || paused || flashOn) return false;
     if ((mode !== 'shift' && mode !== 'practice') || t - lastDecide < GUARD) return false;
     if (action === 'challenge' ? picking !== top || !picked : !!picking) return false;
     lastDecide = t;
@@ -508,35 +517,27 @@
     held = top.contains(a) || (action === 'challenge' && (!a || a === document.body));
     if (picking) exitPick(false);
     if (held) focusFirst = true;   // topLanded() focuses the next card
-    if (mode === 'practice') { r = practiceDecide(top, action, picked); if (r && held) park('play'); return r; }
+    if (mode === 'practice') { f = practiceDecide(top, action, picked); if (f && held) park('play'); return f; }
     item = top._item;
     o = R.judge(item, action, picked);
     res = R.apply(score, item, o);
-    r = ruling(o, item); r.quiet = true;
-    toast(r); say(r.title);
-    if (res.streakBonus) toast({ tone: 'good', ms: 1300, title: 'Clean streak ×' + score.streak + ' · ' + signed(res.streakBonus) });
+    f = verdict(o, item, picked);
+    // The streak bonus and a new tier ride in the same flash.
+    if (res.streakBonus) extra.push(signed(res.streakBonus) + ' streak');
     if (res.tierTo > announcedTier) {
-      if (!(KIOSK && res.tierTo > S.kioskMaxTier)) tierToast(res.tierTo);
+      ti = rw('tierInfo', res.tierTo);
+      // A just-for-fun round earns no merch, so it announces no unlock.
+      if (ti && info && info.counted && !(KIOSK && res.tierTo > S.kioskMaxTier)) extra.push(ti.name + ' unlocked');
       announcedTier = res.tierTo;
     }
-    hudScore(score.raw, o.trust < 0);
+    f.extra = extra.join(' · ');
+    flash(f);
+    hudScore(score.raw);
     if (!o.correct) buzz([20, 40, 20]); else if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o);
     advance();
     if (held && !cards[0]) park('play');   // last card: nothing lands, so focus waits on #play until Results takes it
-    if (!o.correct && relaxed && mode === 'shift' && cards[0]) openExplain(r);
     return true;
-  }
-  function tierToast(i) {
-    var ti = rw('tierInfo', i);
-    if (ti) toast({ tone: 'tier', tier: ti.key, ms: 2600, title: ti.name + ' unlocked · ' + ti.reward, thumb: ti.img && ti.img[0] });
-  }
-  function preloadThumbs() {
-    var i, ti;
-    for (i = 1; i <= 3; i++) {
-      ti = rw('tierInfo', i);
-      if (ti && ti.img && ti.img[0]) new Image().src = ti.img[0];
-    }
   }
   function advance() {
     cards.shift(); idx++;
@@ -545,17 +546,12 @@
   }
   // Fly-out rides the compositor. The next card is already top, so input stays live (buffered).
   function fly(el, dir, o) {
-    var v = slot(el, 'verdict');
     finishFly();
     if (drag && drag.card === el) drag = null;
     el.classList.remove('dragging', 'spring');
     el.removeAttribute('data-drag');
     el.style.setProperty('--sk', '0'); el.style.setProperty('--sc', '0');
     edges(0, 0);
-    v.textContent = VERDICT[o.kind];
-    v.className = 'verdict ' + (o.correct ? 'v-good' : 'v-bad');
-    if (o.kind === 'catch') setChip(el, 'st-off', 'Rejected', '');
-    else setChip(el, 'st-listed', 'Listed', '');
     ob('state', el._obj, OBJ_STATE[o.kind]);
     el.setAttribute('aria-hidden', 'true'); el.setAttribute('inert', '');
     // fly-* carries the 240 ms exit (a fade under reduced motion) from where the drag left it.
@@ -574,43 +570,50 @@
 
   // ---- Practice ----
   // One untimed card that cannot be failed: a wrong move springs it back with a coach line. It is the deck's
-  // first practice item, a fake (a good one teaches Verify). pStep is 0 while it is live.
-  function coach(s) { txt('coach', s); }
+  // first practice item, a fake (a good one teaches Correct). pStep is 0 while it is live.
+  var P_REAL = 'This one is real. Tap ✓ Correct.';
+  // The ✓/✗ glyphs are hidden from screen readers, which read the word after them anyway.
+  function coach(s) {
+    var el = $('coach'), parts = String(s).split(/([\u2713\u2717])/), i, sp;
+    if (!el) return;
+    el.textContent = '';
+    for (i = 0; i < parts.length; i++) {
+      if (i % 2) { sp = document.createElement('span'); sp.setAttribute('aria-hidden', 'true'); sp.textContent = parts[i]; el.appendChild(sp); }
+      else if (parts[i]) el.appendChild(document.createTextNode(parts[i]));
+    }
+  }
   function pItem() { return (deck.practice || [])[0] || {}; }
-  // The practice hint: the item's own, else the deck's coach.fact, else the item's why line.
-  function coachFact() { var p = pItem(); return p.hint || (deck.coach || {}).fact || p.why || ''; }
+  // The 4 s idle hint (v6 §6): the list's policy, else the item's own hint, the deck's coach.fact or its why.
+  function coachFact() {
+    var p = pItem(), l = p.list && deck.lists[p.list];
+    return (l && l.policy) || p.hint || (deck.coach || {}).fact || p.why || '';
+  }
   function practiceCard() {
     pT0 = now(); pHinted = false;
-    coach(pItem().bad ? 'Something here is fake. Swipe left, then tap the fake part.'
-                      : 'Everything checks out. Swipe right to verify it.');
+    coach(pItem().bad ? 'Something here is wrong. Tap ✗ Wrong.' : P_REAL);
   }
-  // After 4 s idle in pick mode the fake part pulses and the coach gives the hint.
+  // After 4 s idle in pick mode the wrong part pulses and the coach gives the hint.
   function practiceFrame(t) {
     var top = cards[0], marks, i;
     if (pStep !== 0 || pHinted || !top || picking !== top || !top._item.bad || t - pT0 < 4000) return;
     pHinted = true;
     marks = top.querySelectorAll('[data-f="' + top._item.bad + '"]');
     for (i = 0; i < marks.length; i++) marks[i].classList.add('hint');
-    coach('Hint: ' + coachFact());
+    coach(coachFact());
   }
   function practiceDecide(top, action, picked) {
-    var item = top._item, o, r, hold;
+    var item = top._item, o;
     if (pStep !== 0) return false;
-    if (item.bad && action !== 'challenge') { coach('Careful: that would list a fake. ' + (item.why || coachFact())); return false; }
-    if (!item.bad && action === 'challenge') { coach('Everything here is true. A wrong challenge costs your stake.'); return false; }
+    if (item.bad && action !== 'challenge') { coach('Look again. Something here is wrong.'); return false; }
+    if (!item.bad && action === 'challenge') { coach(P_REAL); return false; }
     o = R.judge(item, action, picked);
-    hold = o.evidence === 'wrong' ? 3400 : 1800;   // a wrong pick has a lesson to read
-    r = ruling(o, item); r.quiet = true; r.ms = Math.max(r.ms || 0, hold);
-    toast(r); say(r.title);
+    flash(verdict(o, item, picked));
     if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o);
     pStep = 1;
-    if (item.bad) {
-      coach(o.evidence === 'sharp' ? 'Spotted. The faker’s deposit is your bounty.'
-                                   : 'Bounty won, but the fake part was the ' + partName(item, item.bad) + '. Look closer next time.');
-    } else coach('Nobody challenged it, so it joins the list. That’s Curate in a nutshell.');
+    coach(o.evidence === 'wrong' ? 'Almost. That’s how it works.' : 'Nice. That’s how it works.');
     cards.shift(); idx++;   // empty arena until the round
-    endPractice(true, hold);
+    endPractice(true);
     return true;
   }
   function startPractice() {
@@ -619,15 +622,17 @@
     if (!run.length) { beginShift(); return; }
     body('is-practice', true);
     show('practice-bar', true); show('coach', true);
+    txt('prog', '');   // practice is not one of the 10
     hudScore(0); hudClock(total * 1000);
     fillStack(); topLanded(); practiceCard();
     startLoop();
   }
-  // Practice counts as done once on this phone, for every app; kiosk never stores it.
-  function endPractice(done, ms) {
+  // Practice counts as done once on this phone, for every app; kiosk never stores it. After the flash the
+  // coach line stays a moment, then the round starts.
+  function endPractice(done) {
     if (!KIOSK) rw('setPref', 'practiced.any', true);
     mode = 'between';
-    if (done) later(beginShift, ms || 1800); else beginShift();
+    if (done) afterFlash(function () { later(beginShift, 1200); }); else beginShift();
   }
   // ---- Shift flow ----
   function banner(text, ms, then) {
@@ -639,9 +644,10 @@
     clearTimers(); stopLoop();
     exitPick(false);   // a card left in pick mode goes with the stack; the action bar comes back
     clearStack();
-    drag = null; paused = false; explainOpen = false; clockOn = false;
+    drag = null; paused = false; clockOn = false;
     body('is-paused', false); body('is-practice', false);
-    show('paused', false); show('explain', false); show('banner', false);
+    show('paused', false); show('banner', false);
+    killFlash();
     if ($('toasts')) $('toasts').textContent = '';
     edges(0, 0);
   }
@@ -669,14 +675,24 @@
     score = R.newScore(); announcedTier = 0; info = null; elapsed = 0;
     said30 = said10 = false;
     hudScore(0); hudClock(total * 1000);
-    preloadThumbs();
+    txt('prog', '1/' + run.length);
     preload(0, 4);   // the stack's three and the next, while the banners show
     // The app's mission for 900 ms, then Go.
     if (deck.copy && deck.copy.mission) { say(deck.copy.mission); banner(deck.copy.mission, 900, go); } else go();
   }
+  // v6 §4: the Go banner says which counted try this is (rewards.js counts; startShift spends it below).
+  function goText() {
+    var c = rw('canCount'), per = (c && c.perDay) || S.countedPerDay || 2;
+    if (!c || c.reason === 'kiosk') return 'Go!';
+    if (!c.counted) return 'Just for fun · Go!';
+    return 'Try ' + (c.next || per - c.left + 1) + ' of ' + per + ' · Go!';
+  }
   function go() {
+    var g;
     if (mode !== 'banner') return;
-    banner('Go · ' + total + ' s', 600, function () {
+    g = goText();
+    say(g);
+    banner(g, 900, function () {
       // The clock starts when the first real card lands; the shift counts from here.
       mode = 'shift';
       info = rw('startShift', deckId) || { counted: false, shiftNo: 0, code: null };
@@ -690,21 +706,22 @@
     var left, fb, d = drag, pc = picking;
     if (mode !== 'shift') return;
     left = Math.max(0, total * 1000 - elapsed);
-    // The discarded card drops its drag pose, stamp and pick mode (before mode changes, so its chip text comes back).
+    // The discarded card drops its drag pose and pick mode.
     if (d) { drag = null; if (d.on) springBack(d.card); else edges(0, 0); }
     exitPick(false);
-    if (pc) contest(pc, false);   // a card left mid-pick reads Pending again under Time’s up
+    if (pc) contest(pc, false);
     mode = 'ended'; clockOn = false;
     fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
     hudScore(score.raw);
     if (by === 'done') {
-      // Same conditions as R.finish(): few mistakes and enough fakes spotted.
-      var tooMany = score.mistakes > S.points.bonusMaxMistakes, noEv = score.evidence < (S.points.bonusMinEvidence || 0);
-      var done = 'All done early';
-      if (!tooMany && !noEv) toast({ tone: 'good', ms: 1300, title: done + ' · ' + signed(fb.timeBonus) + ' time bonus' });
-      else toast({ tone: 'info', ms: 2600, title: done, line: 'Time bonus needs ' +
-        (tooMany ? S.points.bonusMaxMistakes + ' mistakes or fewer.' : 'a fake spotted: challenge it, then tap the fake part.') });
-      later(function () { handOff(by); }, 1300);
+      // After the last card's flash. Same conditions as R.finish(): few mistakes and enough wrong parts spotted.
+      afterFlash(function () {
+        var tooMany = score.mistakes > S.points.bonusMaxMistakes, noEv = score.evidence < (S.points.bonusMinEvidence || 0);
+        if (!tooMany && !noEv) toast({ tone: 'good', ms: 1300, title: 'All done · ' + signed(fb.timeBonus) + ' time bonus' });
+        else toast({ tone: 'info', ms: 2200, title: 'All done', line: 'Time bonus needs ' +
+          (tooMany ? S.points.bonusMaxMistakes + ' mistakes or fewer.' : 'one wrong part spotted.') });
+        later(function () { handOff(by); }, 1300);
+      });
     } else if (by === 'time') {
       if (cards[0]) cards[0].setAttribute('inert', '');
       banner('Time’s up', 700, function () { handOff(by); });
@@ -752,7 +769,8 @@
     dt = lastT ? Math.min(t - lastT, 1000) : 0;
     lastT = t;
     if (drag && drag.dirty) dragFrame();
-    if (mode === 'shift' && clockOn && !explainOpen) { elapsed += dt; shiftFrame(); }
+    // The clock also stops under the flash (v6 §2: fair play, and the sim's timing stays valid).
+    if (mode === 'shift' && clockOn && !flashOn) { elapsed += dt; shiftFrame(); }
     if (mode === 'practice') practiceFrame(t);
     if (!raf && /^(practice|between|banner|shift)$/.test(mode)) raf = requestAnimationFrame(tick);
   }
@@ -768,7 +786,7 @@
   // Pointer Events on #stack. Taps stay native clicks (rows are real buttons); a drag starts past 8 px of
   // mostly horizontal travel and captures the pointer. Moves are batched into the rAF loop. In pick mode a press
   // is only tracked, never dragged.
-  function canPlay() { return (mode === 'shift' || mode === 'practice') && !paused && !explainOpen; }
+  function canPlay() { return (mode === 'shift' || mode === 'practice') && !paused && !flashOn; }
   function onDown(e) {
     var top = cards[0], t = now();
     keyboard = false;
@@ -810,7 +828,7 @@
     if (!d.on) return;   // a tap or a vertical nudge: the click handler decides
     vx = velocity(d.buf, t); ax = Math.abs(d.dx);
     if (d.card === cards[0] && (ax > 0.28 * d.card.offsetWidth || (Math.abs(vx) > 0.55 && ax > 40 && (vx < 0) === (d.dx < 0)))) {
-      // Left: the card springs back to the centre and asks what's fake. Right: verified.
+      // Left (Wrong): the card springs back to the centre and asks what's wrong. Right: Correct.
       if (d.dx < 0) { springBack(d.card); enterPick(); return; }
       if (decide('letThrough')) return;
     }
@@ -845,11 +863,8 @@
     ob('tilt', c._obj, clamp(dx / 4, -35, 35), clamp(d.dy / 10, -15, 15));
     if ((dx < -24) !== d.left) { d.left = dx < -24; contest(c, d.left); }
   }
-  // While dragged left the entry reads as being challenged.
-  function contest(c, on) {
-    setChip(c, on ? 'st-contested' : 'st-window', on ? 'Challenging…' : 'Pending', on ? '' : OPEN_SUFFIX);
-    ob('state', c._obj, on ? 'challenge' : 'pending');
-  }
+  // While dragged left the picture reads as being marked wrong.
+  function contest(c, on) { ob('state', c._obj, on ? 'challenge' : 'pending'); }
   function edges(l, r) {
     var a = $('edge-l'), b = $('edge-r');
     if (a) a.style.opacity = String(l);
@@ -869,25 +884,23 @@
   }
 
   // ---- Keyboard and buttons ----
-  // ←/A challenge, →/D verify, Esc/P pause. Pick mode: 1–4 or Enter on a part picks it, Esc cancels.
+  // ←/A Wrong, →/D Correct, Esc/P pause. Pick mode: 1–4 or Enter on a part picks it, Esc cancels.
   function onKey(e) {
     var k = e.key, top = cards[0], a = document.activeElement, part;
-    if (e.ctrlKey || e.metaKey || e.altKey || !/^(practice|between|banner|shift)$/.test(mode)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // Any key skips the flash and does nothing else (Tab still moves focus).
+    if (flashOn) { if (k !== 'Tab') { e.preventDefault(); if (!e.repeat) skipFlash(); } return; }
+    if (!/^(practice|between|banner|shift)$/.test(mode)) return;
     if ($('err') && !$('err').hidden) return;
     // A held key acts once: no decision bursts, no pause/resume flicker, no evidence flicker.
     if (e.repeat && k !== 'Tab') {
       if (/^(ArrowLeft|ArrowRight|Escape|Enter|Spacebar|[ aAdDpP])$/.test(k)) e.preventDefault();
       return;
     }
-    // The pause overlay sits above #explain, so it takes the keys first; resume() hands focus back to Got it.
+    // The pause overlay takes the keys first.
     if (paused) {
       if (k === ' ' || k === 'Spacebar' || k === 'Escape') { e.preventDefault(); resume(); }
       else if (k === 'Tab') trapTab(e, [$('resume'), $('end-shift')]);
-      return;
-    }
-    if (explainOpen) {
-      if (k === 'Enter' || k === 'Escape') { e.preventDefault(); closeExplain(); }
-      else if (k === 'Tab') { e.preventDefault(); $('explain-ok').focus(); }
       return;
     }
     if (picking && picking === top) {
@@ -930,7 +943,7 @@
     on('pause', function (e) { keyboard = e.detail === 0; pause(); });
     on('resume', resume);
     on('end-shift', endFromPause);
-    on('explain-ok', closeExplain);
+    on('flash', skipFlash);
     on('err-reload', function () { location.reload(); });
     on('again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
     on('rep-switch', function () { if (KIOSK) reset(); else goBrief(true); });
@@ -948,11 +961,12 @@
     document.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onVisibility);
   }
-  // ---- Pause and relaxed explanation ----
+  // ---- Pause ----
   // No clock pause in standard play except this overlay: the clock and animations freeze (pick mode stays).
   function pause() {
     var d = drag;
     if (paused || (mode !== 'shift' && mode !== 'practice')) return;
+    endFlash();   // the next card waits under the pause overlay instead
     paused = true;
     stopLoop();
     if (d) { drag = null; if (d.on) springBack(d.card); }
@@ -969,7 +983,7 @@
     show('paused', false);
     ob('resume');
     startLoop();   // resets lastT, so the paused time never counts
-    if (explainOpen) $('explain-ok').focus(); else if (cards[0]) cards[0].focus();
+    if (cards[0]) cards[0].focus();
   }
   // Ending from the pause overlay still uses a counted shift; during practice it returns to the brief.
   function endFromPause() {
@@ -980,28 +994,6 @@
     ob('resume');
     if (mode === 'shift') endShift('quit');
     else { freshPlay(); goBrief(true); }
-  }
-  // Relaxed mode: after a mistake the next card stays hidden and the clock waits until Got it.
-  function openExplain(r) {
-    var fx = $('explain-fix'), top = cards[0];
-    explainOpen = true;
-    txt('explain-title', r.title);
-    txt('explain-why', r.line || '');
-    if (fx) { fx.textContent = r.fix ? r.fix[0] + ': ' + r.fix[1] + ' → ' + r.fix[2] : ''; fx.hidden = !r.fix; }
-    if (top) { top.setAttribute('inert', ''); top.style.visibility = 'hidden'; }
-    show('explain', true);
-    if ($('explain-ok')) $('explain-ok').focus();
-  }
-  function closeExplain() {
-    var top = cards[0];
-    if (!explainOpen) return;
-    explainOpen = false;
-    show('explain', false);
-    if (top) {
-      top.removeAttribute('inert'); top.style.visibility = '';
-      landT = now();
-      top.focus();
-    }
   }
   function onVisibility() {
     if (document.hidden) { if (mode === 'shift' || mode === 'practice') pause(); else stopLoop(); }

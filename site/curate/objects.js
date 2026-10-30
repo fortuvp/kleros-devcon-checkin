@@ -64,7 +64,7 @@
 
   // ---- Flags ----
   // A flat flag filling w × h on context x. Kinds: v3, h3 (ratio), h2, nordic (inner), disc (off), cross (Swiss),
-  // h3wheel (India). See decks.js.
+  // h3wheel (India), h4 (four equal stripes, Mauritius), h5 (Thailand: the middle stripe twice as tall, or a ratio). See decks.js.
   function flagAspect(f) { return f && f.kind === 'cross' ? 1 : 1.5; }
   function flagPaint(x, f, w, h) {
     f = f || {};
@@ -88,9 +88,11 @@
     } else if (f.kind === 'disc') {
       band(0, 0, 0, w, h);
       x.beginPath(); x.arc(w / 2 + (+f.off || 0) * w, h / 2, h * .3, 0, 7); F(x, c[1]);
-    } else {   // h3 and h3wheel
-      r = f.ratio || [1, 1, 1]; t = r[0] + r[1] + r[2];
-      for (y = 0, i = 0; i < 3; i++) { band(i, 0, Math.round(y), w, Math.round(y + h * r[i] / t) + 1); y += h * r[i] / t; }
+    } else {   // h3, h3wheel, h4 and h5: horizontal stripes, top to bottom, sized by ratio
+      r = f.ratio || (f.kind === 'h4' ? [1, 1, 1, 1] : f.kind === 'h5' ? [1, 1, 2, 1, 1] : [1, 1, 1]);
+      for (t = 0, i = 0; i < r.length; i++) t += r[i];
+      // Each band overlaps the next by a pixel, so no seam shows between them
+      for (y = 0, i = 0; i < r.length; i++) { band(i, 0, Math.round(y), w, Math.round(y + h * r[i] / t) + 1); y += h * r[i] / t; }
       if (f.kind === 'h3wheel') {   // the 24-spoke wheel, 3/4 of the white band
         r = h / 8; x.strokeStyle = x.fillStyle = c[3];
         x.lineWidth = r * .13; x.beginPath(); x.arc(w / 2, h / 2, r * .93, 0, 7); x.stroke();
@@ -171,12 +173,15 @@
     x.fillStyle = rad(x, -34, y - 34, 0, -34, y - 34, 30, [0, W(.32), 1, W(0)]); x.fillRect(-64, y - 64, 60, 60);
   }
   // ---- Token logos ----
-  // Flat painted logo coins (never downloaded) with a soft shadow like the flags. TOK: mark -> [disc, glyph]
-  // colours, which spec.color and color2 override (Solana keeps its purple-to-teal bars).
+  // Flat painted logo coins (never downloaded) with a soft shadow like the flags. TOK: mark -> [disc, glyph,
+  // second disc colour for a diagonal gradient], which spec.color and color2 override (Solana keeps its
+  // purple-to-teal bars). Any other mark gets its first letter in bold on the disc.
   var TOK = {
     btc: ['#f7931a'], eth: ['#627eea'], usdt: ['#26a17b'], usdc: ['#2775ca'], doge: ['#c2a633'], sol: ['#0c0a12'],
     ada: ['#0033ad'], link: ['#2a5ada'], uni: ['#ff007a'], pol: ['#8247e5'], avax: ['#e84142'], ton: ['#0098ea'],
-    shib: ['#e8490f'], bnb: ['#141519', '#f0b90b'], pnk: ['#9013fe']
+    shib: ['#e8490f'], bnb: ['#141519', '#f0b90b'], pnk: ['#9013fe'],
+    xrp: ['#23292f'], ltc: ['#345d9d'], xlm: ['#141414'], dot: ['#e6007a'], xmr: ['#ff6600'],
+    aave: ['#b6509e', 0, '#2ebac6'], arb: ['#213147'], op: ['#ff0420'], gno: ['#133629', '#f0ebde'], near: ['#111111']
   };
   // Subpaths in the glyph’s unit box (the disc has radius 1)
   function pl(x, p) {
@@ -190,12 +195,55 @@
   function dot(x, cx, cy, r) { x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, 7); }
   function dia(x, cx, cy, s) { pl(x, [cx, cy - s, cx + s, cy, cx, cy + s, cx - s, cy]); }
   // A bold letter s units tall, set at 100× (canvas text misbehaves at sub-pixel sizes)
-  function txt(x, t, s, dy) {
+  function txt(x, t, s, dy, it) {
     x.save(); x.scale(.01, .01);
-    x.font = '800 ' + Math.round(s * 100) + 'px system-ui, -apple-system, Roboto, Arial, sans-serif';
+    x.font = (it ? 'italic ' : '') + '800 ' + Math.round(s * 100) + 'px system-ui, -apple-system, Roboto, Arial, sans-serif';
     x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(t, 0, dy * 100);
     x.restore();
   }
+  // v6 marks, each (x, g = glyph colour, c = disc colour) on a fresh path in the unit box
+  var MK = {
+    xrp: function (x, g) {   // an X of two bowls, back to back
+      x.moveTo(-.5, -.46); x.quadraticCurveTo(0, .16, .5, -.46);
+      x.moveTo(-.5, .46); x.quadraticCurveTo(0, -.16, .5, .46); S(x, .14, g);
+    },
+    ltc: function (x) {   // a leaning L with a rising bar across its stem
+      pl(x, [-.08, -.52, .14, -.52, -.02, .24, .46, .24, .42, .44, -.28, .44]);
+      pl(x, [-.4, .07, .24, -.19, .24, -.04, -.4, .22]); x.fill();
+    },
+    xlm: function (x, g) {   // a ring crossed by two parallel rising lines, like a rocket’s orbit
+      x.arc(0, 0, .42, 0, 7); S(x, .08, g);
+      x.save(); x.rotate(-.42); x.fillRect(-.66, -.13, 1.16, .1); x.fillRect(-.5, .05, 1.16, .1); x.restore();
+    },
+    dot: function (x) {   // a ring of six dots round a centre dot
+      for (var i = 0; i < 6; i++) dot(x, .44 * Math.cos(i * PI / 3 - PI / 2), .44 * Math.sin(i * PI / 3 - PI / 2), .13);
+      dot(x, 0, 0, .1); x.fill();
+    },
+    xmr: function (x) {   // the M over a dark grey band across the bottom of the disc
+      x.save(); x.arc(0, 0, .975, 0, 7); x.clip(); x.fillStyle = '#4c4c4c'; x.fillRect(-1, .36, 2, 1); x.restore();
+      x.beginPath(); pl(x, [-.6, .36, -.6, -.5, 0, .1, .6, -.5, .6, .36, .38, .36, .38, -.04, 0, .34, -.38, -.04, -.38, .36]);
+      x.fill();
+    },
+    aave: function (x, g) {   // the A with no bar and two eyes under its peak, like a ghost
+      x.lineJoin = 'round'; x.moveTo(-.46, .44); x.lineTo(0, -.46); x.lineTo(.46, .44); S(x, .16, g);
+      x.beginPath(); dot(x, -.13, .2, .085); dot(x, .13, .2, .085); x.fill();
+    },
+    arb: function (x, g) {   // a pointy-top hexagon round an A: a white left leg and a blue right one
+      x.lineJoin = 'round'; hex(x, 0, 0, .6, -PI / 2); S(x, .07, g);
+      x.beginPath(); x.moveTo(-.32, .36); x.lineTo(-.04, -.34); S(x, .13, g);
+      x.beginPath(); x.moveTo(.08, -.34); x.lineTo(.36, .36); S(x, .13, '#12aaff');
+    },
+    op: function (x) { txt(x, 'OP', .66, .04, 1); },   // bold italic OP
+    gno: function (x, g) {   // a round G with its bar and an owl’s eye in the middle (ears read as a cat)
+      x.arc(0, 0, .44, 0, PI * 1.72); S(x, .15, g);
+      x.fillRect(.04, -.075, .47, .15);
+      x.beginPath(); dot(x, -.1, 0, .08); x.fill();
+    },
+    near: function (x) {   // an N: two stems and the diagonal
+      x.rect(-.42, -.44, .16, .88); x.rect(.26, -.44, .16, .88);
+      pl(x, [-.42, -.44, -.22, -.44, .42, .44, .22, .44]); x.fill();
+    }
+  };
   // The glyph for mark m in the current fill and stroke; c is the disc colour (for cut-outs)
   function glyph(x, m, c) {
     var i, a, o, g = x.fillStyle;
@@ -245,6 +293,7 @@
       x.beginPath(); x.moveTo(-.31, -.11); x.lineTo(0, -.42); x.lineTo(.31, -.11);
       x.moveTo(-.31, .11); x.lineTo(0, .42); x.lineTo(.31, .11); S(x, .13, g);
     } else if (m === 'pnk') mark(x, 1.04, 0);   // the Kleros mark, as on the medal
+    else if (MK[m]) MK[m](x, g, c);
     else txt(x, String(m || '?').charAt(0).toUpperCase(), 1.1, .05);
   }
   // One coin of radius R on (cx, cy); d is the canvas scale, as shadows ignore the transform
@@ -252,7 +301,7 @@
     var t = TOK[s.mark] || [], c = s.color || t[0] || '#9013fe';
     x.save();
     x.shadowColor = 'rgba(7,0,26,.5)'; x.shadowBlur = R * d * .2; x.shadowOffsetY = R * d * .08;
-    x.beginPath(); x.arc(cx, cy, R, 0, 7); F(x, c);
+    x.beginPath(); x.arc(cx, cy, R, 0, 7); F(x, t[2] ? lin(x, cx - R, cy - R, cx + R, cy + R, [0, c, 1, t[2]]) : c);
     x.restore();
     x.save(); x.translate(cx, cy); x.scale(R, R);
     x.beginPath(); x.arc(0, 0, .975, 0, 7); S(x, .025, W(lum(rgb(c)) < 60 ? .22 : .16));   // a rim for dark discs

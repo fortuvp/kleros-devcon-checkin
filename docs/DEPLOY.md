@@ -9,7 +9,7 @@ Pick one:
 - **From GitHub (recommended, redeploys on every push).** Netlify › *Add new site* › *Import an existing project* › GitHub › `weiwei-ooi/kleros-devcon-checkin`. Leave the build command empty; the publish directory is `site` (set by `netlify.toml`).
 - **Drag and drop.** Netlify › *Add new site* › *Deploy manually*, then drop the `site` folder from this package. To update later: the site's *Deploys* tab › drop the folder again.
 
-The Curate game (`/curate`) is part of `site/` (`site/curate/`, including its photos in `site/curate/img/` and their credits in `site/curate/credits.js`): nothing extra to deploy or configure.
+The Curate game (`/curate`) is part of `site/` (`site/curate/`, including its photos in `site/curate/img/` and their credits in `site/curate/credits.js`): nothing extra to deploy or configure. Game knobs, including the 2 counted tries a day (`countedPerDay`) and the tier thresholds, are in `site/curate/settings.js`.
 
 Then the domain:
 
@@ -42,10 +42,11 @@ On a phone: open the site, check in with a real email, confirm the Kleros blog e
 
 Then the game, on the same phone:
 
-1. On the check-in's final screen, tap **Play Curate** (*Help an app keep its list clean. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header, showing *Pick an app to help* and three cards, each with a picture (a real photo, a flag, painted token logos): Travel guide app, Atlas app for schools, Crypto exchange app.
-2. Tap a card and play its round to the end: 10 entries in 60 s with no per-entry countdown, after one practice card the first time on this phone. Swipe left on a card: it springs back and asks *What’s fake here? Tap it.*; tapping a part decides it, and *Cancel* goes back. On Sightseeing, the photos load; on the Crypto exchange app, the logos are painted coins and the websites are plain text. See the Results with the spinning medal in your tier's colour, then the ticket: the clock ticks, the date is today, and tapping the ticket turns it over.
-3. Open *How it works*: the *Photo credits* list shows every photo's author and licence, with working links.
-4. Check the back-link under the ticket (*Back to your check-in ticket →*): it opens the check-in page.
-5. Confirm the check-in is unaffected: the same ticket, tier and code as before the game, and no new row in the Sheet.
+1. On the check-in's final screen, tap **Play Curate** (*Help an app keep its list clean. Better score, better merch.*): https://devcon.kleros.io/curate/ opens as its own page, the Curate title screen with no check-in header: *These apps need clean lists.*, the hint row *← Wrong* · *Correct →*, *Pick an app* and three cards, each with a picture (a real photo, a flag, painted token logos): Travel guide app, Atlas app for schools, Crypto exchange app. Under them: the prize strip and *2 tries a day count for merch.*
+2. Tap a card. After one practice card the first time on this phone, the Go banner says *Try 1 of 2 · Go!*. Play the round to the end: 10 entries in 60 s with no per-entry countdown. During play the screen shows only the time ring, score, progress (*1/10*), pause, the card (picture and three lines) and the *✗ Wrong* / *✓ Correct* buttons. Mark a card Wrong: it springs back and asks *What’s wrong? Tap it.*; tapping a part decides it, and *Cancel* goes back. After every decision a full-screen flash answers: green ✓ **CORRECT** with the points, or red ✗ **WRONG** with *−75* and one short reason; the clock does not run while it shows, and a tap skips it. On Sightseeing, the photos load; on the Crypto exchange app, the logos are painted coins and the websites are plain text.
+3. See the Results: the spinning medal in your tier's colour, the score, *n of 10 right*, one company line and *Try 1 of 2 · 1 try left today*. Open the ticket: the clock ticks, the date is today, and tapping the ticket turns it over (*Try 1 of 2* on the back). Play a second try (*Try 2 of 2 · Go!*, then *Both tries used today*) and a third (*Just for fun · Go!*, *Play for fun*).
+4. Open *How it works*: the *Photo credits* list shows every photo's author and licence, with working links.
+5. Check the back-link under the ticket (*Back to your check-in ticket →*): it opens the check-in page.
+6. Confirm the check-in is unaffected: the same ticket, tier and code as before the game, and no new row in the Sheet.
 
 More detail: `README.md`.

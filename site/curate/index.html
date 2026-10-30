@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0620">
 <title>Kleros Curate · Clean lists</title>
-<meta name="description" content="Pick an app and help keep its list clean in 60 seconds: verify the real entries, challenge the fakes, point at what’s fake, win booth merch.">
+<meta name="description" content="Pick an app, mark its entries Correct or Wrong, spot what’s wrong and win booth merch. 60 seconds.">
 <link rel="icon" href="/assets/kleros-symbol-white-flat.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@700&family=Inter:wght@400;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -65,13 +65,10 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .link { color:var(--teal); font-weight:600; text-decoration:none; }
 .fine { color:#d0c8ee; font-size:11.5px; line-height:1.5; text-align:center; margin:14px 6px 0; }
 .sr { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
-/* Status chip: dot with a halo plus the word */
+/* Status chip: dot with a halo plus the word (only the practice bar uses it now) */
 .state { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 9px; border-radius:999px; font:600 11.5px Inter,sans-serif; white-space:nowrap; background:rgba(255,255,255,.06); color:var(--text); --c:var(--st-window); --h:var(--st-window-h); }
 .state i { width:6px; height:6px; border-radius:50%; background:var(--c); box-shadow:0 0 0 3px var(--h); flex:none; }
 .state b { font-weight:600; color:var(--c); }
-.st-contested { --c:var(--st-contested); --h:var(--st-contested-h); }
-.st-listed { --c:var(--st-listed); --h:var(--st-listed-h); }
-.st-off { --c:var(--st-off); --h:var(--st-off-h); }
 /* Merch thumbs, as on the check-in */
 .t-free { --tc:var(--tier-free); } .t-teal { --tc:var(--tier-teal); } .t-purple { --tc:var(--tier-purple); } .t-gold { --tc:var(--tier-gold); }
 .thumbs { display:flex; flex:none; }
@@ -82,13 +79,12 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 /* No hero stage any more: the real pictures live on the app cards, and the block sits a little below the top bar */
 .title { margin-top:clamp(4px,calc(100svh - 760px),22px); }
 #brief:has(#welcome:not([hidden])) .title { margin-top:clamp(2px,calc(100svh - 800px),22px); }   /* returning players: room for the chip */
-.title .kicker { color:var(--cyan); letter-spacing:.16em; }
 #brief h1 { font-size:clamp(28px,8.4vw,36px); line-height:1.06; letter-spacing:-.02em; margin-top:5px; background:linear-gradient(180deg,#fff 35%,#c7b6ff 115%); -webkit-background-clip:text; background-clip:text; color:transparent; }
 .lead { margin:7px auto 0; max-width:30em; font-size:14px; line-height:1.42; color:#ddd3ff; text-wrap:balance; }
-/* Gesture hint: one compact row, each side in its own colour */
+/* Gesture hint: one compact row; Wrong is red and Correct green, the same colours as the buttons and the flash */
 .hints { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:6px 8px; margin:10px 0 0; padding:0; list-style:none; font:600 12.5px Inter,sans-serif; }
-.hints li { display:inline-flex; align-items:center; height:26px; padding:0 10px; border-radius:999px; background:var(--h); box-shadow:inset 0 0 0 1px var(--c); color:var(--c); white-space:nowrap; }
-.g-l { --c:var(--st-contested); --h:var(--st-contested-h); }
+.hints li { display:inline-flex; align-items:center; gap:.3em; height:26px; padding:0 10px; border-radius:999px; background:var(--h); box-shadow:inset 0 0 0 1px var(--c); color:var(--c); white-space:nowrap; }   /* gap: flex drops the space beside the arrow */
+.g-l { --c:var(--st-off); --h:var(--st-off-h); }
 .g-r { --c:var(--st-listed); --h:var(--st-listed-h); }
 /* App picker: game.js clones #tpl-pick into #picker, one big button per deck (the cards are the CTA) */
 .pick-label { margin:14px 2px 6px; font:600 11px Inter,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--gold); text-align:left; }
@@ -109,11 +105,11 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .coin-trio { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
 .coin-trio > .obj { position:relative !important; flex:none; width:38px !important; height:38px !important; margin:0 -5px; }
 .coin-trio > .obj:nth-child(2) { z-index:1; width:44px !important; height:44px !important; }   /* the middle coin leads */
-/* Tight line heights: the need wraps to two lines at 375 px, and an app may add a sub line, yet each card stays under about 96 px */
+/* Tight line heights: the need may wrap to two lines at 375 px, yet each card stays under about 96 px */
 .pick-txt { display:flex; flex-direction:column; gap:1px; min-width:0; }
 .pick-app { font:700 15.5px/1.1 Inter,sans-serif; color:#fff; }
 .pick-need { font-size:12.5px; line-height:1.2; color:#ddd3ff; }
-.pick-sub { font-size:11.5px; line-height:1.2; color:var(--muted); }
+.pick-sub { display:none; }   /* v6: name, need and meta only */
 .pick-meta { margin-top:2px; font:600 11px/1.2 Inter,sans-serif; color:var(--teal); font-variant-numeric:tabular-nums; }
 .pick-txt > :empty { display:none; }
 .pick-go { width:12px; height:12px; fill:none; stroke:var(--violet); stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
@@ -145,7 +141,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   #ladder-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); margin:0; padding:2px 0 4px; overflow:visible; }
   #ladder-list li { min-width:0; }
 }
-#ladder-fine { margin:6px 0 0; font-size:11px; line-height:1.4; color:#a99fd0; }
+#ladder-fine { margin:6px 0 0; font:600 13px/1.35 Inter,sans-serif; color:var(--text); }   /* the tries line: “2 tries a day count for merch.” */
+#ladder-fine:empty { display:none; }
 /* Small links row: relaxed timing, practice, the check-in */
 .links { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:0 16px; margin-top:6px; }
 .links .ghost { margin:0; padding:8px 2px; font-size:12.5px; }
@@ -176,6 +173,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #play { position:fixed; inset:0; z-index:2; height:100vh; height:100dvh; display:grid; grid-template-rows:auto auto auto 1fr auto; grid-template-columns:minmax(0,480px); justify-content:center; overscroll-behavior:none; overflow:hidden; user-select:none; -webkit-user-select:none;
   padding:max(8px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(8px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px)); }
 .v-play { overflow:hidden; overscroll-behavior:none; }
+/* Each part keeps its grid row, so the hidden client row and the practice-only row never shift the arena out of the 1fr track */
+.hud { grid-row:1; } .mrow { grid-row:2; } .client { grid-row:3; } .arena { grid-row:4; } .acts { grid-row:5; }
 .hud { height:48px; display:flex; align-items:center; gap:12px; }
 .ring { position:relative; width:44px; height:44px; flex:none; }
 #clock { width:44px; height:44px; transform:rotate(-90deg); display:block; }
@@ -188,51 +187,37 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #score-v { font:700 24px/1 var(--display); display:inline-block; }
 #score-v.bump { animation:bump .35s var(--ease); }
 .score small { font-size:12px; color:var(--muted); }
-#streak { display:flex; gap:4px; margin-left:auto; }
-#streak i { width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,.14); transition:background .2s,box-shadow .2s; }
-#streak i.on { background:var(--gold); box-shadow:0 0 8px rgba(242,196,109,.7); }
+/* v6: a calm HUD of time, score, progress and pause. The streak pips, merch meter, client row and policy stay in the markup, hidden. */
+#prog { margin-left:auto; font:700 15px var(--mono); font-variant-numeric:tabular-nums; color:var(--muted); }
 #pause { width:40px; height:40px; border-radius:12px; border:1px solid var(--field-line); background:var(--field); cursor:pointer; display:grid; place-items:center; flex:none; }
 #pause svg { width:14px; height:14px; fill:var(--text); }
-.mrow { height:14px; padding-bottom:6px; }
-#meter { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; height:8px; }
-#meter i { position:relative; overflow:hidden; border-radius:4px; background:rgba(255,255,255,.10); }
-#meter b { position:absolute; inset:0; transform:scaleX(var(--f,0)); transform-origin:left; transition:transform .3s var(--ease); background:var(--tc); }
-#meter [data-t="1"], #rep-meter [data-t="1"] { --tc:var(--tier-teal); }
-#meter [data-t="2"], #rep-meter [data-t="2"] { --tc:var(--tier-purple); }
-#meter [data-t="3"], #rep-meter [data-t="3"] { --tc:var(--tier-gold); }
-#practice-bar { display:none; align-items:center; justify-content:space-between; height:24px; margin-top:-5px; }
-.is-practice .mrow { height:30px; }
-.is-practice #meter { display:none; }
-.is-practice #practice-bar { display:flex; }
+/* The row under the HUD only holds the practice bar now, so it takes no room in a round */
+.mrow { display:none; }
+.is-practice .mrow { display:block; height:30px; }
+#practice-bar { display:flex; align-items:center; justify-content:space-between; height:24px; margin-top:-5px; }
 #skip-practice { background:none; border:0; color:var(--teal); font:600 13px Inter,sans-serif; cursor:pointer; padding:4px 0; }
-.client { height:36px; display:flex; flex-direction:column; justify-content:center; gap:2px; min-width:0; }
-.cl-top { display:flex; align-items:baseline; gap:6px; font-size:13px; white-space:nowrap; min-width:0; }
-#client-name { font-weight:700; }
-#list-name { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
-#trust { margin-left:auto; font-weight:600; font-variant-numeric:tabular-nums; color:var(--teal); }
-#trust.dip { animation:dip .6s var(--ease); }
-@keyframes dip { 0%, 100% { color:var(--teal); } 30% { color:var(--st-off); transform:translateY(2px); } }
-#policy { margin:0; font-size:11.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.arena { position:relative; min-height:0; padding:6px 8px 0; }
+#streak, #meter, .client { display:none !important; }   /* belt and braces: game.js may still write to them */
+/* 14 px on top: in pick mode the banner sits on the card's top edge, in this gap */
+.arena { position:relative; min-height:0; padding:14px 8px 0; }
 #stack { position:relative; width:100%; max-width:420px; height:100%; margin:0 auto; touch-action:none; }
 .acts { height:64px; display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:end; max-width:436px; width:100%; margin:0 auto; }
-/* Decision buttons: CTA glass with a coloured lit edge */
+/* Decision buttons: Wrong is red, Correct green (the flash colours), each on a dark tint of its colour */
 .act { height:56px; border-radius:16px; cursor:pointer; font:700 clamp(14px,4vw,16px) Inter,sans-serif; color:#fff; border:1.5px solid transparent; line-height:1.15; overflow:hidden; padding:0 8px;
   box-shadow:0 10px 26px -14px var(--cta-glow),inset 0 1px 0 var(--cta-highlight); transition:transform .1s; }
-#b-chal { background:linear-gradient(180deg,var(--cta-top),var(--cta-bottom)) padding-box,linear-gradient(120deg,#ffc46b,#de4fd0) border-box; }
-#b-keep { background:linear-gradient(180deg,var(--cta-top),var(--cta-bottom)) padding-box,linear-gradient(120deg,#65dc7f,#27cdfe) border-box; }
+#b-chal { background:linear-gradient(180deg,#52123a,#2a0722) padding-box,linear-gradient(120deg,#ff7b8f,#d64545) border-box; }
+#b-keep { background:linear-gradient(180deg,#0f4d37,#072a1e) padding-box,linear-gradient(120deg,#6ee59a,#1f9d55) border-box; }
 /* Pick mode leaves one full-width Cancel: a quiet edge, since it is a way back, not a decision */
 #b-cancel { grid-column:1 / -1; color:var(--text); background:linear-gradient(180deg,var(--cta-top),var(--cta-bottom)) padding-box,linear-gradient(120deg,rgba(255,255,255,.5),rgba(255,255,255,.14)) border-box; }
 .act:active { transform:scale(.97); }
 .edge { position:fixed; top:0; bottom:0; width:90px; pointer-events:none; opacity:0; z-index:3; }
-#edge-l { left:0; background:linear-gradient(90deg,rgba(255,196,107,.55),transparent); }
+#edge-l { left:0; background:linear-gradient(90deg,rgba(255,90,120,.55),transparent); }
 #edge-r { right:0; background:linear-gradient(270deg,rgba(101,220,127,.55),transparent); }
-#coach { display:none; margin-top:auto; pointer-events:auto; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font-size:13.5px; line-height:1.35; text-align:center; }
+#coach { display:none; margin-top:auto; font-family:Inter,sans-serif; pointer-events:auto; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font-size:13.5px; line-height:1.35; text-align:center; }
 .is-practice #coach { display:block; }
 #coach:empty { visibility:hidden; }
 #banner { position:absolute; left:0; right:0; width:max-content; max-width:calc(100% - 16px); margin:0 auto; top:calc(40% - 28px); z-index:6; padding:12px 22px; border-radius:16px; background:rgba(30,10,66,.96); border:1px solid var(--gold-dim); font:700 clamp(17px,5.4vw,22px)/1.25 var(--display); text-align:center; text-wrap:balance; animation:rise .3s var(--ease); }   /* the app's mission may take two lines on a phone */
 /* ---- Card ---- */
-.card { position:absolute; top:0; left:0; right:0; margin:0 auto; max-width:420px; padding:8px 12px 6px; border-radius:22px; color:var(--text);
+.card { position:absolute; top:0; left:0; right:0; margin:0 auto; max-width:420px; padding:10px 12px 6px; border-radius:22px; color:var(--text);
   background:linear-gradient(180deg,#24104f,var(--surface)); border:1px solid rgba(255,255,255,.12);
   box-shadow:0 24px 50px -24px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.08); transform-origin:50% 100%; will-change:transform; outline:none; }
 .card:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
@@ -240,30 +225,29 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .card.is-back1 { z-index:2; transform:translateY(10px) scale(.95); opacity:.7; pointer-events:none; }
 .card.is-back2 { z-index:1; transform:translateY(20px) scale(.9); opacity:.45; pointer-events:none; }
 .card.is-back1, .card.is-back2, .card.spring { transition:transform .3s var(--ease-spring),opacity .2s; }
+.card.is-back1 > *, .card.is-back2 > * { visibility:hidden; }   /* with no footer, the back cards' last row would peek out under the top card */
 .card.dragging { transition:none; cursor:grabbing; }
-.card[data-drag=left] { border-color:rgba(255,196,107,.55); }
-.card[data-drag=right] { border-color:rgba(101,220,127,.55); }
+.card[data-drag=left] { border-color:rgba(255,90,120,.65); }
+.card[data-drag=right] { border-color:rgba(101,220,127,.65); }
 .card.fly-left, .card.fly-right { pointer-events:none; transition:transform .24s var(--ease-exit),opacity .24s var(--ease-exit); }
 .card.fly-left { transform:translateX(-130vw) rotate(-22deg) !important; }
 .card.fly-right { transform:translateX(130vw) rotate(22deg) !important; }
-.c-head { height:28px; display:flex; align-items:center; gap:8px; }
-/* The list name keeps its width; the chip (‘Pending · open’) fits, and only ellipsises as a fallback on very narrow screens */
-.c-head .state { min-width:0; }
-.c-head .state span { font-variant-numeric:tabular-nums; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; }
-.c-list { font:600 11px Inter,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-left:auto; white-space:nowrap; flex:none; }
-.c-n { font:600 12px var(--mono); color:var(--muted); font-variant-numeric:tabular-nums; }
-/* Every card is the picture (one field) plus three 44 px rows. The stage grows into the height left after the play padding, HUD, list row,
-   client, the card's fixed parts (head, three rows, footer: 194 px), the toast gap and the buttons (584 px), never below 19svh.
-   At 375x548 that is 104 px (the card is 298 px in a 364 px arena); at 375x812 it is 228 px. svh, so the toolbar never resizes it;
-   the earlier lines are fallbacks for older browsers. */
+/* v6: the card is the picture plus three rows. The chip, footer and verdict stay in the template for game.js, hidden. */
+.c-head, .c-foot, .verdict { display:none !important; }
+/* Drag stamps (v6 §1): they fade in with the drag (game.js sets --sk/--sc), over the top corners of the picture */
+.stamp { position:absolute; top:20px; z-index:4; padding:4px 10px; border:2.5px solid; border-radius:10px; font:700 20px var(--display); letter-spacing:.06em; pointer-events:none; background:rgba(7,0,26,.6); }
+.s-keep { left:20px; color:#6ee59a; transform:rotate(-12deg); opacity:var(--sk,0); }
+.s-chal { right:20px; color:#ff7b8f; transform:rotate(12deg); opacity:var(--sc,0); }
+.picking .stamp { opacity:0; }
+/* The stage grows into the height left after the play padding, HUD, arena padding, the card's fixed parts (padding and three 44 px rows:
+   150 px), the back cards' peek and the buttons (330 px), never below 19svh: at 375x548 that is 218 px, at 375x812 the 320 px cap.
+   svh, so the toolbar never resizes it; the earlier lines are fallbacks for older browsers. */
 .obj-slot { position:relative; height:clamp(84px,19vh,190px); height:clamp(84px,19svh,190px);
-  height:clamp(84px,max(19svh,calc(100svh - 584px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),320px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
-/* Short screens in practice: the coach sits over the bottom of the arena, so the stage gives up its height and the coach is tighter,
-   keeping the whole card (footer included) above it at 375x548. 462 px = play padding, HUD, list row, client, buttons, arena padding, fixed card parts, dock and a two-line coach */
-@media (max-height:639px) {
-  .is-practice .obj-slot { height:80px; height:clamp(60px,min(19svh,calc(100svh - 462px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),190px); }
-  .is-practice #coach { padding:6px 10px; font-size:12.5px; line-height:1.3; }
-}
+  height:clamp(84px,max(19svh,calc(100svh - 330px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))),320px); background:radial-gradient(closest-side,rgba(192,132,255,.18),transparent); border-radius:16px; }
+/* Practice: the coach sits over the bottom of the arena, so the stage also leaves room for the practice bar and a two-line coach
+   (390 px in all), keeping the whole card above it at every height */
+.is-practice .obj-slot { height:80px; height:clamp(60px,calc(100svh - 390px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)),320px); }
+@media (max-height:639px) { .is-practice #coach { padding:6px 10px; font-size:12.5px; line-height:1.3; } }
 .obj { position:absolute; inset:0; }
 /* Card pictures. Photo: a real photo, about 16:10, cropped to fill, rounded. It gives up width before height on tall stages. */
 .obj-slot:has(.obj-photo) { background:none; }   /* objects.js sizes, rounds and shades the photo box itself */
@@ -272,14 +256,12 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .r-lab { font:600 11px Inter,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
 .r-val { font:600 16.5px/1.25 Inter,sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .r-val.mono, .mono .r-val { font:600 15px/1.25 var(--mono); font-size:clamp(13px,4vw,15px); }   /* a domain's end stays in view on 320px screens */
-/* Pick mode: after a left swipe the card springs back and asks which part is fake. game.js adds .picking to the card, .is-picking to body,
-   data-n 1-4 on the parts (picture first) and shows #b-cancel. The banner sits over the card's head row, so no part moves or hides. */
-.pick-banner { display:none; position:absolute; z-index:4; top:5px; left:10px; right:10px; height:28px; align-items:center; justify-content:center; padding:0 10px; border-radius:999px;
+/* Pick mode: after a left swipe the card springs back and asks which part is wrong. game.js adds .picking to the card, .is-picking to body,
+   data-n 1-4 on the parts (picture first) and shows #b-cancel. The banner sits on the card's top edge, in the arena's top gap, so no part moves or hides. */
+.pick-banner { display:none; position:absolute; z-index:4; top:-14px; left:0; right:0; width:max-content; max-width:calc(100% - 24px); margin:0 auto; height:28px; align-items:center; justify-content:center; padding:0 14px; border-radius:999px;
   background:#1e0a42; border:1px solid var(--st-contested); color:var(--st-contested); font:700 14px/1 var(--display); letter-spacing:.01em; white-space:nowrap; pointer-events:none; }
 .picking .pick-banner { display:flex; animation:rise .2s var(--ease); }
 .card.picking { border-color:rgba(255,196,107,.55); }
-.picking .c-head { visibility:hidden; }   /* the banner takes its place; the row keeps its height so nothing moves */
-.picking .stamp { opacity:0; }
 .picking [data-f] { cursor:pointer; outline:2px solid var(--st-contested); }
 .picking .obj-slot[data-f] { outline-offset:2px; }
 .picking .row[data-f] { outline-offset:-3px; padding-right:42px; }   /* room for the badge on the right */
@@ -299,66 +281,61 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .picking [data-f].hint { background-color:rgba(255,196,107,.16); outline-color:#ffd99a; }
 .picking [data-f].hint::after { animation-duration:.9s; }   /* practice hint: the fake part glows faster */
 @keyframes pickglow { 0%, 100% { opacity:0; } 50% { opacity:1; } }
-/* Everything but the card dims while picking; the policy line stays readable */
-.hud, .mrow, .client { transition:opacity .2s; }   /* back cards keep their spring transition */
+/* Everything but the card dims while picking */
+.hud, .mrow { transition:opacity .2s; }   /* back cards keep their spring transition */
 .is-picking .hud, .is-picking .mrow, .is-picking .card.is-back1, .is-picking .card.is-back2 { opacity:.3; }
-.is-picking .client { opacity:.6; }
-.c-foot { height:18px; font-size:11px; color:#9d92c4; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
-.stamp, .verdict { position:absolute; top:44px; padding:4px 10px; border:2.5px solid; border-radius:10px; font:700 20px var(--display); letter-spacing:.06em; pointer-events:none; background:rgba(7,0,26,.55); }
-.stamp { opacity:0; }
-.s-keep { left:16px; color:var(--st-listed); transform:rotate(-12deg); opacity:var(--sk,0); }
-.s-chal { right:16px; color:var(--st-contested); transform:rotate(12deg); opacity:var(--sc,0); }
-.verdict { left:50%; top:30%; transform:translate(-50%,-50%) rotate(-8deg); font-size:24px; color:var(--text); white-space:nowrap; }
-.verdict:empty { display:none; }
-.verdict.v-good, .v-good .verdict { color:var(--st-listed); }
-.verdict.v-bad, .v-bad .verdict { color:var(--st-off); }
 /* Booth tablet: a wider card and a taller stage, so the screen is not half empty */
 @media (min-width:700px) {
   .is-kiosk #play { grid-template-columns:minmax(0,640px); }
   .is-kiosk #stack, .is-kiosk .card, .is-kiosk .dock { max-width:600px; }
   .is-kiosk .acts { max-width:616px; }
-  .is-kiosk .obj-slot { height:clamp(84px,calc(100vh - 554px),520px); height:clamp(84px,calc(100svh - 554px),520px); }
+  .is-kiosk .obj-slot { height:clamp(84px,calc(100vh - 330px),520px); height:clamp(84px,calc(100svh - 330px),520px); }
 }
 /* ---- Toasts and overlays ---- */
-/* Toasts and the practice coach share one dock, so toasts sit in the gap above the buttons, or just above the coach, and the card's state chip stays readable */
+/* Toasts and the practice coach share one dock, so toasts sit in the gap above the buttons, or just above the coach */
 .dock { position:absolute; left:8px; right:8px; bottom:4px; z-index:5; max-width:420px; margin:0 auto; display:flex; flex-direction:column; pointer-events:none; }
 #toasts { display:flex; flex-direction:column; gap:6px; }
 .is-practice .toast:last-child { margin-bottom:6px; }
 /* Short screens: no room above the coach, so practice toasts go to the top of the arena (the dock spans it, the coach stays at the bottom) */
 @media (max-height:639px) { .is-practice .dock { top:4px; } }
 .toast { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:14px; background:rgba(30,10,66,.96); border:1px solid var(--field-line); box-shadow:0 12px 30px -12px rgba(0,0,0,.7); font-size:13px; line-height:1.35; animation:rise .25s var(--ease); --c:var(--st-window); }
-.toast[data-tone=good] { --c:var(--st-listed); } .toast[data-tone=bad] { --c:var(--st-off); } .toast[data-tone=tier] { --c:var(--tc,var(--gold)); }
-.toast[data-tier=free] { --tc:var(--tier-free); } .toast[data-tier=teal] { --tc:var(--tier-teal); } .toast[data-tier=purple] { --tc:var(--tier-purple); } .toast[data-tier=gold] { --tc:var(--tier-gold); }
+.toast[data-tone=good] { --c:var(--st-listed); }
 .t-dot { width:8px; height:8px; border-radius:50%; flex:none; background:var(--c); box-shadow:0 0 0 3px rgba(255,255,255,.08); }
 .t-body { flex:1; min-width:0; }
 .t-body b { display:block; font-weight:700; }
-.t-line, .t-fix { display:block; color:var(--muted); }
-.t-fix s { color:var(--st-off); }
-.t-fix span:last-child { color:var(--st-listed); font-weight:600; }
-/* Short screens: the gap above the buttons is small, so toasts shrink to stay off the next card's rows.
-   The fix line repeats the why (the report lists it); rulings are read in full from #say. */
+.t-line { display:block; color:var(--muted); }
+/* Short screens: the gap above the buttons is small, so toasts shrink to stay off the next card's rows. */
 @media (max-height:700px) {
-  #toasts .t-fix { display:none; }
   #toasts .t-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 }
 @media (max-height:620px) {
-  #toasts .toast + .toast { display:none; }   /* newest is first: one toast at a time */
   #toasts .toast { padding:6px 10px; line-height:1.25; }
 }
-.jurors { display:flex; gap:3px; flex:none; }
-.jurors i { width:10px; height:10px; background:rgba(255,255,255,.2); clip-path:polygon(25% 2%,78% 4%,100% 52%,72% 98%,20% 96%,0 42%); animation:jur .2s both; }
-.jurors i:nth-child(2) { animation-delay:60ms; } .jurors i:nth-child(3) { animation-delay:120ms; }
-.jurors i.on { background:var(--st-listed); }
-@keyframes jur { to { background:var(--st-listed); } }
-.t-thumb { width:24px; height:24px; border-radius:30%; object-fit:cover; flex:none; }
+/* ---- Flash: full-screen feedback after every decision. game.js fills the slots, sets data-tone and toggles hidden; a tap skips it.
+   Text sits on the darker middle of each gradient for AA contrast (white on #168a4a is about 4.4:1, on the soft and red mids 5 to 6:1). ---- */
+#flash { position:fixed; inset:0; z-index:15; display:grid; place-items:center; cursor:pointer; color:#fff; text-align:center; user-select:none; -webkit-user-select:none;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));
+  background:linear-gradient(180deg,#1f9d55,#0b6b3a); animation:fl-fade .14s ease-out; }
+#flash[data-tone=soft] { background:linear-gradient(180deg,#3a9a6c,#1d5f45); }   /* right call, wrong part: green but quieter */
+#flash[data-tone=bad] { background:linear-gradient(180deg,#d64545,#8f1d1d); }
+.fl-in { display:flex; flex-direction:column; align-items:center; gap:6px; max-width:360px; text-shadow:0 1px 2px rgba(0,0,0,.25); }
+.fl-icon { width:clamp(84px,24vmin,124px); height:clamp(84px,24vmin,124px); border-radius:50%; display:grid; place-items:center; margin-bottom:6px;
+  font:700 clamp(52px,15vmin,78px)/1 Inter,sans-serif; background:rgba(255,255,255,.18); box-shadow:0 0 0 4px rgba(255,255,255,.85),0 18px 40px -16px rgba(0,0,0,.5);
+  animation:fl-pop .32s var(--ease-spring) both; }
+#flash[data-tone=soft] .fl-icon { box-shadow:0 0 0 3px rgba(255,255,255,.6); }
+#flash[data-tone=bad] .fl-icon { animation:fl-pop .32s var(--ease-spring) both,shake .36s ease-in-out .3s; }
+.fl-word { font:700 clamp(38px,12vw,56px)/1 var(--display); letter-spacing:.04em; animation:fl-pop .32s var(--ease-spring) .04s both; }
+.fl-pts { font:700 clamp(24px,7.5vw,32px)/1.1 var(--display); font-variant-numeric:tabular-nums; }
+.fl-line { margin-top:4px; font:600 16px/1.35 Inter,sans-serif; text-wrap:balance; }
+.fl-extra { margin-top:6px; padding:5px 14px; border-radius:999px; background:rgba(0,0,0,.22); font:700 14px/1.3 Inter,sans-serif; }
+.fl-pts:empty, .fl-line:empty, .fl-extra:empty { display:none; }
+@keyframes fl-fade { from { opacity:0; } to { opacity:1; } }
+@keyframes fl-pop { from { transform:scale(.4); opacity:0; } to { transform:none; opacity:1; } }
 .overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:24px; background:rgba(7,0,26,.78); }
 .dlg { width:100%; max-width:380px; padding:22px 18px 18px; border-radius:22px; text-align:center; background:linear-gradient(180deg,#24104f,var(--surface)); border:1px solid rgba(255,255,255,.14); box-shadow:0 30px 80px -30px rgba(0,0,0,.8); animation:rise .2s var(--ease); }
 .dlg h2 { font-size:24px; margin-bottom:6px; }
 .dlg p { margin:0 0 6px; color:var(--muted); font-size:14px; line-height:1.45; }
 .dlg .primary { margin-top:14px; }
-#explain { position:absolute; inset:0; z-index:7; display:grid; place-items:center; padding:0 8px; background:rgba(7,0,26,.6); }
-#explain-title { font-size:18px; line-height:1.25; }
-#explain-fix s { color:var(--st-off); }
 .sheet { position:fixed; inset:0; z-index:30; display:flex; align-items:flex-end; justify-content:center; background:rgba(7,0,26,.7); }
 .sheet .dlg { border-radius:22px 22px 0 0; max-width:480px; text-align:left; padding-bottom:max(18px,env(safe-area-inset-bottom,0px)); }
 .sheet .btns { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
@@ -392,22 +369,12 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 @keyframes comet { from { --cv-comet:0deg; opacity:1; } to { --cv-comet:360deg; opacity:0; } }
 #rep-score { font:700 48px/1 var(--display); font-variant-numeric:tabular-nums; }
 .unit { color:var(--muted); font-size:14px; margin-left:4px; }
-#rep-sub { margin:6px 0 14px; color:var(--muted); font-size:13.5px; }
-.stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:left; }
-.stats div { padding:9px 11px; border-radius:12px; background:var(--field); border:1px solid var(--field-line); font-size:13px; line-height:1.35; font-variant-numeric:tabular-nums; }
-.stats b { display:block; font:700 20px/1.1 var(--display); font-variant-numeric:tabular-nums; white-space:nowrap; }
-.stats span { display:block; margin-top:2px; font-size:12px; color:var(--muted); }
-#rep-quote { margin:16px 4px 2px; font:700 17px/1.4 var(--display); text-wrap:balance; }
-#rep-quote-by { margin:0 4px; color:var(--muted); font-size:12.5px; }
-#rep-payoff { margin:12px 4px 0; font-size:14px; line-height:1.5; color:#ddd3ff; }
-.rmeter { margin:18px 0 0; padding:14px 14px 12px; border-radius:18px; background:var(--field); border:1px solid var(--field-line); }
-#rep-meter { position:relative; display:grid; grid-template-columns:repeat(4,1fr); gap:4px; height:8px; }
-#rep-meter i { border-radius:4px; background:rgba(255,255,255,.12); --tc:var(--tier-free); }
-#rep-meter i[data-tier] { background:var(--tc); box-shadow:0 0 10px var(--tc); }
-#rep-meter i[data-tier=none] { background:rgba(255,255,255,.12); box-shadow:none; }   /* rewards.js marks unreached segments 'none' */
-#rep-meter i[data-locked] { background:repeating-linear-gradient(135deg,rgba(255,255,255,.12) 0 3px,transparent 3px 6px); box-shadow:none; }   /* above the kiosk cap */
-#rep-marker { position:absolute; top:-5px; left:calc(var(--at,0) * 100%); width:3px; height:18px; margin-left:-1.5px; border-radius:2px; background:#fff; box-shadow:0 0 8px #fff; }
-#rep-meter-labels { display:grid; grid-template-columns:repeat(4,1fr); margin-top:6px; font:600 11px Inter,sans-serif; color:var(--muted); font-variant-numeric:tabular-nums; }
+#rep-sub { margin:8px 0 0; font:700 17px/1.3 Inter,sans-serif; font-variant-numeric:tabular-nums; }   /* “8 of 10 right” */
+/* v6: one company line under the panel; the stats grid, quote and fine print stay in the markup for rewards.js, hidden */
+#rep-payoff { margin:12px 4px 0; font-size:14px; line-height:1.4; color:#ddd3ff; text-align:center; }
+#rep-payoff:empty, #rep-tries:empty { display:none; }
+#rep-tries { margin:10px 0 0; font:600 13.5px/1.35 Inter,sans-serif; color:var(--text); text-align:center; }   /* “Try 1 of 2 · 1 try left today” */
+.rmeter { margin:14px 0 0; padding:14px 14px 12px; border-radius:18px; background:var(--field); border:1px solid var(--field-line); }
 .tl-row { display:flex; align-items:center; gap:12px; margin-top:12px; }
 #rep-thumbs { --th:40px; --ring:rgba(255,255,255,.6); }
 #rep-tier-line { margin:0; font-size:14px; line-height:1.4; }
@@ -423,6 +390,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .miss small { display:block; color:var(--muted); font-size:12px; }
 .miss p { margin:4px 0 0; color:#ddd3ff; }
 #to-ticket { margin-top:18px; position:sticky; bottom:max(12px,env(safe-area-inset-bottom,0px)); z-index:2; }   /* the medal and the misses make Results tall: the ticket button stays in reach and settles into place at the end */
+/* Short screens: a smaller medal and tighter gaps keep the tier line and the tries line above the sticky ticket button on first view */
+@media (max-height:639px) { #rep-medal { height:96px; } #rep-title { margin-bottom:10px; } #rep-payoff { margin-top:8px; } .rmeter { margin-top:10px; } }
 /* ---- Ticket ---- */
 /* The glow lives on the wrap so the notch masks on the faces never clip it */
 .ticket-wrap { position:relative; margin:6px 0 18px; border-radius:22px; perspective:1000px; cursor:pointer; outline:none; box-shadow:0 30px 70px -28px rgba(120,110,160,.5); --face:linear-gradient(150deg,rgba(52,46,78,.95),rgba(84,78,108,.8)); --line:rgba(255,255,255,.22); }
@@ -510,15 +479,14 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <!-- ---- Title screen ---- -->
 <section id="brief" aria-labelledby="brief-title">
   <div class="title">
-    <div class="kicker">Kleros Curate · <span id="brief-secs">60</span> seconds</div>
     <h1 id="brief-title" tabindex="-1">These apps need clean lists.</h1>
   </div>
-  <p class="lead" id="brief-lead">Help one out. Verify what’s real, challenge the fakes, and win the fakers’ deposits. A clean list keeps users happy and the app earning.</p>
+  <p class="lead" id="brief-lead">Help one. Spot what’s wrong. Win merch.</p>
   <ul class="hints" aria-label="How to play">
-    <li class="g-l">← Challenge a fake</li>
-    <li class="g-r">Verify the real →</li>
+    <li class="g-l"><span aria-hidden="true">←</span> Wrong</li>
+    <li class="g-r">Correct <span aria-hidden="true">→</span></li>
   </ul>
-  <h2 class="pick-label" id="pick-title">Pick an app to help</h2>
+  <h2 class="pick-label" id="pick-title">Pick an app</h2>
   <div id="picker" role="group" aria-labelledby="pick-title"></div>
   <button type="button" id="start" hidden tabindex="-1">Start</button>   <!-- kept for game.js; the app cards are the CTA -->
   <noscript><p class="fine" style="color:var(--gold)">Turn on JavaScript to play. You can still check in at devcon.kleros.io.</p></noscript>
@@ -528,44 +496,43 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <section class="prizes" aria-labelledby="ladder-title">
       <h2 id="ladder-title" class="sr">Booth merch: more points, better merch</h2>
       <ul id="ladder-list"></ul>
-      <p id="ladder-fine"></p>
+      <p id="ladder-fine">2 tries a day count for merch.</p>   <!-- the tries line; rewards.js may rewrite it -->
     </section>
     <div class="links">
-      <button type="button" class="ghost" id="relaxed" aria-pressed="false" aria-describedby="relaxed-note">Relaxed timing: Off</button>
+      <button type="button" class="ghost" id="relaxed" aria-pressed="false" aria-describedby="relaxed-note">More time: Off</button>
       <span class="sr" id="relaxed-note">90 seconds instead of 60.</span>
       <button type="button" class="ghost" id="practice-again" aria-pressed="false" aria-describedby="practice-note" hidden>Practice again</button>
       <span class="sr" id="practice-note">Adds one practice card before the app you pick.</span>
       <a id="hdr-link" href="/">Booth check-in →</a>
       <button type="button" class="ghost" id="deck-switch" hidden></button>   <!-- v4: the app cards pick the deck; kept hidden for game.js -->
     </div>
-    <p class="fine">A game, not real money. No sign-up.<span class="not-kiosk"> Your game data stays on this phone.</span> Photos: Wikimedia Commons (credits in How it works).</p>
+    <p class="fine">A game. No sign-up. Photos: Wikimedia Commons.</p>
   </div>
 </section>
 
 <!-- ---- Report ---- -->
 <section id="report" hidden aria-labelledby="rep-title">
   <div id="rep-medal" aria-hidden="true"></div>
-  <div class="kicker" id="rep-kicker">Results · Travel guide app</div>
-  <h2 id="rep-title" tabindex="-1">Clean list. Travellers are safe.</h2>
+  <div class="kicker" id="rep-kicker">Travel guide app</div>
+  <h2 id="rep-title" tabindex="-1">Great job</h2>
   <div id="rep-panel">
     <div><b id="rep-score">0</b><span class="unit">points</span></div>
     <p id="rep-sub"></p>
-    <div class="stats"><div id="rep-caught"><b></b><span>Fakes caught</span></div><div id="rep-listed"><b></b><span>Good entries listed</span></div><div id="rep-evidence"><b></b><span>Fake parts spotted</span></div><div id="rep-wrong"><b></b><span>Wrong challenges</span></div></div>
+    <div class="stats" hidden><div id="rep-caught"><b></b><span></span></div><div id="rep-listed"><b></b><span></span></div><div id="rep-evidence"><b></b><span></span></div><div id="rep-wrong"><b></b><span></span></div></div>   <!-- v6: kept for rewards.js, never shown -->
   </div>
-  <blockquote id="rep-quote"></blockquote>
-  <p id="rep-quote-by"></p>
-  <p id="rep-payoff"></p>
+  <blockquote id="rep-quote" hidden></blockquote>
+  <p id="rep-quote-by" hidden></p>
+  <p id="rep-payoff"></p>   <!-- the one company line -->
   <div class="rmeter">
-    <div id="rep-meter" aria-hidden="true"><i data-t="0"></i><i data-t="1"></i><i data-t="2"></i><i data-t="3"></i><span id="rep-marker"></span></div>
-    <div id="rep-meter-labels" aria-hidden="true"><span>0</span><span></span><span></span><span></span></div>   <!-- rewards.js fills these from settings tiers -->
     <div class="tl-row"><div class="thumbs" id="rep-thumbs"></div><p id="rep-tier-line"></p></div>
   </div>
+  <p id="rep-tries"></p>   <!-- the tries line, from rewards.js -->
   <div class="gold-strip" id="rep-gold" hidden><span id="rep-gold-text"></span><br><a id="rep-gold-go" href="/">Check in for Gold →</a></div>
   <details id="rep-missed" hidden><summary id="rep-missed-sum">What you missed</summary><ul class="misses" id="rep-misses"></ul></details>
   <button type="button" class="primary" id="to-ticket">Show my merch ticket</button>
   <button type="button" class="ghost" id="again">Play again</button>
   <button type="button" class="ghost not-kiosk" id="rep-switch">Try another app</button>   <!-- back to the title screen and its app cards; hidden in kiosk, where Next curator is the only way on -->
-  <p class="fine" id="rep-fine"></p>
+  <p class="fine" id="rep-fine" hidden></p>   <!-- v6: no fine print on Results -->
 </section>
 
 <!-- ---- Ticket ---- -->
@@ -582,14 +549,14 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
         <div id="t-who"></div>
         <div id="t-org"></div>
         <div id="t-code"></div>
-        <div id="t-hint">Show this screen at the booth to claim your merch</div>
+        <div id="t-hint">Show this at the booth.</div>
       </div>
       <div class="face back">
         <div class="sheen" aria-hidden="true"></div>
         <div id="tb-shift"></div>
         <div id="tb-stats"></div>
         <div id="tb-code"></div>
-        <div id="tb-staff">Staff: hold the code for 2 seconds, or use the button below, to mark as collected.</div>
+        <div id="tb-staff">Staff: hold the code 2 s, or tap below.</div>
         <button type="button" id="tb-staff-btn">Mark as collected</button>
       </div>
     </div>
@@ -610,14 +577,15 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <div class="hud">
     <div class="ring"><svg id="clock" viewBox="0 0 44 44" role="timer" aria-label="Time left"><circle class="trk" cx="22" cy="22" r="19"/><circle id="clock-arc" cx="22" cy="22" r="19" pathLength="100"/></svg><span id="clock-s">60</span></div>
     <div class="score"><b id="score-v">0</b><small>pts</small></div>
-    <div id="streak" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <span id="prog">1/10</span>
+    <div id="streak" aria-hidden="true" hidden><i></i><i></i><i></i><i></i><i></i></div>   <!-- v6: hidden, game.js may still write to it -->
     <button type="button" id="pause" aria-label="Pause"><svg viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/></svg></button>
   </div>
   <div class="mrow">
-    <div id="meter" aria-hidden="true"><i data-t="1"><b></b></i><i data-t="2"><b></b></i><i data-t="3"><b></b></i></div>
+    <div id="meter" aria-hidden="true" hidden><i data-t="1"><b></b></i><i data-t="2"><b></b></i><i data-t="3"><b></b></i></div>
     <div id="practice-bar"><span class="state st-window"><i></i><b>Practice</b> · not timed</span><button type="button" id="skip-practice">Skip practice →</button></div>
   </div>
-  <div class="client">
+  <div class="client" hidden>   <!-- v6: hidden; the practice coach shows the policy -->
     <div class="cl-top"><b id="client-name">Travel guide app</b><span id="list-name"></span><span id="trust">Trust 100%</span></div>
     <p id="policy"></p>
   </div>
@@ -625,24 +593,24 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <div id="stack"></div>
     <div class="dock"><div id="toasts" role="status" aria-live="polite"></div><div id="coach" aria-live="polite"></div></div>
     <div id="banner" hidden></div>
-    <div id="explain" hidden role="dialog" aria-modal="true" aria-labelledby="explain-title">
-      <div class="dlg"><h2 id="explain-title"></h2><p id="explain-why"></p><p id="explain-fix"></p><button type="button" class="primary" id="explain-ok">Got it</button></div>
-    </div>
   </div>
   <div class="acts">
-    <button type="button" class="act" id="b-chal">← Challenge</button>
-    <button type="button" class="act" id="b-keep">Verify →</button>
+    <button type="button" class="act" id="b-chal"><span aria-hidden="true">✗</span> Wrong</button>
+    <button type="button" class="act" id="b-keep"><span aria-hidden="true">✓</span> Correct</button>
     <button type="button" class="act cancel" id="b-cancel" hidden>Cancel</button>   <!-- pick mode: the only action; Esc does the same -->
   </div>
   <div class="edge" id="edge-l" aria-hidden="true"></div><div class="edge" id="edge-r" aria-hidden="true"></div>
 </section>
 
+<!-- ---- Flash: full-screen feedback after each decision (game.js fills it; a tap or any key skips it) ---- -->
+<div id="flash" hidden aria-hidden="true" data-tone=""><div class="fl-in"><div class="fl-icon" aria-hidden="true"></div><div class="fl-word"></div><div class="fl-pts"></div><div class="fl-line"></div><div class="fl-extra"></div></div></div>
+
 <!-- ---- Overlays ---- -->
 <div class="overlay" id="paused" hidden role="dialog" aria-modal="true" aria-labelledby="paused-title">
-  <div class="dlg"><h2 id="paused-title">Paused</h2><p>Your round is on hold.</p>
+  <div class="dlg"><h2 id="paused-title">Paused</h2>
     <button type="button" class="primary" id="resume">Carry on</button>
     <button type="button" class="ghost" id="end-shift">End round</button>
-    <p id="paused-note" hidden>Ending now still uses this round.</p></div>
+    <p id="paused-note" hidden>Ending now still uses this try.</p></div>
 </div>
 <div class="overlay" id="err" hidden role="dialog" aria-modal="true" aria-labelledby="err-title">
   <div class="dlg"><p id="err-title">Something went wrong loading the game.</p><button type="button" class="primary" id="err-reload">Reload</button></div>
@@ -653,17 +621,14 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 </div>
 <dialog id="how" aria-labelledby="how-title">
   <div class="dlg">
-    <h2 id="how-title">How Kleros Curate works for real</h2>
+    <h2 id="how-title">How Kleros Curate works</h2>
     <ol>
-      <li>Apps rely on lists: places, products, addresses, facts.</li>
-      <li>On Kleros Curate, anyone can add an entry by putting down a deposit.</li>
-      <li>For a few days, anyone can challenge an entry that breaks the list’s policy.</li>
-      <li>No challenge? It’s listed, and the submitter gets the deposit back.</li>
-      <li>Challenged? Randomly drawn Kleros jurors decide. The winner takes the loser’s deposit, minus court fees. For a challenger, that’s the bounty.</li>
-      <li>Any app can show a Curate list to its users.</li>
+      <li>Apps rely on lists: places, products, facts.</li>
+      <li>Anyone can add an entry, with a deposit.</li>
+      <li>Anyone can challenge an entry that breaks the rules.</li>
+      <li>Kleros jurors decide. The winner takes the deposit.</li>
     </ol>
-    <p>In this game, swipe left to challenge, then tap the part that’s fake: spotting it earns extra points.</p>
-    <p>Fun fact: Curate’s first live test, in 2018, was a list of doge pictures: Doges on Trial.</p>
+    <p>Here: Wrong is a challenge. Tap the wrong part for extra points.</p>
     <p class="not-kiosk"><a class="link" href="https://docs.kleros.io/products/curate" target="_blank" rel="noopener">Read about Kleros Curate →</a></p>
     <h3 id="credits-title">Photo credits</h3>
     <ul id="credits-list" aria-labelledby="credits-title"></ul>
@@ -692,19 +657,20 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <div id="say" class="sr" role="status" aria-live="polite"></div>
 
 <!-- ---- Templates (game.js and rewards.js clone these and fill [data-s] slots) ---- -->
+<!-- v6: the card shows the picture and three rows only (plus the drag stamps); the chip, footer and verdict are hidden slots game.js may still fill -->
 <template id="tpl-card"><article class="card" role="group" aria-roledescription="entry" tabindex="-1">
-  <header class="c-head"><span class="state st-window" data-s="state"><i></i><b data-s="state-label">Pending</b><span data-s="secs"></span></span>
+  <header class="c-head" hidden><span class="state st-window" data-s="state"><i></i><b data-s="state-label"></b><span data-s="secs"></span></span>
     <span class="c-list" data-s="list"></span><span class="c-n" data-s="n"></span></header>
-  <div class="pick-banner" data-s="pick" aria-live="polite">What’s fake here? Tap it.</div>
+  <div class="pick-banner" data-s="pick" aria-live="polite">What’s wrong? Tap it.</div>
   <div class="obj-slot" data-s="obj"></div>
   <ul class="rows" data-s="rows"></ul>
-  <footer class="c-foot" data-s="foot"></footer>
-  <span class="stamp s-keep" aria-hidden="true">VERIFY</span><span class="stamp s-chal" aria-hidden="true">CHALLENGE</span>
-  <span class="verdict" data-s="verdict" aria-hidden="true"></span></article></template>
+  <footer class="c-foot" data-s="foot" hidden></footer>
+  <span class="stamp s-keep" aria-hidden="true">CORRECT</span><span class="stamp s-chal" aria-hidden="true">WRONG</span>
+  <span class="verdict" data-s="verdict" aria-hidden="true" hidden></span></article></template>
 <template id="tpl-row"><li><button type="button" class="row" data-f=""><span class="r-lab" data-s="lab"></span><span class="r-val" data-s="val"></span></button></li></template>
-<template id="tpl-toast"><div class="toast" data-tone="info"><span class="t-dot" aria-hidden="true"></span><div class="t-body"><b data-s="title"></b><span class="t-line" data-s="line" hidden></span><span class="t-fix" data-s="fix" hidden><span data-s="fixlab"></span> · <s data-s="was"></s> → <span data-s="is"></span></span></div><span class="jurors" data-s="jurors" aria-hidden="true" hidden><i></i><i></i><i></i></span><img class="t-thumb" data-s="thumb" alt="" width="24" height="24" hidden></div></template>
+<template id="tpl-toast"><div class="toast" data-tone="info"><span class="t-dot" aria-hidden="true"></span><div class="t-body"><b data-s="title"></b><span class="t-line" data-s="line" hidden></span></div></div></template>
 <template id="tpl-pick"><button type="button" class="pick"><span class="pick-pic" data-s="pic" aria-hidden="true"></span>
-  <span class="pick-txt"><b class="pick-app" data-s="app"></b><span class="pick-need" data-s="need"></span><span class="pick-sub" data-s="sub"></span><span class="pick-meta" data-s="meta"></span></span>
+  <span class="pick-txt"><b class="pick-app" data-s="app"></b><span class="pick-need" data-s="need"></span><span class="pick-sub" data-s="sub" hidden></span><span class="pick-meta" data-s="meta"></span></span>
   <svg class="pick-go" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 2.5 9.5 7 5 11.5"/></svg></button></template>
 <template id="tpl-miss"><li class="miss"><span class="m-kind" data-s="kind"></span><span class="m-line"><b data-s="lab"></b> · <s data-s="was"></s> → <span data-s="is"></span></span><small data-s="name"></small><p data-s="why"></p></li></template>
 

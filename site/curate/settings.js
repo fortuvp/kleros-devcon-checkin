@@ -11,9 +11,9 @@ window.CURATE_SETTINGS = {
   // evidence: the fake part picked in pick mode. bonusMinEvidence: the time bonus also needs this many
   // fakes spotted (blind swiping rarely earns it)
   trust: { leak: -15, wrongChallenge: -5 },
-  tiers: [0, 390, 690, 925],                 // Everyone, Teal, Purple, Gold (v5: fitted by --fit, 60 s, pick mode)
-  checkinNeededFrom: 3,                      // 3 = Gold only; 1 = every tier above Everyone
-  countedPerDay: 3,
+  tiers: [0, 350, 675, 920],                 // Everyone, Teal, Purple, Gold (v6: refitted by --fit for 2 tries a day)
+  checkinNeededFrom: 1,                      // every tier above Everyone needs a confirmed check-in on this phone (anti-replay: the check-in dedupes by email/Telegram); 3 = Gold only
+  countedPerDay: 2,                          // v6: 2 tries a day count for merch (title, Go banner, Results, ticket)
   kioskMaxTier: 1, kioskResetMs: 20000, kioskIdleMs: 60000,
   staffHoldMs: 2000, undoMs: 5000,
   soldOut: [],                               // e.g. ['gold'] for the rest of the day
