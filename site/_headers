@@ -18,6 +18,8 @@
   Cache-Control: no-cache
 /curate/rewards.js
   Cache-Control: no-cache
+/curate/earn.js
+  Cache-Control: no-cache
 /curate/game.js
   Cache-Control: no-cache
 /admin

@@ -380,6 +380,21 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #rep-tier-line { margin:0; font-size:14px; line-height:1.4; }
 .gold-strip { margin:12px 0 0; padding:12px 14px; border-radius:14px; background:rgba(242,196,109,.12); border:1px solid var(--gold); font-size:13.5px; line-height:1.45; }
 .gold-strip a { display:inline-block; margin-top:4px; color:var(--gold); font-weight:700; text-decoration:none; }
+/* Earn for real (earn.js): one field and a button on a phone line; 16px input text stops iOS zooming in */
+.earn { margin:16px 0 4px; padding:16px; border-radius:18px; text-align:left;
+  background:linear-gradient(160deg,rgba(39,205,254,.14),rgba(192,132,255,.16)); box-shadow:inset 0 0 0 1px rgba(127,240,224,.35); }
+.earn .kicker { color:var(--teal); }
+.earn h3 { margin:4px 0 2px; font:700 19px/1.2 var(--display); }
+#earn-line { margin:0 0 12px; font-weight:600; }
+.earn-row { display:flex; gap:8px; }
+#earn-contact { flex:1; min-width:0; height:48px; padding:0 12px; border-radius:12px; border:1px solid rgba(255,255,255,.2);
+  background:rgba(7,0,26,.55); color:var(--text); font:500 16px Inter,sans-serif; }
+#earn-contact:focus { outline:2px solid var(--teal); outline-offset:1px; }
+.earn-row .primary { flex:none; width:auto; height:48px; padding:0 16px; font-size:15px; }
+.earn-fine { margin:8px 0 0; font-size:12px; color:var(--muted); }
+.earn-fine a { color:var(--muted); }
+.earn-msg { margin:10px 0 0; font-weight:600; color:var(--teal); }
+.earn-msg.bad { color:#ffb4b4; }
 #rep-missed { margin-top:14px; font-size:13.5px; }
 #rep-missed summary { cursor:pointer; font-weight:600; color:var(--muted); }
 .misses { list-style:none; margin:8px 0 0; padding:0; display:grid; gap:8px; }
@@ -528,6 +543,18 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   </div>
   <p id="rep-tries"></p>   <!-- the tries line, from rewards.js -->
   <div class="gold-strip" id="rep-gold" hidden><span id="rep-gold-text"></span><br><a id="rep-gold-go" href="/">Check in for Gold →</a></div>
+  <!-- earn.js: the "earn for real" sign-up, one field; hidden until settings.js earn.endpoint is set (?earnpreview=1 shows it) -->
+  <section class="earn" id="earn" hidden aria-labelledby="earn-title">
+    <div class="kicker">Earn for real</div>
+    <h3 id="earn-title">Get paid to keep lists clean.</h3>
+    <p id="earn-line">Kleros pays curators $5,000+ every month.</p>
+    <form id="earn-form" novalidate>
+      <label class="sr" for="earn-contact">Telegram handle or email</label>
+      <div class="earn-row"><input id="earn-contact" name="contact" type="text" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120" placeholder="@handle or email"><button type="submit" class="primary">Send me how</button></div>
+      <p class="earn-fine">Only to tell you how to start. <a href="/#privacy">Privacy</a></p>
+    </form>
+    <p id="earn-msg" class="earn-msg" role="status" hidden></p>
+  </section>
   <details id="rep-missed" hidden><summary id="rep-missed-sum">What you missed</summary><ul class="misses" id="rep-misses"></ul></details>
   <button type="button" class="primary" id="to-ticket">Show my merch ticket</button>
   <button type="button" class="ghost" id="again">Play again</button>
@@ -681,6 +708,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 <script defer src="/curate/objects.js"></script>
 <script defer src="/curate/credits.js"></script>
 <script defer src="/curate/rewards.js"></script>
+<script defer src="/curate/earn.js"></script>
 <script defer src="/curate/game.js"></script>
 </body>
 </html>

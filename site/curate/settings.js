@@ -19,6 +19,9 @@ window.CURATE_SETTINGS = {
   soldOut: [],                               // e.g. ['gold'] for the rest of the day
   substitutes: { teal: null, purple: null, gold: null },   // { reward, short, img: [paths] }; short reads in a sentence
   ranks: ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'],   // by tier, when no check-in name
+  // Earn for real (earn.js, on Results): endpoint = the /exec URL of your own sign-up sheet script
+  // (apps-script/earn-signups/); empty keeps the form hidden. monthly: the payout line, keep it true.
+  earn: { endpoint: '', monthly: '$5,000+' },
   // Used only when config.js has no merch block with 3 tiers. An exact copy of config.js merch today.
   fallbackMerch: {
     free: { reward: 'Stickers and metallic tattoos', how: 'Free for everyone at the booth',
