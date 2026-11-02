@@ -11,28 +11,31 @@ Until `sheetApp.endpoint` in `site/curate/settings.js` is set, the sign-up form 
 
 1. In Google Drive, signed in with your Kleros account, create a Google Sheet, for example *Curate booth sheet*. Keep it separate from the Booth Leads Database: that backend's `setup()` deletes any tab it doesn't know.
 2. In that Sheet, open **Extensions › Apps Script**. Delete the sample code, paste all of [`Code.gs`](Code.gs), and save.
-3. In the function menu pick **staffSetup** and click **Run**. Approve the permissions. Then open **Execution log** and copy the *Staff key*. Give it to the booth staff only, never to visitors.
+3. Times and today's counts use Mumbai time (`TZ` in the code), whatever the project's own time zone is. In the function menu pick **staffSetup** and click **Run**. Approve the permissions. Then open **Execution log** and copy the *Staff key*. Give it to the booth staff only, never to visitors.
 4. Click **Deploy › New deployment**, choose **Web app**, and set *Execute as: Me* and *Who has access: Anyone*. Click **Deploy**.
 5. Copy the **Web app URL** (it ends in `/exec`). Opening it in a browser should show `{"ok":true,"service":"curate sheet"}`.
 6. Put it in `site/curate/settings.js`: `sheetApp: { endpoint: 'https://script.google.com/macros/s/…/exec' }`. Commit and deploy the site.
 7. Test it:
    - **Sign-ups:** play a round at `/curate/` and send a handle from Results. A row appears in the *Earn sign-ups* tab.
-   - **Desk:** on a staff phone, open `https://devcon.kleros.io/curate/desk/`, enter the key and your name, and scan a badge. A row appears in *Badge claims*. Scan the same badge again: it turns red.
+   - **Badge format first:** on a staff phone, open `https://devcon.kleros.io/curate/desk/?test=1` and scan one real Devcon VIII badge, on an Android phone and on an iPhone, then type the code printed on it (if any). Test mode saves nothing: it shows the raw text and the id the desk uses. All three ids must match. Then set `sheetApp.badgePattern` in `settings.js` to a regex that fits that id (for example `^[A-Z0-9]{12}$` for a 12-character code) and deploy, so a phone ticket, a photo or the back of the badge is refused. If the printed code differs from the QR's id, tell staff to scan only.
+   - **Desk:** open `https://devcon.kleros.io/curate/desk/`, enter the key and your name, and scan a badge. A row appears in *Badge claims*. Scan the same badge again: it turns red. Delete this test row before opening.
 
 To change the code later, use **Deploy › Manage deployments › ✏️ › Version: New version**. The URL stays the same. To change the staff key, run `staffSetup` again; every staff phone then asks for the new key.
 
 ## Staff card: merch desk
 
 1. The visitor shows their ticket (game or check-in). Check the clock ticks and read the **colour**. Stickers need no scan.
-2. On your phone, tap **Scan badge** and point it at the code on their **Devcon badge**. If the camera won't read it, tap **Type the badge code**.
-3. **Red, *Already got merch*:** this badge already got an item (it shows what and when). No more merch; stickers are fine.
-4. **Green, *New badge*:** tap the item you hand over, in the ticket's colour (Teal flip-flops, Purple copper bottle or gamcha, Gold kurta). Optionally type the ticket code (K-… or C-…), so the same ticket can't be used with a second badge.
-5. Hand over the item only after the screen says ***Give: …***.
+2. On your phone, tap **Scan badge** and point it at the code on their **Devcon badge**: only the lanyard badge, never a phone screen, a photo or the back of the badge (the desk refuses codes that don't look like a badge). If the camera won't read it, tap **Type the badge code**.
+3. If it says ***Can't reach the sheet***, don't hand anything over: tap **Try again**.
+4. **Red, *Already got merch*:** this badge already got an item (it shows what and when). No more merch; stickers are fine.
+5. **Green, *New badge*:** optionally type the ticket code (K-… or C-…, so the same ticket can't go with a second badge), then tap the item you hand over in the ticket's colour (Teal flip-flops, Purple copper bottle or gamcha, Gold kurta).
+6. Hand over the item only after the screen says ***Give: …***.
 
 ## How it behaves
 
-- **Only a fingerprint of the badge leaves the phone.** The desk sends a SHA-256 of the badge code, never the code itself, and the sheet stores that.
-- **Two phones can't both give.** The check and the save happen under one lock, so two staff scanning the same badge at the same moment can't both see green.
+- **Only a fingerprint of the badge leaves the phone.** The desk turns the badge code into one id (a URL keeps its id, everything upper-cased, letters and digits only), so scanning and typing give the same id, then sends a SHA-256 of it; the sheet stores that, not the code. The salt is public, so it hides the code from a casual look, not from someone who can guess badge codes.
+- **Two phones can't both give.** The save re-checks the badge under one lock and flushes the sheet before releasing it, so two staff scanning the same badge at the same moment can't both save it.
+- **Slow or lost replies are safe.** Every request gives up after 12 s with a clear *Try again*, a reply for an earlier badge is ignored, and a retried save reuses its id, so a save that went through but lost its reply is recognised, not refused.
 - **Retries never duplicate.** Each claim and sign-up carries an id, and the script skips an id it already saved.
 - **The home screen shows today's count per tier**, for pacing the stock.
 - **iPhones work too.** iPhone browsers can't read barcodes on their own, so the desk carries jsQR (Apache-2.0, `site/curate/desk/vendor/`), loaded on the desk page only. Android Chrome uses its built-in reader (QR, Aztec, Data Matrix, PDF417 and common barcodes); jsQR reads QR only.

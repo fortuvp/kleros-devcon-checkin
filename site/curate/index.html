@@ -392,7 +392,10 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #earn-contact:focus { outline:2px solid var(--teal); outline-offset:1px; }
 .earn-row .primary { flex:none; width:auto; height:48px; padding:0 16px; font-size:15px; }
 .earn-fine { margin:8px 0 0; font-size:12px; color:var(--muted); }
-.earn-fine a { color:var(--muted); }
+.earn-fine summary { cursor:pointer; }
+.earn-fine span { display:block; margin-top:4px; }
+.earn-msg:empty { display:none; }
+.earn-msg:focus { outline:none; }
 .earn-msg { margin:10px 0 0; font-weight:600; color:var(--teal); }
 .earn-msg.bad { color:#ffb4b4; }
 #rep-missed { margin-top:14px; font-size:13.5px; }
@@ -550,10 +553,10 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <p id="earn-line">Kleros pays curators $5,000+ every month.</p>
     <form id="earn-form" novalidate>
       <label class="sr" for="earn-contact">Telegram handle or email</label>
-      <div class="earn-row"><input id="earn-contact" name="contact" type="text" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120" placeholder="@handle or email"><button type="submit" class="primary">Send me how</button></div>
-      <p class="earn-fine">Only to tell you how to start. <a href="/#privacy">Privacy</a></p>
+      <div class="earn-row"><input id="earn-contact" name="contact" type="text" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120" placeholder="@handle or email" aria-describedby="earn-msg"><button type="submit" class="primary">Send me how</button></div>
+      <details class="earn-fine"><summary>Only to tell you how to start. Privacy</summary><span id="earn-privacy">Cooperative Kleros keeps your handle or email only to tell you how to start curating. To see or delete it, ask at the booth.</span></details>
     </form>
-    <p id="earn-msg" class="earn-msg" role="status" hidden></p>
+    <p id="earn-msg" class="earn-msg" role="status" tabindex="-1"></p>
   </section>
   <details id="rep-missed" hidden><summary id="rep-missed-sum">What you missed</summary><ul class="misses" id="rep-misses"></ul></details>
   <button type="button" class="primary" id="to-ticket">Show my merch ticket</button>

@@ -43,10 +43,11 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
 #result[data-tone=warn] { background:linear-gradient(180deg,#b07812,#6b4508); }
 #r-icon { font-size:72px; line-height:1; margin-top:8px; }
 #r-word { font:800 30px/1.1 Inter, system-ui, sans-serif; margin-top:8px; text-transform:uppercase; letter-spacing:.02em; }
-#r-line { font-size:19px; margin-top:10px; }
+#r-line { font-size:19px; margin-top:10px; white-space:pre-line; overflow-wrap:anywhere; }
 .items { margin-top:14px; }
 .items h2 { font-size:14px; margin:16px 0 0; text-transform:uppercase; letter-spacing:.1em; }
 .items button { min-height:64px; margin-top:8px; color:#1d1050; font-size:19px; }
+.items button:disabled { opacity:.5; }
 .items .t-teal { background:var(--teal); } .items .t-purple { background:var(--purple); } .items .t-gold { background:var(--gold); }
 #result .ghost { color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.5); }
 #result input { background:rgba(0,0,0,.22); border-color:rgba(255,255,255,.4); }
@@ -62,7 +63,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
     <h1>Staff key</h1>
     <p class="muted">Ask the booth lead for the key. It stays on this phone.</p>
     <form id="setup-form">
-      <label for="k-key">Key</label><input id="k-key" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <label for="k-key">Key</label><input id="k-key" type="password" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <label for="k-name">Your name</label><input id="k-name" autocomplete="name" maxlength="40">
       <button type="submit">Save</button>
     </form>
@@ -102,9 +103,9 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
     <div id="r-word"></div>
     <p id="r-line"></p>
     <div class="items" id="r-items" hidden>
+      <label for="r-ticket">Ticket code from their screen (optional, stops one ticket going with two badges)</label><input id="r-ticket" placeholder="K-ABC123 or C-ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8">
       <p>Read the colour on their ticket, then tap what you hand over:</p>
       <div id="r-buttons"></div>
-      <label for="r-ticket">Ticket code (optional)</label><input id="r-ticket" placeholder="K-ABC123 or C-ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8">
     </div>
     <p id="r-msg"></p>
     <button type="button" id="r-retry" hidden>Try again</button>

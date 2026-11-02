@@ -7,6 +7,7 @@ var EARN = 'Earn sign-ups', CLAIMS = 'Badge claims';
 var EARN_HEAD = ['Time', 'Contact', 'Kind', 'App', 'Score', 'Event', 'Source', 'Id'];
 var CLAIM_HEAD = ['Time', 'Badge (hashed)', 'Tier', 'Item', 'Ticket', 'Staff', 'Id'];
 var TIERS = ['teal', 'purple', 'gold'];
+var TZ = 'Asia/Kolkata';   // Devcon VIII is in Mumbai: claim times and today's counts use booth time
 var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, TG = /^@[A-Za-z][A-Za-z0-9_]{4,31}$/;
 
 function doPost(e) {
@@ -32,16 +33,15 @@ function earn_(d) {
   if (!kind || contact.length > 120) return { ok: false, error: 'bad contact' };
   var id = cleanId_(d.id);
   if (seen_('earn:' + id)) return { ok: true };   // a retry of a saved sign-up
-  locked_(function () {
-    tab_(EARN, EARN_HEAD).appendRow([new Date(), plain_(contact), kind, plain_(d.app), clampNum_(d.score),
-      plain_(d.event), plain_(d.source), id]);
-  });
+  // No script lock here: the public form must never stall the staff desk, and appendRow is atomic on its own.
+  tab_(EARN, EARN_HEAD).appendRow([new Date(), plain_(contact), kind, plain_(d.app), clampNum_(d.score),
+    plain_(d.event), plain_(d.source), id]);
   remember_('earn:' + id);
   return { ok: true };
 }
 
 // ---- Badge desk ----
-// The page sends a SHA-256 of the badge's code, never the code itself.
+// The page sends a SHA-256 of the badge's normalised id, never the code itself.
 function badgeOf_(d) { var b = String(d.badge || ''); if (!/^[0-9a-f]{64}$/.test(b)) throw new Error('bad badge'); return b; }
 function findBadge_(sh, badge) {
   var n = sh.getLastRow() - 1, rows, i;
@@ -57,7 +57,7 @@ function findTicket_(sh, ticket) {
   for (i = 0; i < rows.length; i++) if (String(rows[i][4]) === ticket) return rows[i];
   return null;
 }
-function used_(row) { return { at: Utilities.formatDate(new Date(row[0]), Session.getScriptTimeZone(), 'HH:mm'), tier: row[2], item: row[3] }; }
+function used_(row) { return { at: Utilities.formatDate(new Date(row[0]), TZ, 'HH:mm'), tier: row[2], item: row[3] }; }
 function check_(d) {
   var row = findBadge_(tab_(CLAIMS, CLAIM_HEAD), badgeOf_(d));
   return row ? { ok: true, used: true, last: used_(row) } : { ok: true, used: false };
@@ -74,6 +74,7 @@ function claim_(d) {
     tRow = findTicket_(sh, ticket);
     if (tRow) { out = { ok: false, ticketUsed: true, last: used_(tRow) }; return; }
     sh.appendRow([new Date(), badge, tier, plain_(String(d.item || '').slice(0, 60)), ticket, plain_(String(d.staff || '').slice(0, 40)), id]);
+    SpreadsheetApp.flush();   // written before the lock is released, so the next phone's check sees it
     out = { ok: true };
   });
   if (out.ok) remember_('claim:' + id);
@@ -81,7 +82,7 @@ function claim_(d) {
 }
 // Today's handouts per tier, for pacing the stock.
 function stats_() {
-  var sh = tab_(CLAIMS, CLAIM_HEAD), n = sh.getLastRow() - 1, tz = Session.getScriptTimeZone(), today, rows, out = { teal: 0, purple: 0, gold: 0 }, i;
+  var sh = tab_(CLAIMS, CLAIM_HEAD), n = sh.getLastRow() - 1, tz = TZ, today, rows, out = { teal: 0, purple: 0, gold: 0 }, i;
   if (n < 1) return { ok: true, today: out };
   today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   rows = sh.getRange(2, 1, n, 3).getValues();

@@ -12,7 +12,7 @@
   var KIOSK = /[?&]kiosk=1\b/.test(location.search), PREVIEW = /[?&]earnpreview=1\b/.test(location.search);
   var KEY = 'kleros_devcon_curate_earn';
   var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, TG = /^@?[A-Za-z][A-Za-z0-9_]{4,31}$/;
-  var sending = false;
+  var sending = false, tries = 0;
 
   function $(id) { return document.getElementById(id); }
   function txt(id, s) { var el = $(id); if (el) el.textContent = s; return el; }
@@ -46,14 +46,20 @@
     if (sending || !E.endpoint || !st.queue.length || !window.fetch) return;
     sending = true;
     send(st.queue[0]).then(function () {
-      sending = false; st.queue.shift(); save(); flush();
-    }, function () { sending = false; /* try again on the next load or when back online */ });
+      sending = false; tries = 0; st.queue.shift(); save(); flush();
+    }, function () {
+      sending = false;
+      // Try again while the visitor stays (20 s, 40 s, 80 s…), then on the next load or when back online.
+      if (tries < 6) setTimeout(flush, 20000 * Math.pow(2, tries++));
+    });
   }
 
   // ---- Form ----
   function msg(s, bad) {
-    var el = txt('earn-msg', s);
-    if (el) { el.hidden = !s; el.className = bad ? 'earn-msg bad' : 'earn-msg'; }
+    var el = $('earn-msg');
+    if (!el) return;
+    el.className = bad ? 'earn-msg bad' : 'earn-msg';
+    el.textContent = s || '';
   }
   // Results (re)shown: the box appears only when sign-ups can reach the sheet, and only until this phone signed up.
   function render() {
@@ -62,6 +68,9 @@
     box.hidden = !(E.endpoint || PREVIEW) || (st.done && !KIOSK);
     if (box.hidden) return;
     txt('earn-line', 'Kleros pays curators ' + (E.monthly || '$5,000+') + ' every month.');
+    if (CFG.privacyContact) txt('earn-privacy', 'Cooperative Kleros keeps your handle or email only to tell you how to start curating. To see or delete it, ask at the booth or ' + CFG.privacyContact + '.');
+    // A shared booth tablet must not suggest the last visitor's email.
+    if (KIOSK) $('earn-contact').setAttribute('autocomplete', 'off');
     if (KIOSK || !st.done) { $('earn-form').hidden = false; $('earn-contact').value = ''; msg(''); }
   }
   function submit(ev) {
@@ -78,6 +87,7 @@
     input.value = '';
     $('earn-form').hidden = true;
     msg('Thanks! We’ll message you soon.');
+    $('earn-msg').focus();   // the focused button just went away
     flush();
   }
 

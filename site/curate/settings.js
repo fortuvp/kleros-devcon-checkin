@@ -21,7 +21,9 @@ window.CURATE_SETTINGS = {
   ranks: ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'],   // by tier, when no check-in name
   // sheetApp: the /exec URL of the game owner's own sheet script (apps-script/curate-sheet/). It takes the
   // Earn for real sign-ups (earn.js) and the staff badge desk (/curate/desk/). Empty hides the sign-up form.
-  sheetApp: { endpoint: '' },
+  // badgePattern: a regex the desk's normalised badge id must match (set it from /curate/desk/?test=1 on a real
+  // badge before opening; empty accepts any 6+ letters and digits). badgeFormats: 2D codes the Android reader looks for.
+  sheetApp: { endpoint: '', badgePattern: '', badgeFormats: ['qr_code', 'aztec', 'data_matrix', 'pdf417'] },
   earn: { monthly: '$5,000+' },   // the payout line on Results: keep it true
   // Used only when config.js has no merch block with 3 tiers. An exact copy of config.js merch today.
   fallbackMerch: {
