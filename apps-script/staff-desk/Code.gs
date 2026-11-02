@@ -4,7 +4,7 @@
 // Public actions (no key): status, start, finish, contact. Staff actions (staff key): check, claim, stats.
 // Badge data never goes to the contacts Sheet and contacts never go to the badge Sheet: the badge Sheet holds only
 // a yes/no "contact given" flag per badge. Setup (paste, run staffSetup, deploy): apps-script/staff-desk/README.md.
-var SCRIPT_V = '2026-11-02b';   // shown by doGet and status: tells the owner which pasted copy is live
+var SCRIPT_V = '2026-11-02c';   // shown by doGet and status: tells the owner which pasted copy is live
 var SHEET_ID = '';   // empty: the Sheet this script is bound to (the badge list); else that Sheet's id
 var CONTACTS_SHEET_ID = '1LzRQ9IizuRMrqWAclFuY2v0bONkgxb2ezvXPbVsBtIc';   // the newsletter contacts, a separate Sheet
 var CLAIMS = 'Badge claims', TRIES = 'Tries', SWITCHES = 'Switches', CONTACTS = 'Contacts';   // tab names
@@ -17,14 +17,14 @@ var TIERS = [0, 300, 550, 750];   // = settings.js tiers (scripts/curate-check.j
 var TIER_KEYS = ['teal', 'purple', 'gold'];   // tier 1..3
 var APPS = ['sights', 'countries', 'tokens'];   // deck ids (checked against decks.js)
 var ENDED = ['done', 'time', 'quit'];   // how a round ended (accepted for the record; not stored)
-var PER_DAY = 2;                  // = settings.js countedPerDay (checked)
+var TRIES_PER_BADGE = 2;          // counted tries per badge for the whole event, never reset daily (= settings.js countedTries, checked)
 var MAX_SCORE = 750;              // the best possible round under settings.js: answers only, no time bonus (checked)
 var MIN_ROUND_MS = 8000;          // start → finish at least: banners plus 10 fast decisions
 var MAX_SEND_MS = 6 * 60 * 60 * 1000;   // start → finish received at most: pauses and dead Wi-Fi fit in 6 h
 var LOCK_MS = 6000;               // tryLock wait: the server answers 'busy' well before the client gives up (20 s)
 var CAP_STARTS = 60, CAP_CONTACTS = 20;   // per minute, all badges together: above it the reply is 'busy'
 var SWITCH_CACHE_S = 20;          // switches are re-read at most every 20 s (an edit of Switches clears it at once)
-var TZ = 'Asia/Kolkata';          // booth days and times: Devcon VIII is in Mumbai
+var TZ = 'Asia/Kolkata';          // booth times and the Day column: Devcon VIII is in Mumbai
 
 // All "now" comes from here, so the check script can move the clock.
 function now_() { return new Date(); }
@@ -116,7 +116,8 @@ function peek_(name, cols) { var sh = book_().getSheetByName(name); return sh ? 
 // Ids and tokens are written as text, so an all-digit one is never turned into a number.
 function text_(v) { return v ? "'" + v : ''; }
 // Day is written as text ("'" + yyyy-MM-dd: a bare date string would be parsed into a Date); a Date that slipped
-// in still compares right. A Date is told by its tag, not instanceof, so one from the check script's vm counts.
+// in still reads right. A Date is told by its tag, not instanceof, so one from the check script's vm counts.
+// The Tries Day column is a record only: tries never depend on it. dayKey_ also dates contacts and stats' handouts.
 function isDate_(v) { return Object.prototype.toString.call(v) === '[object Date]'; }
 function dayKey_(v) { return isDate_(v) ? Utilities.formatDate(v, TZ, 'yyyy-MM-dd') : String(v).replace(/^'/, ''); }
 function hhmm_(v) { return Utilities.formatDate(new Date(v), TZ, 'HH:mm'); }
@@ -139,10 +140,10 @@ function best_(rows, badge) {
   return { score: Number(b[6]), tier: Number(b[7]) || 0, app: String(b[8] || ''), at: hhmm_(b[5]), day: dayName_(b[5]),
     code: 'C-' + String(b[0]).slice(0, 6).toUpperCase(), tryNo: Number(b[3]) || 0 };
 }
-// Today's tries for the badge (booth day in TZ).
-function today_(rows, badge) {
-  var k = dayKey_(now_()), out = [], i;
-  for (i = 0; i < rows.length; i++) if (String(rows[i][2]) === badge && dayKey_(rows[i][1]) === k) out.push(rows[i]);
+// All the badge's counted tries, whatever their Day: TRIES_PER_BADGE is for the whole event, never per day.
+function triesOf_(rows, badge) {
+  var out = [], i;
+  for (i = 0; i < rows.length; i++) if (String(rows[i][2]) === badge) out.push(rows[i]);
   return out;
 }
 // A badge has given its contact when any of its rows says yes.
@@ -150,10 +151,10 @@ function contactGiven_(rows, badge) {
   for (var i = 0; i < rows.length; i++) if (String(rows[i][2]) === badge && rows[i][10] === 'yes') return true;
   return false;
 }
-// What the game shows for a badge: tries left today, best round, contact given, merch collected.
+// What the game shows for a badge: tries used and left (of the whole event's), best round, contact given, merch collected.
 function badgeState_(rows, badge, collected) {
-  var n = today_(rows, badge).length;
-  return { today: n, left: Math.max(0, PER_DAY - n), best: best_(rows, badge), contact: contactGiven_(rows, badge),
+  var n = triesOf_(rows, badge).length;
+  return { triesUsed: n, left: Math.max(0, TRIES_PER_BADGE - n), best: best_(rows, badge), contact: contactGiven_(rows, badge),
     collected: !!collected };
 }
 
@@ -200,7 +201,7 @@ function switches_() {
 function status_(d) {
   var badge = d.badge ? badgeOf_(d) : '', sw = switches_();
   var out = { ok: true, v: SCRIPT_V, tiers: TIERS, maxScore: MAX_SCORE, open: sw.open, soldOut: sw.soldOut,
-    perDay: PER_DAY, badge: null };
+    perBadge: TRIES_PER_BADGE, badge: null };
   if (badge) out.badge = badgeState_(peek_(TRIES, TRY_HEAD.length), badge, collected_(badge));
   return out;
 }
@@ -208,6 +209,7 @@ function status_(d) {
 // ---- Public: start ----
 // Spends a try: called when the player taps Start (never on scan). A try counts when it starts; quitting never
 // refunds it. The client makes the token; a retried start with the same token never spends a second try.
+// A badge has TRIES_PER_BADGE for the whole event: a new day gives no new tries (Day is only recorded).
 function start_(d) {
   var badge = badgeOf_(d), token = tokenOf_(d), app = appOf_(d), kiosk = d.kiosk === true, sw, r, st, out;
   cap_('start', CAP_STARTS);
@@ -222,8 +224,8 @@ function start_(d) {
     }
     if (collected) return { rows: rows, collected: true, counted: false, reason: 'collected' };
     if (!sw.open) return { rows: rows, collected: false, counted: false, reason: 'paused' };
-    n = today_(rows, badge).length;
-    if (n >= PER_DAY) return { rows: rows, collected: false, counted: false, reason: 'limit' };
+    n = triesOf_(rows, badge).length;
+    if (n >= TRIES_PER_BADGE) return { rows: rows, collected: false, counted: false, reason: 'limit' };
     row = [text_(token), "'" + day, badge, n + 1, now_(), '', '', '', app, kiosk ? 'yes' : '', ''];
     sh.appendRow(row);
     SpreadsheetApp.flush();
@@ -231,7 +233,7 @@ function start_(d) {
     return { rows: rows, collected: false, counted: true, tryNo: n + 1 };
   });
   st = badgeState_(r.rows, badge, r.collected);
-  out = { ok: true, counted: r.counted, perDay: PER_DAY, left: st.left, best: st.best, contact: st.contact,
+  out = { ok: true, counted: r.counted, perBadge: TRIES_PER_BADGE, left: st.left, best: st.best, contact: st.contact,
     collected: st.collected, open: sw.open, soldOut: sw.soldOut };
   if (r.counted) out.tryNo = r.tryNo; else out.reason = r.reason;
   return out;
@@ -264,7 +266,7 @@ function finish_(d) {
   rows = r.rows;
   st = badgeState_(rows, String(r.row[2]), collected_(String(r.row[2])));   // best already includes this round
   return { ok: true, score: Number(r.row[6]), tier: Number(r.row[7]) || 0, best: st.best, contact: st.contact,
-    collected: st.collected, left: st.left, perDay: PER_DAY };
+    collected: st.collected, left: st.left, perBadge: TRIES_PER_BADGE };
 }
 
 // ---- Public: contact ----
@@ -308,7 +310,7 @@ function contact_(d) {
 function check_(d) {
   var badge = badgeOf_(d), claim = findBadge_(peek_(CLAIMS, CLAIM_HEAD.length), badge);
   var st = badgeState_(peek_(TRIES, TRY_HEAD.length), badge, !!claim);
-  var out = { ok: true, used: !!claim, game: st.best, contact: st.contact, today: st.today, earned: earned_(st) };
+  var out = { ok: true, used: !!claim, game: st.best, contact: st.contact, triesUsed: st.triesUsed, earned: earned_(st) };
   if (claim) out.last = used_(claim);
   return out;
 }

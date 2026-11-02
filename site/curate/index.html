@@ -142,7 +142,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   #ladder-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); margin:0; padding:2px 0 4px; overflow:visible; }
   #ladder-list li { min-width:0; }
 }
-#ladder-fine { margin:6px 0 0; font:600 13px/1.35 Inter,sans-serif; color:var(--text); }   /* the tries line: “2 tries a day count for merch.” */
+#ladder-fine { margin:6px 0 0; font:600 13px/1.35 Inter,sans-serif; color:var(--text); }   /* the tries line: “2 tries count for merch.” */
 #ladder-fine:empty { display:none; }
 /* Small links row: the check-in; on the intro: play for fun, not your badge, another app */
 .links { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:0 16px; margin-top:6px; }
@@ -406,7 +406,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 /* v6: one company line under the panel; the stats grid, quote and fine print stay in the markup for rewards.js, hidden */
 #rep-payoff { margin:12px 4px 0; font-size:14px; line-height:1.4; color:#ddd3ff; text-align:center; }
 #rep-payoff:empty, #rep-tries:empty { display:none; }
-#rep-tries { margin:10px 0 0; font:600 13.5px/1.35 Inter,sans-serif; color:var(--text); text-align:center; }   /* “Try 1 of 2 · 1 try left today” */
+#rep-tries { margin:10px 0 0; font:600 13.5px/1.35 Inter,sans-serif; color:var(--text); text-align:center; }   /* “Try 1 of 2 · 1 try left” */
 /* Badge mode: the score's trip to the merch list (rewards.js); empty once saved */
 #rep-save { margin:6px 0 0; font:600 13px/1.35 Inter,sans-serif; color:var(--muted); text-align:center; }
 #rep-save:empty { display:none; }
@@ -472,7 +472,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .ticket-wrap[data-tier=teal] { --face:linear-gradient(150deg,rgba(8,92,84,.92),rgba(28,160,146,.7) 55%,rgba(127,240,224,.5)); --line:rgba(127,240,224,.8); --tc:var(--tier-teal); box-shadow:0 30px 70px -28px rgba(127,240,224,.65); }
 .ticket-wrap[data-tier=purple] { --face:linear-gradient(150deg,rgba(77,0,180,.75),rgba(144,19,254,.55) 55%,rgba(222,79,208,.55)); --line:rgba(242,196,109,.5); --tc:var(--tier-purple); box-shadow:0 30px 70px -28px rgba(222,79,208,.8); }
 .ticket-wrap[data-tier=gold] { --face:linear-gradient(150deg,rgba(112,72,0,.95),rgba(196,142,40,.8) 55%,rgba(242,196,109,.65)); --line:var(--gold); --tc:var(--tier-gold); box-shadow:0 30px 70px -28px rgba(242,196,109,.85); }
-.ticket-wrap[data-tier=claimed], .ticket-wrap[data-tier=expired] { box-shadow:none; }
+.ticket-wrap[data-tier=claimed], .ticket-wrap[data-tier=empty] { box-shadow:none; }
 .ticket-wrap.bump { animation:bump .7s var(--ease); }
 .flipper { position:relative; transform-style:preserve-3d; transition:transform .45s var(--ease); }
 .ticket-wrap.flipped .flipper { transform:rotateY(180deg); }
@@ -486,7 +486,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .face .sheen { position:absolute; inset:0; pointer-events:none; background:linear-gradient(105deg,transparent 38%,rgba(255,255,255,.16) 50%,transparent 62%); animation:sheen 3.6s ease-in-out infinite; }
 .t-top { position:relative; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }   /* the pills drop to their own row before the kicker wraps */
 .t-top .kicker { color:var(--gold); }
-[data-tier=gold] .t-top .kicker, [data-tier=claimed] .t-top .kicker, [data-tier=expired] .t-top .kicker { color:#fff3d6; }
+[data-tier=gold] .t-top .kicker, [data-tier=claimed] .t-top .kicker, [data-tier=empty] .t-top .kicker { color:#fff3d6; }
 .t-meta { display:flex; gap:6px; align-items:center; margin-left:auto; }
 #t-date { font:600 12px Inter,sans-serif; padding:5px 9px; border-radius:999px; background:rgba(0,0,0,.22); white-space:nowrap; }
 #t-live { display:inline-flex; align-items:center; gap:6px; font:700 12px/1 var(--mono); font-variant-numeric:tabular-nums; color:#fff; background:rgba(0,0,0,.28); padding:5px 9px; border-radius:999px; white-space:nowrap; }
@@ -507,9 +507,9 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 [data-tier=gold] #t-tier, [data-tier=gold] #t-note, [data-tier=gold] #t-org:not(:empty), [data-tier=gold] #t-hint,
 [data-tier=teal] #t-tier, [data-tier=teal] #t-note, [data-tier=teal] #t-org:not(:empty), [data-tier=teal] #t-hint { width:fit-content; padding:3px 9px; border-radius:12px; background:rgba(0,0,0,.35); }
 [data-tier=gold] #t-note, [data-tier=teal] #t-note { margin-inline:auto; }   /* #t-note is centred */
-[data-tier=claimed] .face, [data-tier=expired] .face { filter:saturate(.3); }
-[data-tier=claimed] .sheen, [data-tier=expired] .sheen, [data-tier=claimed] #t-live, [data-tier=expired] #t-live, [data-tier=claimed] #t-code, [data-tier=expired] #t-code { display:none; }
-[data-tier=claimed] #t-reward, [data-tier=expired] #t-reward { font:500 14.5px/1.45 Inter,sans-serif; color:#e6defd; }
+[data-tier=claimed] .face, [data-tier=empty] .face { filter:saturate(.3); }
+[data-tier=claimed] .sheen, [data-tier=empty] .sheen, [data-tier=claimed] #t-live, [data-tier=empty] #t-live, [data-tier=claimed] #t-code, [data-tier=empty] #t-code { display:none; }
+[data-tier=claimed] #t-reward, [data-tier=empty] #t-reward { font:500 14.5px/1.45 Inter,sans-serif; color:#e6defd; }
 #tb-code { font:700 13px/1.5 var(--mono); }
 #tb-staff { font-size:12.5px; color:#f0e6ff; }
 #tb-staff-btn { align-self:center; padding:9px 16px; border-radius:12px; border:1px solid rgba(255,255,255,.4); background:rgba(0,0,0,.25); font-weight:700; cursor:pointer; }
@@ -575,7 +575,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <section class="prizes" aria-labelledby="ladder-title">
       <h2 id="ladder-title" class="sr">Booth merch: more points, better merch</h2>
       <ul id="ladder-list"></ul>
-      <p id="ladder-fine">2 tries a day count for merch.</p>   <!-- the tries line; rewards.js may rewrite it -->
+      <p id="ladder-fine">2 tries count for merch.</p>   <!-- the tries line; rewards.js may rewrite it -->
     </section>
     <div class="links">
       <a id="hdr-link" href="/">Booth check-in →</a>

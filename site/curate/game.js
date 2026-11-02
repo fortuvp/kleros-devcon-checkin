@@ -68,7 +68,7 @@
   var sayT = 0;
   var announcedTier = 0;     // highest tier shown this shift: re-crossing a threshold stays quiet
   var focusFirst = false;    // focus the next card that lands (after Start), so focus never sits on <body>
-  // began: begin()'s answer { counted, shiftNo, perDay, reason }; beginning: one in flight.
+  // began: begin()'s answer { counted, shiftNo, tries (counted ones, whole event), reason }; beginning: one in flight.
   var began = null, beginning = false, beginGen = 0;
 
   // ---- Views and announcements ----
@@ -301,7 +301,7 @@
   // rewards.js without begin(): canCount()'s answer, spending nothing.
   function v6Began() {
     var c = rw('canCount') || {};
-    return { ok: true, counted: !!c.counted, shiftNo: c.next || 0, perDay: c.perDay || S.countedPerDay || 2, reason: c.reason || '' };
+    return { ok: true, counted: !!c.counted, shiftNo: c.next || 0, tries: c.tries || S.countedTries || 2, reason: c.reason || '' };
   }
   // After a failed start #intro-scan reads Try again: it retries the start.
   function onIntroScan(e) {
@@ -824,7 +824,7 @@
   }
   // The Go banner names the counted try from begin()'s answer; a v6 booth tablet just says Go.
   function goText() {
-    var b = began, per = (b && b.perDay) || S.countedPerDay || 2;
+    var b = began, per = (b && b.tries) || S.countedTries || 2;
     if (!b || b.reason === 'kiosk') return 'Go!';
     if (!b.counted) return 'Just for fun · Go!';
     return 'Try ' + (b.shiftNo || 1) + ' of ' + per + ' · Go!';

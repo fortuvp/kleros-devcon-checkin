@@ -30,8 +30,9 @@
   function isArr(a) { return Object.prototype.toString.call(a) === '[object Array]'; }   // replies may come from another realm
 
   // ---- Badge mode: state ----
-  // The badge is the player's id; the server's word on it is cached in srv.badge ({ today, left, best, contact,
+  // The badge is the player's id; the server's word on it is cached in srv.badge ({ triesUsed, left, best, contact,
   // collected }, any subset: no `left` = status not answered yet). Kiosk keeps all of it in memory, one visitor.
+  // Tries are the badge's for the whole event (Code.gs TRIES_PER_BADGE): nothing here resets them at midnight.
   var SV = S.server || {};
   var ONLINE = !!SV.endpoint;
   var BKEY = 'kleros_devcon_curate_badge';
@@ -45,12 +46,7 @@
   function Bdg() { return window.CurateBadge || null; }   // looked up at call time: the check script swaps it
   function can(k) { var B = Bdg(); try { return !!(B && B.can && B.can()[k]); } catch (e) { return false; } }
   function paused() { return ONLINE && srv.open === false; }
-  // Tries left hold for one booth day (IST): a page left open past midnight forgets them until status answers.
-  function bs() {
-    var b = srv.badge;
-    if (b && b.left != null && b.day !== istDay()) { delete b.left; delete b.today; }
-    return b || {};
-  }
+  function bs() { return srv.badge || {}; }
   function bestTier() { var b = bd && bs().best; return b ? b.tier || 0 : 0; }
   // An unknown id (say a 'travel' run stored before v4) falls back to the first deck in decks.js order.
   function firstDeck() {
@@ -79,11 +75,12 @@
   // settings.js owns the thresholds (tuned with curate-check --sim): no copy of them lives here.
   var TIERS = S.tiers || [0];
   var NEED = S.checkinNeededFrom || 3;
-  var PER_DAY = S.countedPerDay || 2;
+  // Counted tries for the whole event: per badge (badge mode) or per phone (v6). Never per day.
+  var COUNTED = S.countedTries || 2;
   // v6: the tries copy, said the same way on the title, Results and the ticket.
-  function triesLeft(n) { return n + (n === 1 ? ' try' : ' tries') + ' left today'; }
+  function triesLeft(n) { return n + (n === 1 ? ' try' : ' tries') + ' left'; }
   function count(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many); }   // “1 fake”, “3 fakes”
-  function allUsed() { return PER_DAY === 1 ? 'Today’s try is used' : (PER_DAY === 2 ? 'Both' : 'All ' + PER_DAY) + ' tries used today'; }
+  function allUsed() { return COUNTED === 1 ? 'Your try is used' : (COUNTED === 2 ? 'Both' : 'All ' + COUNTED) + ' tries used'; }
   // settings.js soldOut is the static fallback; in badge mode the Switches tab adds to it.
   function isSoldOut(i) { return i > 0 && ((S.soldOut || []).indexOf(NAMES[i]) > -1 || (ONLINE && srv.soldOut.indexOf(NAMES[i]) > -1)); }
   function baseTier(i) {
@@ -126,7 +123,7 @@
   // One object under one key. Kiosk never touches storage; a blocked browser keeps a memory copy for this visit.
   var st = null, blocked = false;
   function fresh() {
-    return { v: 1, deck: (firstDeck() || {}).id || '', relaxed: false, practiced: {}, lastIds: {}, day: today(), counted: 0,
+    return { v: 1, deck: (firstDeck() || {}).id || '', relaxed: false, practiced: {}, lastIds: {}, counted: 0,
              best: null, runs: [], collected: null };
   }
   function load() {
@@ -140,7 +137,6 @@
     if (!(d.runs instanceof Array)) d.runs = [];
     if (window.CURATE_DECKS && !CURATE_DECKS[d.deck]) d.deck = f.deck;   // a deck that no longer exists
     st = d;
-    rollDay();
   }
   function save() {
     if (KIOSK || !st) return;
@@ -151,14 +147,6 @@
   function sync() {
     if (KIOSK || blocked) { if (!st) load(); return; }   // kiosk and blocked browsers: the memory copy is the truth
     load();
-  }
-  // A new local day: counted shifts and today’s best start again; collected, prefs and lastIds stay.
-  function rollDay() {
-    var t = today();
-    if (st.day === t) return false;
-    st.day = t; st.counted = 0; st.best = null;
-    save();
-    return true;
   }
   function code() {
     var A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', b = [], s = 'C-', i;
@@ -185,14 +173,14 @@
   function lastIds(deckId) { sync(); return (st.lastIds[deckId] || []).slice(); }
   function saveLastIds(deckId, ids) { sync(); st.lastIds[deckId] = [].concat(ids || []); save(); }
   // A booth tablet counts every visitor’s shift in memory; the reset wipes it for the next one.
-  // next: the try number the next counted round gets (game.js builds “Try 1 of 2 · Go!” from it and perDay).
+  // next: the try number the next counted round gets (game.js builds “Try 1 of 2 · Go!” from it and tries).
+  // v6: st.counted is this phone's for the whole event; a new day never resets it.
   function canCount() {
     sync();
-    if (KIOSK) return { counted: true, left: 1, reason: 'kiosk', next: 1, perDay: 1 };
-    rollDay();
-    if (st.collected) return { counted: false, left: 0, reason: 'collected', next: 0, perDay: PER_DAY };
-    if (st.counted >= PER_DAY) return { counted: false, left: 0, reason: 'limit', next: 0, perDay: PER_DAY };
-    return { counted: true, left: PER_DAY - st.counted, reason: '', next: st.counted + 1, perDay: PER_DAY };
+    if (KIOSK) return { counted: true, left: 1, reason: 'kiosk', next: 1, tries: 1 };
+    if (st.collected) return { counted: false, left: 0, reason: 'collected', next: 0, tries: COUNTED };
+    if (st.counted >= COUNTED) return { counted: false, left: 0, reason: 'limit', next: 0, tries: COUNTED };
+    return { counted: true, left: COUNTED - st.counted, reason: '', next: st.counted + 1, tries: COUNTED };
   }
   // Called when the clock starts, so quitting does not refund the shift. Badge mode: the server already counted
   // the try at begin(); this only hands back what begin() got.
@@ -201,12 +189,12 @@
     if (ONLINE) {
       sync(); st.deck = deckId || st.deck; save();
       r = { counted: !!(begun && begun.counted && tok), shiftNo: begun ? begun.shiftNo || 0 : 0,
-            code: begun && begun.counted && tok ? 'C-' + tok.token.slice(0, 6).toUpperCase() : null, perDay: PER_DAY };
+            code: begun && begun.counted && tok ? 'C-' + tok.token.slice(0, 6).toUpperCase() : null, tries: COUNTED };
       if (tok) tok.used = true;   // this round plays the try: never handed out again by begin()
       return r;
     }
     var c = canCount();
-    r = { counted: c.counted, shiftNo: 0, code: null, perDay: c.perDay };
+    r = { counted: c.counted, shiftNo: 0, code: null, tries: c.tries };
     if (KIOSK) { st.best = null; st.runs = []; }   // one kiosk shift is one visitor: never show an earlier best
     st.deck = deckId || st.deck;
     if (c.counted) { st.counted++; r.shiftNo = st.counted; r.code = code(); }
@@ -235,7 +223,7 @@
       if (st.collected) line = 'Merch collected. Play for fun.';
       else if (ci && ci.claimed) line = 'You already checked in at the booth. Play for fun.';
       else if (best && m.state === 'live' && m.t > 0) { line = 'Your ' + baseTier(m.t).name + ' ticket is ready ·'; go = 'Show staff →'; }
-      else if (best) { line = 'Best today: ' + fmt(best.final) + ' pts ·'; go = 'Show ticket →'; }
+      else if (best) { line = 'Your best: ' + fmt(best.final) + ' pts ·'; go = 'Show ticket →'; }
       else if (ci && ci.ok && ci.tier > 0 && ci.tier < 3) {
         n = ci.tier + 1;
         line = 'Checked in: ' + baseTier(ci.tier).name + '. Score ' + fmt(TIERS[n]) + ' for ' + baseTier(n).name + '.';
@@ -300,18 +288,18 @@
       if (paused()) lead = 'Merch is paused right now. Play for fun.';
       else if (bd && bb.collected) lead = 'Merch collected. Play for fun.';
       else if (bd && bb.left === 0) lead = allUsed() + '. Play for fun.';
-      else if (bd && bb.left > 0 && bb.left < PER_DAY) lead = bb.left + ' of ' + fmt(PER_DAY) + ' tries left today.';
-      else lead = 'Your Devcon badge gives ' + fmt(PER_DAY) + ' tries a day for merch.';
+      else if (bd && bb.left > 0 && bb.left < COUNTED) lead = bb.left + ' of ' + fmt(COUNTED) + ' tries left.';
+      else lead = 'Your Devcon badge gives ' + fmt(COUNTED) + ' tries for merch.';
       txt('ladder-fine', lead + rule);
     }
     // A booth tablet has no tries: every round is the next visitor.
     else if (KIOSK) txt('ladder-fine', 'Booth tablet: one try each, up to ' + baseTier(kioskCap()).name + '.' + rule);
     else {
-      // v6: follows today’s tries, so a fun round never passes for a counted one.
+      // v6: follows this phone's tries, so a fun round never passes for a counted one.
       if (c.reason === 'limit') lead = allUsed() + '. Play for fun.';
-      else if (c.counted && c.left < PER_DAY && !(ci && ci.claimed)) lead = c.left + ' of ' + fmt(PER_DAY) + ' tries left today.';   // “1 of 2 tries”: PER_DAY ≥ 2 here
+      else if (c.counted && c.left < COUNTED && !(ci && ci.claimed)) lead = c.left + ' of ' + fmt(COUNTED) + ' tries left.';   // “1 of 2 tries”: COUNTED ≥ 2 here
       // None used, collected or a duplicate check-in: the welcome chip says the rest.
-      else lead = (PER_DAY === 1 ? '1 try a day counts' : fmt(PER_DAY) + ' tries a day count') + ' for merch.';
+      else lead = (COUNTED === 1 ? '1 try counts' : fmt(COUNTED) + ' tries count') + ' for merch.';
       txt('ladder-fine', lead + rule);
     }
   }
@@ -376,7 +364,6 @@
   function tierOf(b) { return b.tier != null ? b.tier : tierFor(b.final || 0); }
   function finishShift(sum) {
     sync();
-    rollDay();
     sum = sum || {};
     var run = {}, k, old = st.best, nb, oldT;
     for (k in sum) if (sum.hasOwnProperty(k)) run[k] = sum[k];
@@ -505,16 +492,13 @@
     return c && c.counted ? 'Play again' : 'Play for fun';
   }
   function isFun(sum) { return ONLINE ? !sum.counted : !sum.counted && !KIOSK; }
-  // The booth day in India (Devcon VIII is in Mumbai), as Code.gs counts days.
-  function istDay() { return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); }
   function v6Tier() { var m = model(); return m.state === 'live' ? m.t : 0; }
   // Why a round was just for fun, and what to do. v6 rounds that carry no reason: collected or out of tries.
   function funWhy(sum) {
     var r = sum.reason || (ONLINE ? '' : st.collected ? 'collected' : 'limit'), bt;
     if (r === 'limit') {
       bt = ONLINE ? bestTier() : v6Tier();
-      return allUsed() + '.' + (bt > 0 ? ' Your ' + baseTier(bt).name + ' ticket still counts.' :
-        istDay() < (S.lastDay || '9999') ? ' New tries tomorrow.' : '');
+      return allUsed() + '.' + (bt > 0 ? ' Your ' + baseTier(bt).name + ' ticket still counts.' : '');
     }
     if (r === 'collected') return ONLINE ? 'This badge already got its merch.' : 'You already collected merch on this phone.';
     if (r === 'nobadge') return 'No badge scanned. Scan it next round to play for merch.';
@@ -523,20 +507,20 @@
     if (r === 'nocrypto') return 'This browser can’t read badges, so this round was for fun.';
     return 'You picked Play for fun. Tap Start next time to play for merch.';
   }
-  // “Try 1 of 2 · 1 try left today”, “Both tries used today”, or why this round was just for fun.
+  // “Try 1 of 2 · 1 try left”, “Both tries used”, or why this round was just for fun.
   // v6: left comes from storage now, so a try another tab started since is already taken off.
   function triesText(sum, c) {
     var left, bt;
     if (!sum) return '';
     if (isFun(sum)) return funWhy(sum);
     if (ONLINE) {
-      left = bs().left != null ? bs().left : Math.max(0, PER_DAY - (sum.shiftNo || 1));
+      left = bs().left != null ? bs().left : Math.max(0, COUNTED - (sum.shiftNo || 1));
       bt = bestTier();
-      return 'Try ' + (sum.shiftNo || 1) + ' of ' + PER_DAY + ' · ' + (bt > rs.g ? 'Your best, ' + baseTier(bt).name +
+      return 'Try ' + (sum.shiftNo || 1) + ' of ' + COUNTED + ' · ' + (bt > rs.g ? 'Your best, ' + baseTier(bt).name +
         ', still counts.' : left > 0 ? triesLeft(left) : allUsed());
     }
     if (KIOSK) return '';
-    if (c.left > 0) return 'Try ' + (sum.shiftNo || 1) + ' of ' + PER_DAY + ' · ' + triesLeft(c.left);
+    if (c.left > 0) return 'Try ' + (sum.shiftNo || 1) + ' of ' + COUNTED + ' · ' + triesLeft(c.left);
     return allUsed();
   }
   var repSum = null;   // the round on Results, for the tries line when another tab changes the count
@@ -643,12 +627,12 @@
   function model() {
     if (ONLINE) return modelB();
     sync();
-    rollDay();
     var ci = checkin(), best = st.best, m = { state: 'live', ci: ci, best: best, t: 0, g: 0, pending: 0,
       source: 'game', soldFrom: -1, code: '' }, g, c, t;
     if (st.collected) { m.state = 'collected'; m.t = st.collected.tier || 0; m.code = st.collected.code || ''; return m; }
     if (ci && ci.claimed) { m.state = 'dup'; return m; }
-    if (!best || best.day !== today()) { m.state = 'expired'; m.best = best || lastCountedRun(); return m; }
+    // v6: the best counted round of the whole event is the ticket (no daily expiry); none yet: no ticket.
+    if (!best) { m.state = 'empty'; m.best = lastCountedRun(); return m; }
     g = tierOf(best);
     m.g = g;
     if (g >= NEED && !(ci && ci.ok)) { m.pending = g; g = NEED - 1; }
@@ -714,10 +698,16 @@
     if (m.soldFrom > 0) return soldNote(m);
     return m.source === 'checkin' ? 'From your check-in' : 'From your round';
   }
+  // Tries last the whole event, so a best round from another day says which day (the front shows today’s date).
+  function dayOf(b) {
+    if (!b.day || b.day === today()) return '';
+    try { return new Date(b.at).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) + ' · '; }
+    catch (e) { return b.day + ' · '; }
+  }
   function renderBack(m) {
     var b = m.best, ci = m.ci, live = m.state === 'live', staff = live && !KIOSK && m.t > 0;   // Everyone: nothing to stamp
-    txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Try ' + (b.shiftNo || 1) + ' of ' + PER_DAY + ' · ') +
-        hhmm(b.at) + ' · ' + deckOf(b.deck).client);
+    txt('tb-shift', !b ? '' : (KIOSK ? '' : 'Try ' + (b.shiftNo || 1) + ' of ' + COUNTED + ' · ') +
+        dayOf(b) + hhmm(b.at) + ' · ' + deckOf(b.deck).client);
     txt('tb-stats', !b ? '' : fmt(b.final) + ' pts · ' + fmt(b.caught) + ' of ' + count(b.fakesSeen, 'fake', 'fakes') + ' · ' +
         count(b.evidence, 'part', 'parts') + ' spotted · trust ' + (b.trust == null ? 100 : b.trust) + '%');
     txt('tb-code', !b || !live ? '' : 'Game code ' + (b.code || '') + (ci && ci.ok ? ' · Check-in ' + ci.ticket : ''));
@@ -732,7 +722,7 @@
         thanks = 'Thanks for playing. Play again for fun.', who, ck;
     current = m;
     if (tk) {
-      tk.setAttribute('data-tier', live ? NAMES[m.t] : m.state === 'expired' ? 'expired' : 'claimed');
+      tk.setAttribute('data-tier', live ? NAMES[m.t] : m.state === 'empty' ? 'empty' : 'claimed');
       if (tk.classList.contains('flipped')) unfocusFace(tk);
       tk.classList.remove('flipped');
       if (!tk.hasAttribute('tabindex')) tk.setAttribute('tabindex', '0');
@@ -761,7 +751,8 @@
       txt('t-reward', 'You already checked in at the booth. One item per person.');
       txt('t-hint', thanks); txt('t-note', '');
     } else {
-      txt('t-tier', 'From a previous day'); txt('t-reward', ''); txt('t-hint', 'Play today for a new ticket.');
+      // A try spent on a round that never finished (a reload) leaves no best: say so once the tries are gone.
+      txt('t-tier', 'No ticket yet'); txt('t-reward', ''); txt('t-hint', c.counted ? 'Play a round for merch.' : allUsed() + '.');
       txt('t-note', '');
     }
     vis('t-note', !!($('t-note') || {}).textContent);
@@ -827,8 +818,8 @@
     txt('t-org', b ? fmt(b.score) + ' pts' + tail : '');
     ck = vis('t-code', coded || lock);
     if (ck) { ck.textContent = lock ? '······' : coded ? m.code : ''; ck.classList.remove('holding'); ck.style.setProperty('--hold', '0'); }
-    // The back: which try, when and which app; staff use the desk, so no stamp here.
-    txt('tb-shift', b ? ['Try ' + (b.tryNo || 1) + ' of ' + PER_DAY, b.at || '', appName(b.app)].filter(Boolean).join(' · ') : '');
+    // The back: which try, which day and time (tries last the event) and which app; staff use the desk, so no stamp here.
+    txt('tb-shift', b ? ['Try ' + (b.tryNo || 1) + ' of ' + COUNTED, b.day || '', b.at || '', appName(b.app)].filter(Boolean).join(' · ') : '');
     txt('tb-stats', b ? fmt(b.score) + ' pts' : '');
     txt('tb-code', coded ? 'Game code ' + m.code + tail : '');
     vis('tb-staff', false); vis('tb-staff-btn', false);
@@ -875,7 +866,7 @@
   }
 
   // ---- Ticket mechanics: clock, flip, hold, staff sheet, undo, kiosk ----
-  var clockTimer = 0, renderedDay = '', nextLeft = 0, undoTimer = 0, staffPrev = null, staffFor = null;
+  var clockTimer = 0, nextLeft = 0, undoTimer = 0, staffPrev = null, staffFor = null;
   var hold = { on: false, t0: 0, raf: 0 }, suppressFlip = false, holdEndAt = -1e9, myStamp = null;
   function now() { return window.performance && performance.now ? performance.now() : Date.now(); }
   // The clock keeps ticking under reduced motion: it is the live proof against screenshots.
@@ -891,7 +882,6 @@
   function onTick() {
     var v = $('ticketv');
     if (!v || v.hidden) { stopTicket(); return; }   // left the view: the interval goes with it
-    if (!ONLINE && today() !== renderedDay) { renderedDay = today(); renderTicket(); }   // v6, past midnight: no live ticket
     tickClock();
     if (KIOSK) {
       if (current && current.state === 'locked') return;   // badge mode: the contact step holds the tablet (armLock)
@@ -920,7 +910,6 @@
       try { ct.focus({ preventScroll: true }); } catch (e) { ct.focus(); }
       try { cx.scrollIntoView({ block: 'nearest' }); } catch (e) { /* old browsers: no options */ }
     } else if (tk) { try { tk.focus({ preventScroll: true }); } catch (e) { tk.focus(); } }
-    renderedDay = today();
     nextLeft = Math.round((S.kioskResetMs || 20000) / 1000);
     if (KIOSK) txt('t-next', 'Next curator in ' + nextLeft + ' s');
     clockTimer = setInterval(onTick, 1000);
@@ -1125,9 +1114,8 @@
   function merge(b) {
     var s = srv.badge || (srv.badge = {});
     if (!b) return;
-    ['today', 'left', 'best', 'contact', 'collected'].forEach(function (k) { if (b[k] !== undefined) s[k] = b[k]; });
-    if (b.left != null && b.today == null) s.today = Math.max(0, PER_DAY - b.left);
-    if (b.left != null) s.day = istDay();
+    ['triesUsed', 'left', 'best', 'contact', 'collected'].forEach(function (k) { if (b[k] !== undefined) s[k] = b[k]; });
+    if (b.left != null && b.triesUsed == null) s.triesUsed = Math.max(0, COUNTED - b.left);
   }
   // Whatever is on screen catches up with the server's word.
   function refreshViews() {
@@ -1203,7 +1191,8 @@
 
   // ---- Begin a round ----
   // Decides whether the next round counts. Badge mode, not for fun: POST start (a try counts when it starts;
-  // quitting never refunds it). done({ ok, counted, shiftNo, perDay, reason }) or done({ ok: false, error }).
+  // quitting never refunds it). done({ ok, counted, shiftNo, tries, reason }) or done({ ok: false, error }).
+  // tries: the counted tries for the whole event (the server's perBadge in badge mode).
   function funReason() {
     var b = bs();
     if (!can('hash')) return 'nocrypto';
@@ -1219,13 +1208,13 @@
     done = typeof done === 'function' ? done : function () {};
     if (!ONLINE) {   // v6: spends nothing here; startShift spends the try when the clock starts
       c = canCount();
-      done({ ok: true, counted: c.counted, shiftNo: c.next, perDay: c.perDay, reason: c.reason });
+      done({ ok: true, counted: c.counted, shiftNo: c.next, tries: c.tries, reason: c.reason });
       return;
     }
     if (!(opts && opts.fun) && held()) { renderIntro(); done(begun); return; }
     tok = null; begun = null;
     if (opts && opts.fun) {
-      r = { ok: true, counted: false, shiftNo: 0, perDay: PER_DAY, reason: funReason() };
+      r = { ok: true, counted: false, shiftNo: 0, tries: COUNTED, reason: funReason() };
       if (r.reason === 'offline') refreshStatus(true);   // so the intro and Results show the real tries left
       begun = r;
       done(r);
@@ -1255,7 +1244,7 @@
         return;
       }
       tok = { token: token, tryNo: j.tryNo || 1, hash: hash };
-      begun = { ok: true, counted: true, shiftNo: tok.tryNo, perDay: j.perDay || PER_DAY, reason: '' };
+      begun = { ok: true, counted: true, shiftNo: tok.tryNo, tries: j.perBadge || COUNTED, reason: '' };
       renderIntro();
       done(begun);
     });
@@ -1289,7 +1278,7 @@
   function renderIntro() {
     var sec = $('intro'), s = introState(), b = bs(), line = bd ? 'Badge …' + bd.tail : '', note = '', B = Bdg(),
         more = (b.left > 0 || held()) && !paused(), name = baseTier(modelB().t).name, c,   // the ticket's tier (sold out: lower)
-        tryN = ' · Try ' + (held() ? tok.tryNo : Math.min(PER_DAY, (b.today || 0) + 1)) + ' of ' + PER_DAY;
+        tryN = ' · Try ' + (held() ? tok.tryNo : Math.min(COUNTED, (b.triesUsed || 0) + 1)) + ' of ' + COUNTED;
     if (!sec || sec.hidden) return;
     ['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun', 'intro-change'].forEach(function (id) { btn(id, ''); });
     if (s === 'v6') {
@@ -1325,7 +1314,7 @@
       note = 'No camera here. Play on the booth tablet, or play for fun.';
       btn('intro-fun', 'Play for fun', 'primary');
     } else {
-      note = 'Your Devcon badge gives ' + fmt(PER_DAY) + ' tries a day for merch.';
+      note = 'Your Devcon badge gives ' + fmt(COUNTED) + ' tries for merch.';
       btn('intro-scan', 'Scan your badge', 'primary');
       btn('intro-fun', 'Play for fun');
       // iPhones have no BarcodeDetector: fetch the reader while the visitor reads the examples.
@@ -1447,7 +1436,7 @@
     } else if (b && !b.hidden) { renderHeader(); renderWelcome(); renderLadder(); refreshStatus(false); }   // another tab’s try changes the tries line
     else if (r && !r.hidden && ONLINE) { if (rs.sum) renderLines(); }
     else if (r && !r.hidden) { m = canCount(); txt('again', againText(m)); slot('rep-tries', 'rep-fine', triesText(repSum, m)); }
-    else { renderIntro(); if ($('intro') && !$('intro').hidden) refreshStatus(false); }   // back after midnight: today's tries
+    else { renderIntro(); if ($('intro') && !$('intro').hidden) refreshStatus(false); }   // back later: the badge's tries, as the server has them
   }
   function init(ui) {
     var noop = function () {};

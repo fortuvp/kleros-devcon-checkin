@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Curate game checks: content schema and facts, round dealing, ES5 lint, user copy (banned words, web3 words
 // outside the Crypto exchange app, and Curate’s jargon on the play screen) and file sizes; with --sim, the §2.8
-// tier simulation (v5 pick model, v6: 2 tries a day). Badge tries (2 Nov): the booth web app
+// tier simulation (v5 pick model; 2 Nov: 2 counted tries per badge for the whole event). Badge tries (2 Nov): the booth web app
 // (apps-script/staff-desk/Code.gs) runs here against an in-memory Sheets stub, and rewards.js, earn.js and badge.js
 // run against it in fake pages.
 // Node 22, no dependencies. It runs the very settings.js, decks.js and rules.js the phones load.
@@ -9,7 +9,7 @@
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
 //   node scripts/curate-check.js --fit    the same simulation, plus the tier thresholds that would hit TARGET
 // Exits non-zero on any failure. Run it after every change to settings.js, decks.js or rules.js.
-// v5: the tiers were refitted with --fit for 60 s rounds and pick mode; v6: refitted again for 2 tries a day. A deliberate retune (README stock
+// v5: the tiers were refitted with --fit for 60 s rounds and pick mode; v6: refitted again for 2 counted tries. A deliberate retune (README stock
 // runbook) moves the tier mix away from §2.8 on purpose: the --sim table then shows the new shares; update
 // TARGET below once the team agrees on them.
 'use strict';
@@ -42,8 +42,8 @@ var S = W.CURATE_SETTINGS, D = W.CURATE_DECKS, R = W.CurateRules;
 // ---- Settings ----
 function checkSettings() {
   var keys = ['v', 'seconds', 'entries', 'fakes', 'points', 'trust',
-    'tiers', 'checkinNeededFrom', 'countedPerDay', 'kioskMaxTier', 'kioskResetMs', 'kioskIdleMs', 'staffHoldMs',
-    'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch', 'server', 'badge', 'contact', 'lastDay'], i, cfg, fm,
+    'tiers', 'checkinNeededFrom', 'countedTries', 'kioskMaxTier', 'kioskResetMs', 'kioskIdleMs', 'staffHoldMs',
+    'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch', 'server', 'badge', 'contact'], i, cfg, fm,
     tk = ['teal', 'purple', 'gold'];
   if (!S) return fail('settings.js: window.CURATE_SETTINGS is missing');
   keys.forEach(function (k) { if (S[k] === undefined) fail('settings.js: missing ' + k); });
@@ -59,7 +59,10 @@ function checkSettings() {
     if (typeof bg.typed !== 'boolean') fail('settings.js: badge.typed must be true or false');
     if (typeof ct.monthly !== 'string' || !ct.monthly) fail('settings.js: contact.monthly is empty');
   })(S.server || {}, S.badge || {}, S.contact || {});
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(S.lastDay || '')) fail('settings.js: lastDay must be yyyy-MM-dd');
+  // 2 Nov (user): 2 tries per ticket, the Devcon badge, for the whole event. Nothing counts tries per day any more.
+  ['countedPerDay', 'lastDay'].forEach(function (k) {
+    if (S[k] !== undefined) fail('settings.js: ' + k + ' is gone (countedTries is per badge or phone for the whole event, never per day)');
+  });
   ['catch', 'evidence', 'letThrough', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus'].forEach(function (k) {
     if (typeof S.points[k] !== 'number') fail('settings.js: points.' + k + ' is not a number');
   });
@@ -84,8 +87,8 @@ function checkSettings() {
     if (flawless < S.tiers[3]) fail('settings.js: a flawless round scores ' + flawless + ', below Gold (' + S.tiers[3] + ')');
   })(S.points);
   if (S.ranks.length !== 4) fail('settings.js: ranks needs 4 names');
-  // v6 §4: 2 tries a day count for merch, said on the title, the Go banner, Results and the ticket.
-  if (S.countedPerDay !== 2) warn('settings.js: countedPerDay is ' + S.countedPerDay + '; the v6 copy and the sim assume 2 tries');
+  // 2 tries count for merch (whole event), said on the title, the intro, the Go banner, Results and the ticket.
+  if (S.countedTries !== 2) warn('settings.js: countedTries is ' + S.countedTries + '; the copy and the sim assume 2 tries');
   if (S.checkinNeededFrom < 1 || S.checkinNeededFrom > 4) fail('settings.js: checkinNeededFrom must be 1..4');
   S.soldOut.forEach(function (k) { if (tk.indexOf(k) < 0) fail('settings.js: soldOut has unknown tier ' + k); });
   tk.forEach(function (k) {
@@ -755,6 +758,20 @@ var JARGON = [[word('challeng\\w*'), 'challenge'], [word('verif\\w*'), 'verify']
   [word('rejected'), 'rejected'], [word('jurors?'), 'jurors'], [word('bount(?:y|ies)'), 'bounty'],
   [word('deposits?'), 'deposit'], [word('stak(?:e|es|ed)'), 'stake'], [word('pending'), 'pending'],
   [word('submitted'), 'submitted']];
+// 2 Nov (user): “2 tries per ticket”: a badge (or, without the sheet script, a phone) has 2 counted tries for the
+// whole event. No copy may limit or renew tries by the day; the stock lines (“Gone today”) are about stock, not tries.
+var DAILY = [[/\btr(?:y|ies)\b[^.]*\b(?:a|per|each|every) day\b/i, 'tries a day'],
+  [/\b(?:a|per|each|every) day\b[^.]*\btr(?:y|ies)\b/i, 'a day … tries'], [/\btr(?:y|ies)\b[^.]*\btoday\b/i, 'tries … today'],
+  [/\btoday(?:[’']s)? tr(?:y|ies)\b/i, 'today’s tries'], [/\btomorrow\b/i, 'tomorrow'], [/\bnew tries\b/i, 'new tries'],
+  [/\bdaily tr(?:y|ies)\b/i, 'daily tries']];
+function daily(t) { for (var i = 0; i < DAILY.length; i++) if (DAILY[i][0].test(t)) return DAILY[i][1]; return ''; }
+// The tries lines are built from fragments (' left', ' · Go!'), so a fragment saying “today” or “a day” fails on
+// its own in the game’s code and markup, wherever the “try” is. The deck data is exempt (“a day trip”, “Today
+// it’s Tokyo”), and so is stock (“Gone today”, “gone for today”): staff restock by the day.
+function dayWord(t) {
+  t = t.replace(/\bgone (?:for )?today\b/gi, ' ');
+  return /\btoday\b/i.test(t) ? 'today' : /\b(?:a|per|each|every) day\b/i.test(t) ? 'a day' : /\bdaily\b/i.test(t) ? 'daily' : '';
+}
 var IDENT = /^[a-z_$][\w$.\-\/:]*$/;   // ids, keys, classes, paths, mode names
 // Web3 words allowed in decks.js: every string the tokens deck holds (its entries, list, pick card and copy).
 // The same words anywhere else (another deck, game.js, rewards.js, index.html) still fail.
@@ -777,6 +794,10 @@ function checkCopy() {
       return;
     }
     BANNED.forEach(function (r) { if (r[0].test(t)) { hits++; fail(where + ': user copy says ' + r[1] + ': ' + t.trim().slice(0, 70)); } });
+    if (daily(t)) { hits++; fail(where + ': user copy counts tries by the day (' + daily(t) + '): ' + t.trim().slice(0, 70)); }
+    else if (/^site\/curate\/(?!decks\.js)/.test(where) && dayWord(t)) {
+      hits++; fail(where + ': game copy says ' + dayWord(t) + ' (tries are for the whole event; only stock is per day): ' + t.trim().slice(0, 70));
+    }
     // v4 (user feedback): the title shows what an app needs, so the v3 line is retired everywhere.
     if (/spot the fakes/i.test(t)) warn(where + ': the retired v3 line “Spot the fakes” is still in user copy');
     if (onPlay) {
@@ -830,6 +851,12 @@ function checkCopy() {
   fs.readdirSync(DIR).filter(function (f) { return /\.(js|html)$/.test(f); }).forEach(function (f) {
     if (/clean list/i.test(fs.readFileSync(path.join(DIR, f), 'utf8'))) fail('site/curate/' + f + ': the retired line “Clean list” is still there');
   });
+  // The docs and the server say the same (2 Nov): no retired per-day wording about tries ("not 2 a day" is fine).
+  ['README.md', 'docs/DEPLOY.md', 'apps-script/staff-desk/README.md', 'apps-script/staff-desk/Code.gs'].forEach(function (f) {
+    var src = fs.existsSync(path.join(ROOT, f)) ? fs.readFileSync(path.join(ROOT, f), 'utf8') : '', m,
+      re = /(?:\d|two|counted) tries (?:a|each|every|per) day|tries (?:per|each|every) day|tries daily|per (?:badge|phone) per day|daily tries|new tries tomorrow|tr(?:y|ies) left today|tries used today|countedPerDay|PER_DAY|perDay|lastDay/ig;
+    while ((m = re.exec(src))) fail(f + ':' + src.slice(0, m.index).split('\n').length + ': says tries are per day (' + m[0] + '); they are per badge for the whole event');
+  });
   console.log('User copy\n  ' + n + ' strings and text runs in ' + (files.length + 3) + ' files' +
     (hits ? ': ' + hits + ' banned, web3 or jargon word(s)' : ': no job words, nothing web3') + ' (' + allowed +
     ' tokens-deck strings may name tokens; ' + play + ' play-screen strings free of Curate jargon)');
@@ -865,7 +892,7 @@ function jpegHeight(buf) {
   }
   return 0;
 }
-// Badge tries (2 Nov): settings.js 4.8 KB (the server, badge, contact and lastDay keys); rules.js 9.2 KB (intro());
+// Badge tries (2 Nov): settings.js 4.8 KB (the server, badge and contact keys; lastDay went with daily tries); rules.js 9.2 KB (intro());
 // earn.js is now the contact step (6 KB / 2.5 KB gz); game.js 58 KB / 18.5 KB gz (intro, scanner sheet);
 // index.html 77 KB / 22 KB gz (intro, scanner, contact, privacy notice); badge.js is new (10 KB / 4 KB gz).
 // rewards.js 78 KB / 25 KB gz, above the spec’s 56 / 18.5: it holds both modes (v6 per phone and badge mode: tries,
@@ -1040,7 +1067,8 @@ function checkServer() {
   // 2. In sync with settings.js and decks.js: the server derives the tier itself, from the same thresholds.
   H = gsHarness();
   ok(JSON.stringify(H.ctx.TIERS) === JSON.stringify(S.tiers), 'TIERS ' + JSON.stringify(H.ctx.TIERS) + ' differ from settings.js tiers ' + JSON.stringify(S.tiers));
-  ok(H.ctx.PER_DAY === S.countedPerDay, 'PER_DAY differs from settings.js countedPerDay');
+  ok(H.ctx.TRIES_PER_BADGE === S.countedTries, 'TRIES_PER_BADGE differs from settings.js countedTries');
+  ok(H.ctx.PER_DAY === undefined && typeof H.ctx.today_ !== 'function', 'PER_DAY or today_ is back: tries are per badge for the whole event');
   ok(H.ctx.MAX_SCORE === maxScore() && H.ctx.MAX_SCORE >= S.tiers[3], 'MAX_SCORE ' + H.ctx.MAX_SCORE + ', the best round under settings.js is ' + maxScore());
   ok(JSON.stringify(H.ctx.APPS) === JSON.stringify(Object.keys(D)), 'APPS differ from the deck ids');
   ok(H.ctx.CONTACTS_SHEET_ID === '1LzRQ9IizuRMrqWAclFuY2v0bONkgxb2ezvXPbVsBtIc' && H.ctx.SHEET_ID === '', 'sheet ids');
@@ -1071,32 +1099,54 @@ function checkServer() {
   ok(H.call({ action: 'check', badge: A }).error === 'wrongkey' && H.call({ action: 'stats', key: 'WRONG' }).error === 'wrongkey' &&
     H.call({ action: 'claim', badge: A, tier: 'teal' }).error === 'wrongkey', 'staff actions without the key');
   ok(H.call({ action: 'status' }).ok === true, 'status needs no key');
-  // 3. Two counted tries a day, a third refused; a retried token is the same try; a token is one badge's.
+  // 3. Two counted tries per badge for the whole event, a third refused; a retried token is the same try; a token
+  // is one badge's.
   t1 = tok(); t2 = tok();
   r = start(H, A, t1);
-  ok(r.ok && r.counted && r.tryNo === 1 && r.left === 1 && r.open === true && Array.isArray(r.soldOut), 'first start ' + JSON.stringify(r));
+  ok(r.ok && r.counted && r.tryNo === 1 && r.left === 1 && r.perBadge === 2 && r.perDay === undefined && r.open === true &&
+    Array.isArray(r.soldOut), 'first start ' + JSON.stringify(r));
   r = start(H, A, t2, { app: 'evil' });
   ok(r.counted && r.tryNo === 2 && r.left === 0, 'second start ' + JSON.stringify(r));
   ok(H.tab('Tries').rows[2][8] === '' && !(H.tab('Tries').rows[1][1] instanceof Date), 'an unknown app is stored, or Day is not text');
   r = start(H, A);
-  ok(r.ok && r.counted === false && r.reason === 'limit' && H.rows('Tries') === 3, 'a third start the same day ' + JSON.stringify(r));
+  ok(r.ok && r.counted === false && r.reason === 'limit' && r.left === 0 && H.rows('Tries') === 3, 'a third start ' + JSON.stringify(r));
   r = start(H, A, t1);
   ok(r.counted && r.tryNo === 1 && H.rows('Tries') === 3, 'a retried token spent a try ' + JSON.stringify(r));
   ok(start(H, B, t1).error === 'badtoken', 'a token reused with another badge');
   ok(start(H, 'nothex').error === 'badbadge' && start(H, A, 'BAD').error === 'badtoken', 'bad badge or token');
-  // 4. Booth days are IST days: 23:59 and 00:01 IST are two days.
+  // 4. A new day gives no new tries (2 Nov, user: 2 tries per ticket): not at 00:01 IST, not on the last booth day.
+  // A badge with one try on day 1 gets try 2 on day 2, then none. Day is still written, as a record.
   r = gsHarness(); r.clock = Date.parse('2026-11-03T18:29:00Z');
   start(r, A); start(r, A);
-  ok(start(r, A).reason === 'limit', 'the day’s limit at 23:59 IST');
+  ok(start(r, A).reason === 'limit', 'the limit at 23:59 IST on day 1');
   r.clock = Date.parse('2026-11-03T18:31:00Z');
   tmp = start(r, A);
-  ok(tmp.counted && tmp.tryNo === 1, 'a start at 00:01 IST is still the old day ' + JSON.stringify(tmp));
+  ok(tmp.ok && tmp.counted === false && tmp.reason === 'limit' && tmp.left === 0, 'a new day (00:01 IST) gave new tries ' + JSON.stringify(tmp));
+  r.clock = Date.parse('2026-11-06T06:00:00Z');
+  tmp = r.call({ action: 'status', badge: A });
+  ok(start(r, A).reason === 'limit' && tmp.badge && tmp.badge.left === 0 && tmp.badge.triesUsed === 2 && tmp.perBadge === 2 &&
+    r.rows('Tries') === 3, 'the last booth day gave new tries ' + JSON.stringify(tmp));
+  r.clock = Date.parse('2026-11-03T06:00:00Z'); start(r, B);
+  r.clock = Date.parse('2026-11-04T06:00:00Z'); tmp = start(r, B);
+  ok(tmp.counted && tmp.tryNo === 2 && tmp.left === 0 && start(r, B).reason === 'limit', 'one try on day 1, then day 2 ' + JSON.stringify(tmp));
+  // The Day record is the IST day: a fresh badge's try at 00:01 IST (18:31Z) is dated the next day.
+  r.clock = Date.parse('2026-11-03T18:31:00Z'); start(r, 'd'.repeat(64));
+  tmp = r.tab('Tries').rows.slice(1).map(function (x) { return x[1]; });
+  ok(tmp.join() === '2026-11-03,2026-11-03,2026-11-03,2026-11-04,2026-11-04', 'the Day column is not the IST day, kept as a record ' + JSON.stringify(tmp));
+  // Stats' handouts today (stock pacing) roll over at 00:01 IST too: a claim at 23:59 IST is yesterday's.
+  r = gsHarness(); r.ctx.staffSetup(); r.clock = Date.parse('2026-11-03T18:29:00Z');
+  claim(r, E, 'teal', 'claimide0001', { ticket: 'K-DAY001' });
+  r.clock = Date.parse('2026-11-03T18:31:00Z');
+  claim(r, F, 'teal', 'claimidf0001', { ticket: 'K-DAY002' });
+  tmp = r.call({ action: 'stats', key: r.props.STAFF_KEY });
+  ok(r.rows('Badge claims') === 3 && tmp.ok && tmp.today && tmp.today.teal === 1, 'stats today is not the IST day ' + JSON.stringify(tmp));
   // 5. finish: one score per token, inside the time window, never above the best possible round.
   H.clock += 5000;
   ok(H.call({ action: 'finish', token: t1, score: 500 }).error === 'early', 'a finish 5 s after its start');
   H.clock += 3 * HOUR;
   r = H.call({ action: 'finish', token: t1, score: 615, tier: 3, relaxed: false, endedBy: 'done' });
-  ok(r.ok && r.score === 615 && r.tier === 2 && r.best && r.best.score === 615, 'the tier comes from the score, not the body ' + JSON.stringify(r));
+  ok(r.ok && r.score === 615 && r.tier === 2 && r.best && r.best.score === 615 && r.perBadge === 2 && r.left === 0,
+    'the tier comes from the score, not the body ' + JSON.stringify(r));
   ok(r.best && /^C-[A-Z0-9]{6}$/.test(r.best.code) && r.best.code === 'C-' + t1.slice(0, 6).toUpperCase(), 'best.code ' + (r.best || {}).code);
   H.clock += 7 * HOUR;
   ok(H.call({ action: 'finish', token: t1, score: 615 }).ok === true, 'the same finish again (7 h later) is not ok');
@@ -1109,7 +1159,8 @@ function checkServer() {
   // 6. status: the best across days, with its game code and time.
   r = H.call({ action: 'status', badge: A });
   ok(r.ok && r.v && r.tiers.join() === S.tiers.join() && r.maxScore === maxScore() && r.badge && r.badge.best && r.badge.best.score === 615 &&
-    r.badge.best.at === '13:30' && r.badge.left === 0 && r.badge.contact === false && r.badge.collected === false, 'status ' + JSON.stringify(r));
+    r.badge.best.at === '13:30' && r.badge.left === 0 && r.badge.triesUsed === 2 && r.badge.today === undefined && r.perBadge === 2 &&
+    r.badge.contact === false && r.badge.collected === false, 'status ' + JSON.stringify(r));
   ok(H.call({ action: 'status' }).badge === null, 'status without a badge');
   // 7. contact: only for a badge with an earned round, one contacts row per badge, nothing of it in the badge sheet.
   ok(H.call({ action: 'contact', badge: C, contact: 'ana@example.org', id: 'abcdefabcdef' }).error === 'notry', 'a contact for a badge with no earned round');
@@ -1135,7 +1186,8 @@ function checkServer() {
   ok(tmp.indexOf('@') < 0 && tmp.indexOf('ana@example.org') < 0 && tmp.indexOf('ana_k') < 0, 'the badge sheet holds a contact');
   ok(H.writes.indexOf('\'\t=1') > -1, 'the event \\t=1 is not written as \'\\t=1');
   r = H.call({ action: 'check', key: H.props.STAFF_KEY, badge: A });
-  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === 615, 'check after the contact ' + JSON.stringify(r));
+  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === 615 && r.triesUsed === 2 &&
+    r.today === undefined, 'check after the contact ' + JSON.stringify(r));
   // 9. claim: one item per badge, up to the earned tier; a check-in ticket (K-) allows any open tier, once.
   ok(claim(H, A, 'gold', 'claimida0001').error === 'notearned', 'Gold claimed on a Purple badge');
   r = claim(H, A, 'purple', 'claimida0002', { staff: '=1+1', how: 'typed' });
@@ -1167,11 +1219,11 @@ function checkServer() {
   ok(!H.cache.switches, 'a hand edit of Switches keeps the cached switches');
   H.ctx.showStaffKey();
   ok(H.alerts.some(function (a) { return a.indexOf(H.props.STAFF_KEY) > -1; }), 'showStaffKey');
-  // Day cells Sheets turned into Dates still compare as booth days.
+  // Rows of earlier days count, whatever their Day cell holds (text, or a Date Sheets made of it).
   r = gsHarness(); r.ctx.staffSetup();
   start(r, A); start(r, A);
-  r.tab('Tries').rows[1][1] = new Date('2026-11-03T00:00:00+05:30'); r.tab('Tries').rows[2][1] = new Date('2026-11-03T00:00:00+05:30');
-  ok(start(r, A).reason === 'limit', 'a Day stored as a Date is not today’s');
+  r.tab('Tries').rows[1][1] = new Date('2026-11-01T00:00:00+05:30'); r.tab('Tries').rows[2][1] = '2026-11-02';
+  ok(start(r, A).reason === 'limit', 'tries with an earlier Day (a Date, or text) gave new tries');
   // 11. Caps and the lock: busy, and nothing written.
   r = gsHarness(); r.ctx.staffSetup();
   for (i = 0; i < 61; i++) last = start(r, (i % 10 + '').repeat(64));
@@ -1192,14 +1244,15 @@ function checkServer() {
   ok(tmp.ok === false && tmp.error === 'server' && JSON.stringify(tmp).indexOf('boom') < 0, 'an internal throw ' + JSON.stringify(tmp));
   // 12. Error codes are identifiers (lowercase letters only), so the clients and the copy lint can tell them apart.
   (GS_SRC.match(/\berror: '[^']*'|\bfail_\('[^']*'\)/g) || []).forEach(function (m) { ok(/'[a-z]+'/.test(m), 'error code ' + m); });
-  console.log('Booth web app (Code.gs)\n  ' + n + ' cases (setup, sync with settings.js, tries, booth days, finish, status, contacts sheet, claims, switches, caps, lock)');
+  console.log('Booth web app (Code.gs)\n  ' + n + ' cases (setup, sync with settings.js, 2 tries per badge, no new tries on a new day, finish, status, contacts sheet, claims, switches, caps, lock)');
 }
 
 // ---- Rewards ----
 // rewards.js and earn.js in vm "pages" that share one fake localStorage, like two tabs on one phone. No real DOM:
 // every element is a stub that keeps textContent, hidden, value and attributes. v6 pages have no network; a badge-
 // mode page (opts.server = a gsHarness) gets a CurateBadge stub whose post() calls Code.gs synchronously (or answers
-// offline while server.offline is set), and a clock and timers tied to the harness clock.
+// offline while server.offline is set), and a clock and timers tied to the harness clock. A v6 page may get a clock
+// too (opts.clock = { clock: ms }), so a case can move it to another day.
 function Store() { this.d = {}; }
 Store.prototype.getItem = function (k) { return Object.prototype.hasOwnProperty.call(this.d, k) ? this.d[k] : null; };
 Store.prototype.setItem = function (k, v) { this.d[k] = String(v); };
@@ -1233,20 +1286,29 @@ var BADGE = (function () {
   return ctx.CurateBadge || null;
 })();
 function badgeHash(id) { return crypto.createHash('sha256').update((BADGE ? BADGE.SALT : '') + id).digest('hex'); }
+// The Go banner as game.js builds it from begin()'s answer (badge mode) or canCount() (v6Began, the fallback).
+function goLine(began) {
+  var src = fs.readFileSync(path.join(DIR, 'game.js'), 'utf8'), m = /function goText\(\) \{[\s\S]*?\n  \}/.exec(src);
+  if (!m) { fail('game.js: goText() is missing'); return ''; }
+  return new Function('began', 'S', m[0] + '\nreturn goText();')(began, S);
+}
 function page(ls, opts) {
   opts = opts || {};
-  var els = {}, G = opts.server, timers = [], ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
+  var els = {}, G = opts.server, clk = null, timers = [], ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
     document: { hidden: false, activeElement: null, readyState: 'complete', getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
       createElement: stubEl, addEventListener: function () {} },
     addEventListener: function () {}, setTimeout: function () { return 0; }, clearTimeout: function () {},
     setInterval: function () { return 1; }, clearInterval: function () {}, performance: { now: function () { return 0; } },
     requestAnimationFrame: function () { return 0; }, cancelAnimationFrame: function () {} };
   ctx.window = ctx;
+  if (G || opts.clock) {
+    clk = G || opts.clock;
+    ctx.Date = function () { return arguments.length ? new (Function.prototype.bind.apply(Date, [null].concat([].slice.call(arguments))))() : new Date(clk.clock); };
+    ctx.Date.now = function () { return clk.clock; }; ctx.Date.parse = Date.parse; ctx.Date.UTC = Date.UTC;
+  }
   if (G) {
     ctx.setTimeout = function (fn, ms) { timers.push({ fn: fn, at: G.clock + (ms || 0) }); return timers.length; };
     ctx.clearTimeout = function (i) { if (timers[i - 1]) timers[i - 1].fn = null; };
-    ctx.Date = function () { return arguments.length ? new (Function.prototype.bind.apply(Date, [null].concat([].slice.call(arguments))))() : new Date(G.clock); };
-    ctx.Date.now = function () { return G.clock; }; ctx.Date.parse = Date.parse; ctx.Date.UTC = Date.UTC;
     ctx.Uint8Array = Uint8Array;
     ctx.crypto = { getRandomValues: function (u) { return crypto.randomFillSync(u); } };
     ctx.CurateBadge = {
@@ -1304,13 +1366,13 @@ function self(tier, merch) {
   return JSON.stringify({ ticket: 'K-ABC123', name: 'Ana', confirmed: true, newsletter: false, merch: m });
 }
 function checkRewards() {
-  var n = 0, ls, a, b, c, kept, m, k, T = S.tiers, PER = S.countedPerDay;
+  var n = 0, ls, a, b, c, kept, m, k, T = S.tiers, PER = S.countedTries, clock, DAY = 24 * 3600 * 1000;
   // Scores inside each tier, read from settings.js so a retune keeps these cases meaningful.
   var EVERY = Math.floor(T[1] / 2), LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
     PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3] + 50, GOLD2 = T[3] + 150;
   function ok(cond, msg) { n++; if (!cond) fail('rewards.js: ' + msg); }
   function stored(l) { return JSON.parse(l.getItem('kleros_devcon_curate')); }
-  // Two tabs: once one tab has used the day’s tries (countedPerDay, v6: 2), a stale tab neither counts one more
+  // Two tabs: once one tab has used the phone’s tries (countedTries, v6: 2), a stale tab neither counts one more
   // nor drops the other tab's best or stamp.
   ls = new Store(); a = page(ls); b = page(ls);
   for (k = 0; k < PER; k++) playShift(a, [TEAL, PURPLE][k] || EVERY);
@@ -1336,7 +1398,7 @@ function checkRewards() {
   // A mid-day retune never downgrades a ticket, and a lower tier never replaces it.
   ls = new Store(); playShift(page(ls), GOLD);
   c = page(ls, { settings: function (s) { s.tiers = [0, T[1], T[2], T[3] + 100]; } });
-  ok(c.CurateRewards.model().g === 3, 'raising the Gold threshold downgraded today’s Gold ticket');
+  ok(c.CurateRewards.model().g === 3, 'raising the Gold threshold downgraded an earned Gold ticket');
   playShift(c, GOLD + 20);
   ok(stored(ls).best.final === GOLD, 'a Purple ' + (GOLD + 20) + ' replaced a Gold ' + GOLD);
   // Sold-out notes read as plain sentences for every tier.
@@ -1371,11 +1433,13 @@ function checkRewards() {
   // v6 §4: the title's tries line counts down, and a collected ticket never says how many are left.
   if (PER === 2) {
     ls = new Store(); c = page(ls); playShift(c, LOW); c.CurateRewards.refreshBrief();
-    ok(c.text('ladder-fine').indexOf('1 of 2 tries left today.') === 0, 'tries line after one try: ' + c.text('ladder-fine'));
+    ok(c.text('ladder-fine').indexOf('1 of 2 tries left.') === 0, 'tries line after one try: ' + c.text('ladder-fine'));
     playShift(c, LOW); c.CurateRewards.refreshBrief();
-    ok(c.text('ladder-fine').indexOf('Both tries used today. Play for fun.') === 0, 'tries line after two: ' + c.text('ladder-fine'));
+    ok(c.text('ladder-fine').indexOf('Both tries used. Play for fun.') === 0, 'tries line after two: ' + c.text('ladder-fine'));
     ls = new Store(); c = page(ls); playShift(c, TEAL); stamp(c); c.CurateRewards.refreshBrief();
-    ok(c.text('ladder-fine').indexOf('left today') < 0, 'tries line after a stamp: ' + c.text('ladder-fine'));
+    ok(c.text('ladder-fine').indexOf('left') < 0, 'tries line after a stamp: ' + c.text('ladder-fine'));
+    a = page(new Store());
+    ok(a.text('ladder-fine').indexOf('2 tries count for merch.') === 0, 'tries line before a try: ' + a.text('ladder-fine'));
     // A round just for fun says what its score reached and that it wins no merch, never a reward (2 Nov: the
     // bare “Purple score” box said nothing), then why: here the merch was already collected.
     playShift(c, PURPLE);
@@ -1384,8 +1448,51 @@ function checkRewards() {
     // After both tries: the same tier line, and the why starts with the tries.
     ls = new Store(); c = page(ls); playShift(c, LOW); playShift(c, LOW); playShift(c, PURPLE);
     ok(c.text('rep-tier-line') === 'Your score reached Purple, but this round wins no merch.' &&
-      c.text('rep-tries').indexOf('Both tries used today.') === 0, 'just-for-fun after two tries: ' + c.text('rep-tier-line') + ' / ' + c.text('rep-tries'));
+      c.text('rep-tries').indexOf('Both tries used.') === 0, 'just-for-fun after two tries: ' + c.text('rep-tier-line') + ' / ' + c.text('rep-tries'));
   }
+  // 2 tries per phone for the whole event (2 Nov, user: “2 tries per ticket”): a new day, or the last booth day,
+  // gives no new tries and keeps the best ticket; a try left on day 1 is still the phone’s on day 2.
+  clock = { clock: Date.parse('2026-11-03T12:00:00+05:30') };
+  ls = new Store(); c = page(ls, { clock: clock });
+  m = c.CurateRewards.canCount();
+  ok(goLine({ counted: m.counted, shiftNo: m.next, tries: m.tries }) === 'Try 1 of ' + PER + ' · Go!', 'Go banner for try 1');
+  playShift(c, TEAL);
+  ok(c.text('rep-tries') === 'Try 1 of ' + PER + ' · ' + (PER - 1) + (PER === 2 ? ' try' : ' tries') + ' left', 'Results after try 1: ' + c.text('rep-tries'));
+  c.CurateRewards.showTicket();
+  ok(c.text('tb-shift').split(' · ').length === 3, 'the ticket back names a day for today’s round: ' + c.text('tb-shift'));
+  // 00:01 IST the next day (the booth’s midnight): the phone’s second try is still its own, and still its last.
+  clock.clock = Date.parse('2026-11-04T00:01:00+05:30'); c = page(ls, { clock: clock });
+  m = c.CurateRewards.canCount();
+  ok(m.counted && m.next === 2 && m.left === PER - 1 && m.tries === PER && m.perDay === undefined, 'day 2 after one try on day 1: ' + JSON.stringify(m));
+  ok(goLine({ counted: m.counted, shiftNo: m.next, tries: m.tries }) === 'Try 2 of ' + PER + ' · Go!', 'Go banner for try 2 on day 2');
+  clock.clock = Date.parse('2026-11-04T12:00:00+05:30'); c = page(ls, { clock: clock });
+  a = playShift(c, LOW);
+  ok(a.counted && a.shiftNo === 2 && c.text('rep-tries') === (PER > 2 ? 'Try 2 of ' + PER + ' · ' + (PER - 2) + ' tries left' : 'Both tries used'),
+    'try 2 on day 2: ' + JSON.stringify(a) + ' ' + c.text('rep-tries'));
+  // 5 Nov, then 6 Nov (the last booth day).
+  [DAY, DAY].forEach(function (d) {
+    var p;
+    clock.clock += d; p = page(ls, { clock: clock });
+    m = p.CurateRewards.canCount();
+    ok(!m.counted && m.reason === 'limit' && stored(ls).counted === PER, 'a new day gave this phone new tries: ' + JSON.stringify(m));
+    ok(p.CurateRewards.model().state === 'live' && p.CurateRewards.model().best.final === TEAL, 'a new day dropped the phone’s best ticket');
+    p.CurateRewards.refreshBrief();
+    ok(p.text('ladder-fine').indexOf('Both tries used. Play for fun.') === 0 && !daily(p.text('ladder-fine')), 'tries line on a later day: ' + p.text('ladder-fine'));
+    ok(!playShift(p, PURPLE).counted && p.text('rep-tries') === 'Both tries used. Your Teal ticket still counts.' && !daily(p.text('rep-tries')),
+      'a fun round on a later day: ' + p.text('rep-tries'));
+    ok(!daily(p.text('welcome-text')) && p.text('welcome-text').indexOf('today') < 0, 'welcome chip says today: ' + p.text('welcome-text'));
+    p.CurateRewards.showTicket();
+    ok(p.text('tb-shift').indexOf('Try 1 of ' + PER + ' · ') === 0 && p.text('tb-shift').split(' · ').length === 4,
+      'the ticket back of a best round from another day names no day: ' + p.text('tb-shift'));
+    ok(goLine({ counted: false, reason: 'limit', tries: PER }) === 'Just for fun · Go!', 'Go banner for a fun round');
+  });
+  // Both tries spent on rounds that never finished (a reload mid-round): no ticket, and none promised.
+  ls = new Store(); c = page(ls); c.CurateRewards.startShift('sights'); c.CurateRewards.startShift('sights');
+  c = page(ls); c.CurateRewards.showTicket();
+  ok(c.text('t-tier') === 'No ticket yet' && c.text('t-hint') === (PER === 2 ? 'Both tries used.' : 'All ' + PER + ' tries used.') &&
+    c.text('t-again') === 'Play for fun', 'no ticket after spent tries: ' + c.text('t-hint') + ' / ' + c.text('t-again'));
+  ls = new Store(); c = page(ls); c.CurateRewards.showTicket();
+  ok(c.text('t-hint') === 'Play a round for merch.', 'no ticket before a try: ' + c.text('t-hint'));
   // The live rule (checkinNeededFrom 1, anti-replay): without a check-in a Teal score shows the Everyone ticket
   // plus a "check in to claim" strip; with a confirmed check-in it is a live K- ticket; a kiosk round gets stickers.
   if (S.checkinNeededFrom === 1) {
@@ -1400,7 +1507,7 @@ function checkRewards() {
     c = page(new Store(), { kiosk: true, need: 1 }); playShift(c, GOLD2);
     ok(c.CurateRewards.model().t === 0, 'need 1, kiosk: a tablet round is above stickers without a check-in');
   }
-  console.log('Rewards\n  ' + n + ' ticket and storage cases (two tabs, check-in, Everyone, retune, sold out, duplicate, kiosk, tries line, check-in for all merch)');
+  console.log('Rewards\n  ' + n + ' ticket and storage cases (two tabs, check-in, Everyone, retune, sold out, duplicate, kiosk, tries line, 2 tries per phone with none back on a later day, check-in for all merch)');
 }
 
 // ---- Badge mode ----
@@ -1408,7 +1515,7 @@ function checkRewards() {
 // nothing, a try counts at Start, a ticket above stickers unlocks with a contact, the kiosk keeps nothing.
 function checkBadgeMode() {
   var n = 0, G = gsHarness(), T = S.tiers, LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
-    PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3], ls, p, q, r, m, rows, k, kls, best;   // Gold: the server caps scores at the best round
+    PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3], ls, p, q, r, m, rows, k, kls, best, before;   // Gold: the server caps scores at the best round
   function ok(cond, msg) { n++; if (!cond) fail('badge mode: ' + msg); }
   function R(pg) { return pg.CurateRewards; }
   function begin(pg, fun) { var out; R(pg).begin('sights', { fun: !!fun }, function (x) { out = x; }); return out; }
@@ -1429,15 +1536,17 @@ function checkBadgeMode() {
   // Scan, then two counted tries; the first Teal round is locked until a contact is left.
   ls = new Store(); p = page(ls, { server: G });
   ok(R(p).online === true, 'online is false with an endpoint');
-  ok(p.text('ladder-fine').indexOf('Your Devcon badge gives 2 tries a day for merch.') === 0, 'title fine line: ' + p.text('ladder-fine'));
+  ok(p.text('ladder-fine').indexOf('Your Devcon badge gives 2 tries for merch.') === 0, 'title fine line: ' + p.text('ladder-fine'));
   R(p).renderIntro();
-  ok(p.text('intro-note') === 'Your Devcon badge gives 2 tries a day for merch.' && !p.el('intro-scan').hidden, 'intro before a scan: ' + p.text('intro-note'));
+  ok(p.text('intro-note') === 'Your Devcon badge gives 2 tries for merch.' && !p.el('intro-scan').hidden, 'intro before a scan: ' + p.text('intro-note'));
   ok(setB(p, 'not a badge').error === 'notbadge', 'a non-badge scan');
   r = setB(p, 'AB12CD34');
   ok(r && r.ok && p.text('intro-badge') === 'Badge …CD34 · Try 1 of 2' && G.rows('Tries') === 1, 'a scan: ' + JSON.stringify(r) + ' ' + p.text('intro-badge') + ', Tries rows ' + G.rows('Tries'));
   r = begin(p);
   ok(r && r.ok && r.counted && r.shiftNo === 1 && G.rows('Tries') === 2, 'Start spends try 1 ' + JSON.stringify(r));
+  ok(goLine(r) === 'Try 1 of 2 · Go!', 'Go banner for try 1: ' + goLine(r));
   r = play(p, TEAL);
+  ok(p.text('rep-tries') === 'Try 1 of 2 · 1 try left', 'Results after try 1: ' + p.text('rep-tries'));
   ok(/^C-[A-Z0-9]{6}$/.test(r.code || ''), 'game code ' + r.code);
   m = R(p).model();
   ok(m.state === 'locked' && m.t === 1 && m.pending === 0, 'a Teal round before a contact is not locked ' + JSON.stringify({ s: m.state, t: m.t, p: m.pending }));
@@ -1452,20 +1561,42 @@ function checkBadgeMode() {
   contact(p, 'ana@example.org');
   m = R(p).model();
   ok(m.state === 'live' && /^C-[A-Z0-9]{6}$/.test(p.text('t-code')), 'the ticket after a contact: ' + m.state + ' ' + p.text('t-code'));
+  R(p).showTicket();
+  ok(/^Try 1 of 2 · \w{3} \d{1,2} \w{3} · \d\d:\d\d · \S/.test(p.text('tb-shift')), 'the ticket back names no day: ' + p.text('tb-shift'));
   rows = G.contacts.sheets.Contacts.rows;
   ok(G.contacts.sheets.Contacts.getLastRow() === 2 && rows[1][1] === 'ana@example.org' && rows[1][3] === 'yes', 'the contact row ' + JSON.stringify(rows[1]));
   ok(clean(ls), 'localStorage holds a contact or a badge code: ' + JSON.stringify(ls.d));
+  R(p).refreshBrief();
+  ok(p.text('ladder-fine').indexOf('1 of 2 tries left.') === 0, 'title after try 1: ' + p.text('ladder-fine'));
   r = begin(p);
   ok(r && r.ok && r.shiftNo === 2, 'Start spends try 2 ' + JSON.stringify(r));
   play(p, LOW);
   r = begin(p);
-  ok(r && r.ok === false && r.error === 'limit', 'a third Start the same day ' + JSON.stringify(r));
+  ok(r && r.ok === false && r.error === 'limit' && p.text('intro-note') === 'Both tries used.', 'a third Start ' + JSON.stringify(r) + ' ' + p.text('intro-note'));
   r = begin(p, true);
-  ok(r && r.ok && r.counted === false && r.reason === 'limit', 'Play for fun after two tries ' + JSON.stringify(r));
+  ok(r && r.ok && r.counted === false && r.reason === 'limit' && goLine(r) === 'Just for fun · Go!', 'Play for fun after two tries ' + JSON.stringify(r));
   play(p, PURPLE, { reason: r.reason });
-  ok(p.text('rep-tier-line') === 'Your score reached Purple, but this round wins no merch.' && p.text('rep-tries').indexOf('Both tries used today.') === 0,
-    'a fun round after two tries: ' + p.text('rep-tier-line') + ' / ' + p.text('rep-tries'));
+  ok(p.text('rep-tier-line') === 'Your score reached Purple, but this round wins no merch.' &&
+    p.text('rep-tries') === 'Both tries used. Your Teal ticket still counts.', 'a fun round after two tries: ' + p.text('rep-tier-line') + ' / ' + p.text('rep-tries'));
   ok(R(p).model().t === 1, 'a fun Purple round raised the ticket');
+  // 2 tries per badge for the whole event (2 Nov, user: “2 tries per ticket”): the next day and the last booth day
+  // give none back, neither on this phone (no midnight reset in the browser) nor on a fresh one (the server's count).
+  before = G.rows('Tries'); G.clock += 24 * 3600 * 1000; R(p).renderIntro();
+  ok(p.text('intro-note') === 'Both tries used.' && p.el('intro-go').hidden, 'the next day, before status answers: ' + p.text('intro-note'));
+  R(p).refreshStatus(true); R(p).refreshBrief();
+  ok(p.text('ladder-fine').indexOf('Both tries used. Play for fun.') === 0 && !daily(p.text('ladder-fine')), 'the next day, title: ' + p.text('ladder-fine'));
+  r = begin(p);
+  ok(r && r.ok === false && r.error === 'limit', 'a Start the next day ' + JSON.stringify(r));
+  [G.clock, Date.parse('2026-11-06T10:00:00Z')].forEach(function (t) {
+    var pg;
+    G.clock = t; pg = page(new Store(), { server: G }); setB(pg, 'AB12CD34');
+    ok(pg.text('intro-badge') === 'Badge …CD34' && pg.text('intro-note') === 'Both tries used.' && pg.el('intro-go').hidden,
+      'another phone on ' + new Date(t).toISOString().slice(0, 10) + ': ' + pg.text('intro-badge') + ' / ' + pg.text('intro-note'));
+    r = begin(pg, true); play(pg, TEAL, { reason: r && r.reason });
+    ok(r && r.reason === 'limit' && pg.text('rep-tries') === 'Both tries used. Your Teal ticket still counts.' && !daily(pg.text('rep-tries')),
+      'a fun round on a later day: ' + pg.text('rep-tries'));
+  });
+  ok(G.rows('Tries') === before, 'a later day added a Tries row for a badge with no tries left');
   // Company line in plain words, both modes.
   [page(new Store(), { server: G }), page(new Store())].forEach(function (pg, i) {
     [[0, 'No wrong entry got through.'], [1, '1 wrong entry got through.'], [3, '3 wrong entries got through.']].forEach(function (c) {
@@ -1543,14 +1674,11 @@ function checkBadgeMode() {
   // No crypto.subtle (http, old browsers): play for fun.
   q = page(new Store(), { server: G, nocrypto: true }); R(q).renderIntro();
   ok(q.text('intro-note') === 'This browser can’t read badges. Play for fun.', 'no crypto: ' + q.text('intro-note'));
-  // On the last booth day, a fun round never promises tomorrow (v6, per phone).
-  q = page(new Store(), { settings: function (s) { s.lastDay = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); } });
+  // A fun round with no ticket promises no new tries, ever (v6, per phone; 2 Nov: no “New tries tomorrow”).
+  q = page(new Store());
   [0, 1, 2].forEach(function () { playShift(q, LOW); });
-  ok(q.text('rep-tries') === 'Both tries used today.', 'the last day promises new tries: ' + q.text('rep-tries'));
-  q = page(new Store(), { settings: function (s) { s.lastDay = '2099-12-31'; } });
-  [0, 1, 2].forEach(function () { playShift(q, LOW); });
-  ok(q.text('rep-tries') === 'Both tries used today. New tries tomorrow.', 'v6 fun round before the last day: ' + q.text('rep-tries'));
-  console.log('Badge mode\n  ' + n + ' cases (scan, tries, locked ticket and contact, late unlock, lost replies, refused and unsent finishes, paused, kiosk)');
+  ok(q.text('rep-tries') === 'Both tries used.', 'a v6 fun round with no ticket: ' + q.text('rep-tries'));
+  console.log('Badge mode\n  ' + n + ' cases (scan, 2 tries per badge, none back on a later day, locked ticket and contact, late unlock, lost replies, refused and unsent finishes, paused, kiosk)');
 }
 
 // ---- badge.js ----
@@ -1611,10 +1739,10 @@ function checkWatchdog() {
 // Model: lognormal decision time (SIGMA), +PICK_S when the player taps Wrong (pick mode: tap the wrong part),
 // 0.25 s per card for the fly-out and landing. No windows, no timeouts: a card waits until it is decided, and
 // the round ends at the clock. v6: the full-screen flash after each decision pauses the round clock, so it adds
-// no time here. The best of the tries actually played counts (v6: 2 tries a day; 60% play 1, 40% play 2), the
-// second try +3% accuracy and −10% time. Accuracy is the chance of the right call on a card; pick is the chance
-// of tapping the right part after rightly marking a fake Wrong (otherwise a random other part). A real entry
-// marked Wrong taps any part.
+// no time here. The best of the tries actually played counts (2 counted tries per badge for the whole event; 60%
+// play 1, 40% play 2), the second try +3% accuracy and −10% time. Accuracy is the chance of the right call on a
+// card; pick is the chance of tapping the right part after rightly marking a fake Wrong (otherwise a random other
+// part). A real entry marked Wrong taps any part.
 var RUNS = 20000, SIGMA = 0.5, PICK_S = 0.8, OVERHEAD_S = 0.25;
 var PLAYS = [[1, 0.6], [2, 0.4]];
 var PROFILES = [   // name, mix share, accuracy, mean decision s, pick accuracy
@@ -1695,8 +1823,8 @@ function simProfile(prof, relaxed, rand) {
 function shares(c) { return c.map(function (x) { return Math.round(pct(x, RUNS)); }); }
 function simulate() {
   var rand = mulberry32(2026), modes = ['standard'];
-  // The sim never plays more tries than count in a day.
-  if (PLAYS[PLAYS.length - 1][0] > S.countedPerDay) fail('the simulation plays ' + PLAYS[PLAYS.length - 1][0] + ' tries, settings count ' + S.countedPerDay);
+  // The sim never plays more tries than count for the whole event.
+  if (PLAYS[PLAYS.length - 1][0] > S.countedTries) fail('the simulation plays ' + PLAYS[PLAYS.length - 1][0] + ' tries, settings count ' + S.countedTries);
   modes.forEach(function (mode) {
     var relaxed = mode === 'relaxed', mix = [0, 0, 0, 0], all = [];
     console.log('\nSimulation, ' + mode + ' (' + RUNS + ' players per profile; E/T/P/G = Everyone/Teal/Purple/Gold %)');
@@ -1780,7 +1908,8 @@ if (SIM) simulate();
 console.log('Manual QA before opening\n' +
   '  the intro, up to Start / Scan your badge, fits above the fold at 375×548\n' +
   '  a badge scan on an iPhone (jsQR) and on an Android phone (BarcodeDetector)\n' +
-  '  a full kiosk cycle on the tablet: scan, round, locked ticket, unlock, reset, scan');
+  '  a full kiosk cycle on the tablet: scan, round, locked ticket, unlock, reset, scan\n' +
+  '  the full guide in apps-script/staff-desk/README.md (2 tries per badge for the whole event; delete test rows after)');
 warnings.forEach(function (w) { console.log('warn  ' + w); });
 if (errors.length) {
   errors.forEach(function (e) { console.log('FAIL  ' + e); });
