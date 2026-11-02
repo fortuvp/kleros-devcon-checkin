@@ -256,7 +256,8 @@
   function chip(i) {
     var info = tierInfo(i), li = make('li', 'chip t-' + NAMES[i]), th = make('span', 'thumbs', null, 'thumbs'),
         tx = make('span', 'chip-txt'), b = make('b'), im, capped = KIOSK && !ONLINE && i > kioskCap(),
-        sr = info.reward + (i > 0 && paused() ? ': paused right now' : info.soldOut ? ': gone today, scores here get ' + info.short : '') +
+        sr = (info.soldOut ? baseTier(i).reward : info.reward) +   // a sold-out tier names its own reward, then the stand-in
+          (i > 0 && paused() ? ': paused right now' : info.soldOut ? ': gone today, scores here get ' + info.short : '') +
           (capped ? ': play on your own phone' : '');
     if (capped) li.className += ' is-locked';   // v6: out of the tablet’s reach
     if (info.soldOut) li.className += ' is-sold';
