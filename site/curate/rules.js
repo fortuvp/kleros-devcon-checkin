@@ -146,10 +146,12 @@
     score.tier = tierFor(score.raw);
     return { streakBonus: bonus, tierFrom: from, tierTo: score.tier };
   }
+  // The score shown and kept: never below the effort points (points.effort per entry decided), never below 0.
+  function shown(score) { return Math.max(0, score.raw, (S().points.effort || 0) * score.reviewed); }
   // 2 Nov: no time bonus, so the score comes from the answers only. The arguments stay for older callers.
   function finish(score) {
     score.timeBonus = 0;
-    score.final = Math.max(0, score.raw);
+    score.final = shown(score);
     score.tier = tierFor(score.final);
     return { timeBonus: 0 };
   }
@@ -160,5 +162,5 @@
   }
 
   window.CurateRules = { buildRun: buildRun, windowFor: windowFor, newScore: newScore, judge: judge, apply: apply,
-      finish: finish, tierFor: tierFor, intro: intro };
+      finish: finish, shown: shown, tierFor: tierFor, intro: intro };
 })();

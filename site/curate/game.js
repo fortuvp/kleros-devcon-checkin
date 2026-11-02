@@ -740,7 +740,7 @@
     }
     f.extra = extra.join(' · ');
     flash(f);
-    hudScore(score.raw);
+    hudScore(R.shown(score));   // effort points: the score never drops below 10 per entry decided
     if (!o.correct) buzz([20, 40, 20]); else if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o);
     advance();
@@ -854,7 +854,7 @@
     if (pc) contest(pc, false);
     mode = 'ended'; clockOn = false;
     R.finish(score);   // no time bonus: the score is the answers
-    hudScore(score.raw);
+    hudScore(R.shown(score));   // effort points: the score never drops below 10 per entry decided
     if (by === 'done') {
       // After the last card's flash.
       afterFlash(function () {

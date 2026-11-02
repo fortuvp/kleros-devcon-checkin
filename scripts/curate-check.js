@@ -63,7 +63,7 @@ function checkSettings() {
   ['countedPerDay', 'lastDay'].forEach(function (k) {
     if (S[k] !== undefined) fail('settings.js: ' + k + ' is gone (countedTries is per badge or phone for the whole event, never per day)');
   });
-  ['catch', 'evidence', 'letThrough', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus'].forEach(function (k) {
+  ['catch', 'evidence', 'letThrough', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus', 'effort'].forEach(function (k) {
     if (typeof S.points[k] !== 'number') fail('settings.js: points.' + k + ' is not a number');
   });
   // 2 Nov: no time bonus (the score is the answers) and one 90 s round for everyone (no More time).
@@ -71,6 +71,19 @@ function checkSettings() {
     if (S.points[k] !== undefined) fail('settings.js: points.' + k + ' is gone (no time bonus)');
   });
   if (S.relaxedSeconds !== undefined) fail('settings.js: relaxedSeconds is gone (one round length for everyone)');
+  // Effort points (2 Nov): a played round never scores 0, but effort alone never reaches Teal.
+  if (!(S.points.effort > 0)) fail('settings.js: points.effort must be above 0 (a played round never scores 0)');
+  if (S.points.effort * S.entries >= S.tiers[1]) fail('settings.js: effort points alone (' + S.points.effort * S.entries + ') reach Teal (' + S.tiers[1] + ')');
+  (function () {   // every entry wrong: the score is the effort floor, never 0; the floor never lifts a better score
+    var sc = R.newScore(), it = { id: 'x', list: '', bad: 'name', f: {} }, i;
+    for (i = 0; i < S.entries; i++) R.apply(sc, it, R.judge(it, 'letThrough', ''));
+    R.finish(sc);
+    if (sc.final !== S.points.effort * S.entries) fail('rules.js: a round of ' + S.entries + ' mistakes scores ' + sc.final + ', not the effort floor ' + S.points.effort * S.entries);
+    sc = R.newScore(); it = { id: 'y', list: '', bad: '', f: {} };
+    for (i = 0; i < S.entries; i++) R.apply(sc, it, R.judge(it, 'letThrough', ''));
+    R.finish(sc);
+    if (sc.final !== sc.raw || sc.final <= S.points.effort * S.entries) fail('rules.js: the effort floor changed a better score (' + sc.raw + ' → ' + sc.final + ')');
+  })();
   ['leak', 'wrongChallenge'].forEach(function (k) {
     if (typeof S.trust[k] !== 'number') fail('settings.js: trust.' + k + ' is not a number');
   });

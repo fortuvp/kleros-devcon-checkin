@@ -6,8 +6,10 @@ window.CURATE_SETTINGS = {
   seconds: 90, entries: 10, fakes: 4,       // 2 Nov: one calm 90 s round for everyone (no More time option)
   windows: [],                               // v5: no per-card countdown and no auto-listing
   points: { catch: 75, evidence: 50, letThrough: 25, wrongChallenge: -75, leak: -75,
-            streakEvery: 5, streakBonus: 50 },
+            streakEvery: 5, streakBonus: 50, effort: 10 },
   // evidence: the fake part picked in pick mode. 2 Nov: no time bonus: the score comes from the answers only.
+  // effort: the score never drops below this many points per entry decided, so a played round never scores 0
+  // (10 entries × 10 = 100, well under Teal: effort alone wins no merch).
   trust: { leak: -15, wrongChallenge: -5 },
   tiers: [0, 300, 550, 750],                 // Everyone, Teal, Purple, Gold (2 Nov: refitted by --fit for answers-only scoring; Gold = a perfect round; Code.gs TIERS matches: curate-check.js fails if not)
   checkinNeededFrom: 1,                      // v6 mode only (no server): every tier above Everyone needs a confirmed check-in on this phone (anti-replay: the check-in dedupes by email/Telegram); 3 = Gold only
