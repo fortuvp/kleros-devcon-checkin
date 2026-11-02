@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0b0620">
+<title>Merch desk · Kleros staff</title>
+<style>
+/* Staff-only page: one merch item per Devcon badge. Big targets, high contrast, readable in a busy booth. */
+:root { --bg:#0b0620; --panel:#1d1050; --text:#f7f3ff; --muted:#b8acdc; --teal:#7ff0e0; --purple:#b77bff; --gold:#f2c46d;
+  --good:#1f9d55; --bad:#d64545; --warn:#e0a32e; }
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html, body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+body { min-height:100vh; min-height:100svh; padding:max(14px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+.wrap { max-width:480px; margin:0 auto; }
+header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px; }
+header b { font-size:17px; }
+header small { color:var(--muted); }
+h1 { font-size:26px; line-height:1.15; margin:10px 0 6px; }
+p { margin:6px 0; }
+.muted { color:var(--muted); }
+button, .btn { display:block; width:100%; min-height:56px; margin:10px 0 0; border:0; border-radius:16px; font:700 18px Inter, system-ui, sans-serif;
+  color:#fff; background:linear-gradient(120deg,#6a1fd6,#9013fe); cursor:pointer; }
+button.ghost { background:transparent; color:var(--muted); min-height:44px; font-weight:600; font-size:15px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); }
+button.big { min-height:120px; font-size:26px; border-radius:22px; }
+input { width:100%; height:52px; margin-top:6px; padding:0 14px; border-radius:12px; border:1px solid rgba(255,255,255,.22);
+  background:rgba(255,255,255,.06); color:var(--text); font:500 17px Inter, system-ui, sans-serif; }
+label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:var(--muted); }
+.counts { display:flex; gap:8px; margin-top:16px; }
+.counts div { flex:1; padding:10px; border-radius:12px; background:var(--panel); text-align:center; }
+.counts b { display:block; font-size:24px; }
+.c-teal b { color:var(--teal); } .c-purple b { color:var(--purple); } .c-gold b { color:var(--gold); }
+/* Camera */
+.cam { position:relative; margin-top:10px; border-radius:18px; overflow:hidden; background:#000; aspect-ratio:3/4; }
+.cam video { width:100%; height:100%; object-fit:cover; display:block; }
+.cam i { position:absolute; inset:18% 12%; border:3px solid rgba(255,255,255,.85); border-radius:16px; box-shadow:0 0 0 999px rgba(0,0,0,.35); }
+/* Results: the whole screen says yes or no */
+#result { position:fixed; inset:0; padding:max(24px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom)); overflow:auto; background:var(--bg); }
+#result[data-tone=good] { background:linear-gradient(180deg,#1f9d55,#0b6b3a); }
+#result[data-tone=bad] { background:linear-gradient(180deg,#d64545,#8f1d1d); }
+#result[data-tone=warn] { background:linear-gradient(180deg,#b07812,#6b4508); }
+#r-icon { font-size:72px; line-height:1; margin-top:8px; }
+#r-word { font:800 30px/1.1 Inter, system-ui, sans-serif; margin-top:8px; text-transform:uppercase; letter-spacing:.02em; }
+#r-line { font-size:19px; margin-top:10px; }
+.items { margin-top:14px; }
+.items h2 { font-size:14px; margin:16px 0 0; text-transform:uppercase; letter-spacing:.1em; }
+.items button { min-height:64px; margin-top:8px; color:#1d1050; font-size:19px; }
+.items .t-teal { background:var(--teal); } .items .t-purple { background:var(--purple); } .items .t-gold { background:var(--gold); }
+#result .ghost { color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.5); }
+#result input { background:rgba(0,0,0,.22); border-color:rgba(255,255,255,.4); }
+#r-msg { margin-top:10px; font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><b>Merch desk</b><small id="who">Staff only</small></header>
+
+  <!-- Key: asked once per phone, kept on this phone only -->
+  <section id="setup" hidden>
+    <h1>Staff key</h1>
+    <p class="muted">Ask the booth lead for the key. It stays on this phone.</p>
+    <form id="setup-form">
+      <label for="k-key">Key</label><input id="k-key" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <label for="k-name">Your name</label><input id="k-name" autocomplete="name" maxlength="40">
+      <button type="submit">Save</button>
+    </form>
+    <p id="setup-msg" class="muted"></p>
+  </section>
+
+  <section id="home" hidden>
+    <button type="button" class="big" id="scan-go">Scan badge</button>
+    <button type="button" class="ghost" id="type-go">Type the badge code</button>
+    <div class="counts" aria-label="Handed out today"><div class="c-teal"><b id="n-teal">–</b>Teal</div><div class="c-purple"><b id="n-purple">–</b>Purple</div><div class="c-gold"><b id="n-gold">–</b>Gold</div></div>
+    <p class="muted" style="margin-top:14px">One item per badge. Stickers need no scan.</p>
+    <button type="button" class="ghost" id="rekey">Change key or name</button>
+  </section>
+
+  <section id="scan" hidden>
+    <h1>Point at the badge code</h1>
+    <div class="cam"><video id="video" playsinline muted autoplay></video><i aria-hidden="true"></i></div>
+    <canvas id="frame" hidden></canvas>
+    <button type="button" class="ghost" id="scan-type">Type it instead</button>
+    <button type="button" class="ghost" id="scan-cancel">Cancel</button>
+  </section>
+
+  <section id="typer" hidden>
+    <h1>Badge code</h1>
+    <p id="type-msg" class="muted"></p>
+    <form id="type-form">
+      <label for="badge-text">The code printed on the badge</label><input id="badge-text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <button type="submit">Check</button>
+    </form>
+    <button type="button" class="ghost" id="type-cancel">Cancel</button>
+  </section>
+</div>
+
+<section id="result" hidden aria-live="assertive">
+  <div class="wrap">
+    <div id="r-icon" aria-hidden="true"></div>
+    <div id="r-word"></div>
+    <p id="r-line"></p>
+    <div class="items" id="r-items" hidden>
+      <p>Read the colour on their ticket, then tap what you hand over:</p>
+      <div id="r-buttons"></div>
+      <label for="r-ticket">Ticket code (optional)</label><input id="r-ticket" placeholder="K-ABC123 or C-ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8">
+    </div>
+    <p id="r-msg"></p>
+    <button type="button" id="r-retry" hidden>Try again</button>
+    <button type="button" class="ghost" id="r-next">Next badge</button>
+  </div>
+</section>
+
+<script defer src="/config.js"></script>
+<script defer src="/curate/settings.js"></script>
+<script defer src="/curate/desk/vendor/jsQR.js"></script>
+<script defer src="/curate/desk/desk.js"></script>
+</body>
+</html>
