@@ -1,8 +1,11 @@
 // Curate game rewards: prize strip, counted rounds, the intro's start area, the report and the merch ticket.
-// Two modes (settings.js server.endpoint): badge mode, where the sheet script counts each Devcon badge's tries
-// and keeps its best score (network through CurateBadge.post only), and v6 mode (no endpoint), where tries and
-// the ticket live on this phone. The only reader of kleros_devcon_self (v6 only, never written here) and the only
-// writer of kleros_devcon_curate and kleros_devcon_curate_badge. User data reaches the DOM through textContent only.
+// Two modes (settings.js server.endpoint): badge mode (the server), where the sheet script counts each player's
+// tries and keeps their best score (network through CurateBadge.post only), and v6 mode (no endpoint), where tries
+// and the ticket live on this phone. With the server, how players verify follows its Switches tab (3 Nov; settings
+// verify until it answers): telegram (the bot saw them: the server gives the id), badge (a scanned Devcon badge)
+// or none (a random id made on this phone). The only reader of kleros_devcon_self (v6 only, never written here)
+// and the only writer of kleros_devcon_curate, kleros_devcon_curate_badge and kleros_devcon_curate_tg. User data
+// reaches the DOM through textContent only.
 (function () {
   'use strict';
 
@@ -13,7 +16,7 @@
   var RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
   var KEY = 'kleros_devcon_curate';
   var NAMES = ['free', 'teal', 'purple', 'gold'];
-  var UI = { show: function () {}, say: function () {}, reset: function () {} };
+  var UI = { show: function () {}, say: function () {}, reset: function () {}, nudge: function () {} };
 
   function $(id) { return document.getElementById(id); }
   function store(k, v) { try { if (v === undefined) return JSON.parse(localStorage.getItem(k) || 'null'); localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return null; } }
@@ -30,15 +33,19 @@
   function isArr(a) { return Object.prototype.toString.call(a) === '[object Array]'; }   // replies may come from another realm
 
   // ---- Badge mode: state ----
-  // The badge is the player's id; the server's word on it is cached in srv.badge ({ triesUsed, left, best, contact,
-  // collected }, any subset: no `left` = status not answered yet). Kiosk keeps all of it in memory, one visitor.
-  // Tries are the badge's for the whole event (Code.gs TRIES_PER_BADGE): nothing here resets them at midnight.
-  var SV = S.server || {};
+  // bd is the player's id (the API's `badge`: 64 hex in every mode); the server's word on it is cached in srv.badge
+  // ({ triesUsed, left, best, contact, collected }, any subset: no `left` = status not answered yet). Kiosk keeps
+  // all of it in memory, one visitor. Tries are the id's for the whole event (Code.gs TRIES_PER_BADGE): nothing here
+  // resets them at midnight.
+  var SV = S.server || {}, TGS = S.telegram || {};
   var ONLINE = !!SV.endpoint;
-  var BKEY = 'kleros_devcon_curate_badge';
+  var BKEY = 'kleros_devcon_curate_badge', TGKEY = 'kleros_devcon_curate_tg';
   var MAX_SEND = 6 * 60 * 60 * 1000;   // = Code.gs MAX_SEND_MS: an older finish is refused anyway
-  var bd = null;                       // { hash, tail }: never the badge code
-  var srv = { open: true, soldOut: [], tiers: null, badge: null, asked: 0 };
+  var MODES = ['telegram', 'badge', 'none'], KIND = { telegram: 'tg', badge: 'badge', none: 'device' };
+  var HEX = /^[0-9a-f]{64}$/, HEX32 = /^[0-9a-f]{32}$/;
+  var bd = null;                       // { hash, tail, kind: tg | badge | device, sig (tg only) }: never the badge code
+  // mode: the Switches tab's Verify with (any reply; kept with the id); tg: false while the bot isn't set up.
+  var srv = { open: true, soldOut: [], tiers: null, badge: null, asked: 0, mode: '', tg: null };
   var flow = { busy: 0, offline: false };   // the intro: a request in flight; the last start got no answer
   var tok = null, spare = '', begun = null; // this round's try { token, tryNo }; an unconfirmed start token; begin()'s answer
   var pend = null, bg = [];                 // the finish not saved yet (one, kept on the phone); kiosk ones left behind
@@ -47,6 +54,27 @@
   function can(k) { var B = Bdg(); try { return !!(B && B.can && B.can()[k]); } catch (e) { return false; } }
   function paused() { return ONLINE && srv.open === false; }
   function bs() { return srv.badge || {}; }
+  // How players verify: the server's Switches win; settings.js verify until it answers.
+  function mode() { return srv.mode || (MODES.indexOf(S.verify) > -1 ? S.verify : 'telegram'); }
+  // An id counts only in its own mode: a switch drops it, so ids never mix.
+  function fit() {
+    if (!bd || bd.kind === KIND[mode()]) return;
+    bd = null; srv.badge = null; spare = '';
+    hideContact();
+    bSave();
+  }
+  function tgId() { return !!bd && bd.kind === 'tg'; }   // verifying gave the contact: never a locked ticket
+  function who() { return !bd ? '' : tgId() ? 'Telegram ✓' : bd.kind === 'device' ? 'This phone' : 'Badge …' + bd.tail; }
+  // The tries rule on the title and the intro, said by how players verify.
+  function triesFor() {
+    var md = mode(), n = fmt(COUNTED) + ' tries for merch.';
+    if (md === 'telegram') return bd ? 'Telegram ✓ · ' + n : 'Verify with Telegram: ' + n;
+    return md === 'none' ? 'Your phone gets ' + n : 'Your Devcon badge gives ' + n;
+  }
+  function gotMerch() {
+    var md = mode();
+    return 'This ' + (md === 'telegram' ? 'Telegram account' : md === 'none' ? 'phone' : 'badge') + ' already got its merch.';
+  }
   function bestTier() { var b = bd && bs().best; return b ? b.tier || 0 : 0; }
   // An unknown id (say a 'travel' run stored before v4) falls back to the first deck in decks.js order.
   function firstDeck() {
@@ -216,7 +244,7 @@
     var m, ci, best, line = '', go = '', n, b = bs(), g = ONLINE ? modelB().t : 0;   // the ticket's tier: a sold-out one hands down
     if (ONLINE) {   // badge mode: from the remembered badge (a tablet remembers none)
       if (bd && b.collected) line = 'Merch collected. Play for fun.';
-      else if (g > 0 && b.contact) { line = 'Your ' + baseTier(g).name + ' ticket is ready ·'; go = 'Show it →'; }
+      else if (g > 0 && (b.contact || tgId())) { line = 'Your ' + baseTier(g).name + ' ticket is ready ·'; go = 'Show it →'; }
       else if (g > 0) { line = 'Your ' + baseTier(g).name + ' score needs one step ·'; go = 'Unlock →'; }
     } else if (!KIOSK) {
       m = model(); ci = m.ci; best = st.best;
@@ -284,13 +312,13 @@
     // v6: the tries rule under the strip, then the one-item rule once (the merch note may already say it).
     var once = /one item per person/i.test(MERCH.note || ''),
         rule = (once ? '' : ' One item per person.') + (MERCH.note ? ' ' + MERCH.note + '.' : '');
-    // Badge mode: the badge's tries, first match wins (no “scan” here: the title has no scan button).
+    // Badge mode: the player's tries, first match wins (no “scan” here: the title has no scan button).
     if (ONLINE) {
       if (paused()) lead = 'Merch is paused right now. Play for fun.';
       else if (bd && bb.collected) lead = 'Merch collected. Play for fun.';
       else if (bd && bb.left === 0) lead = allUsed() + '. Play for fun.';
       else if (bd && bb.left > 0 && bb.left < COUNTED) lead = bb.left + ' of ' + fmt(COUNTED) + ' tries left.';
-      else lead = 'Your Devcon badge gives ' + fmt(COUNTED) + ' tries for merch.';
+      else lead = triesFor();
       txt('ladder-fine', lead + rule);
     }
     // A booth tablet has no tries: every round is the next visitor.
@@ -310,8 +338,19 @@
     clearTimeout(idleTimer);
     if (KIOSK) { st = null; dropVisitor(); }   // a booth tablet: every return to the brief is the next visitor
     sync();
-    renderHeader(); renderWelcome(); renderLadder();
+    renderHeader(); renderWelcome(); renderLadder(); renderCopy();
     refreshStatus(false);   // badge mode: switches and the badge's tries (throttled)
+  }
+  // How it works and the privacy notice follow how players verify (v6 keeps the contact notice, no merch line).
+  function renderCopy() {
+    var md = ONLINE ? mode() : '', n = fmt(COUNTED);
+    txt('how-merch', md === 'telegram' ? 'Merch: verify with Telegram (tap Start in the Kleros Booth bot). One Telegram account gets ' +
+      n + ' tries and one item.' : md === 'badge' ? 'Merch: scan your Devcon badge. One badge gets ' + n + ' tries and one item.' :
+      md === 'none' ? 'Merch: this phone gets ' + n + ' tries and one item.' : '');
+    vis('how-merch', !!md);
+    vis('cp-tg', md === 'telegram');
+    vis('cp-contact', md !== 'telegram');
+    txt('cp-who', md === 'none' ? 'This phone’s game id' : 'Your badge');
   }
 
   // ---- Medal ----
@@ -501,11 +540,12 @@
       bt = ONLINE ? bestTier() : v6Tier();
       return allUsed() + '.' + (bt > 0 ? ' Your ' + baseTier(bt).name + ' ticket still counts.' : '');
     }
-    if (r === 'collected') return ONLINE ? 'This badge already got its merch.' : 'You already collected merch on this phone.';
-    if (r === 'nobadge') return 'No badge scanned. Scan it next round to play for merch.';
+    if (r === 'collected') return ONLINE ? gotMerch() : 'You already collected merch on this phone.';
+    if (r === 'nobadge') return mode() === 'badge' ? 'No badge scanned. Scan it next round to play for merch.' :
+      mode() === 'telegram' ? 'Verify with Telegram next round to play for merch.' : 'This round was for fun.';
     if (r === 'paused') return 'Merch is paused right now. Ask at the booth.';
     if (r === 'offline') return 'We couldn’t reach the merch list, so this round was for fun.';
-    if (r === 'nocrypto') return 'This browser can’t read badges, so this round was for fun.';
+    if (r === 'nocrypto') return 'This browser can’t ' + (mode() === 'badge' ? 'read badges' : 'play for merch') + ', so this round was for fun.';
     return 'You picked Play for fun. Tap Start next time to play for merch.';
   }
   // “Try 1 of 2 · 1 try left”, “Both tries used”, or why this round was just for fun.
@@ -597,7 +637,7 @@
     // A round that wins nothing leads to a ticket only when the badge already has one.
     tt.hidden = (rs.fun || s === 'refused') && !(bt > 0);
     tt.disabled = s === 'saving';
-    tt.textContent = s !== 'saving' && bt > 0 && !b.contact && !b.collected ? 'Unlock my merch ticket' : 'Show my merch ticket';
+    tt.textContent = s !== 'saving' && bt > 0 && !b.contact && !tgId() && !b.collected ? 'Unlock my merch ticket' : 'Show my merch ticket';
   }
   function armIdle() {
     clearTimeout(idleTimer);
@@ -650,17 +690,17 @@
     m.code = ci && ci.ok ? ci.ticket : best.code;
     return m;
   }
-  // Badge mode, from the server's word on the badge: collected, locked (a tier above stickers, no contact yet),
-  // or live (the best tier with sold-out tiers handed down; t 0 is the Everyone ticket, no code).
+  // Badge mode, from the server's word on the id: collected, locked (a tier above stickers, no contact yet; never
+  // in telegram mode), or live (the best tier with sold-out tiers handed down; t 0 is the Everyone ticket, no code).
   function modelB() {
     var b = bs(), best = bd ? b.best || null : null, m = { state: 'live', ci: null, best: best, t: 0, g: 0, pending: 0,
-      source: 'game', soldFrom: -1, code: '', contact: !!b.contact }, t;
+      source: 'game', soldFrom: -1, code: '', contact: !!b.contact || tgId() }, t;
     if (bd && b.collected) { m.state = 'collected'; m.t = m.g = best ? best.tier || 0 : 0; return m; }
     if (!best) return m;
     t = m.g = best.tier || 0;
     while (t > 0 && isSoldOut(t)) { if (m.soldFrom < 0) m.soldFrom = t; t--; }
     m.t = t;
-    if (t > 0 && !b.contact) m.state = 'locked';
+    if (t > 0 && !m.contact) m.state = 'locked';
     else if (t > 0) m.code = best.code || '';
     return m;
   }
@@ -785,12 +825,43 @@
 
   // ---- Ticket render, badge mode ----
   // Locked: the tier with a hidden code and the contact step under it. Live: the game code (C-) staff read
-  // with the badge at the desk. Everyone: stickers, no code. Collected: the badge already got its merch.
+  // with the badge at the desk, or (telegram and none modes) a QR they scan with the code under it as the fallback.
+  // Everyone: stickers, no code. Collected: the id already got its merch.
   var lockTimer = 0;
   function appName(id) { var D = window.CURATE_DECKS || {}; return D.hasOwnProperty(id) && D[id] ? D[id].client : ''; }
+  // What the desk scans: 'KC1.' + id + '.' + sig (none mode: no sig), upper case so the QR is the compact kind.
+  function qrText() { return bd && bd.kind !== 'badge' ? ('KC1.' + bd.hash + '.' + (tgId() ? bd.sig || '' : '')).toUpperCase() : ''; }
+  // Draws text as a QR into #id once badge.js has the generator (loaded on the first one); #wrap (or #id) stays
+  // hidden until then, so a failed load leaves the code under it. data-qr holds the text (the check script reads it).
+  // A failed load (Wi-Fi dropped) tries again every 4 s while the box still wants that text: one wait per box.
+  function showQR(id, text, wrap) {
+    var box = $(id), w = $(wrap || id), B = Bdg();
+    if (!box || !w) return;
+    clearTimeout(box.qrRetry); box.qrRetry = 0;
+    box.setAttribute('data-qr', text);
+    w.hidden = true;
+    if (!text) return;
+    if (box.getAttribute('data-drawn') === text) { w.hidden = false; return; }
+    if (!B || !B.loadQR || !B.qr) return;
+    B.loadQR(function (good) {
+      var svg = good && box.getAttribute('data-qr') === text ? B.qr(text) : null;
+      if (!good && !box.qrRetry && box.isConnected !== false && box.getAttribute('data-qr') === text) {
+        box.qrRetry = setTimeout(function () {
+          box.qrRetry = 0;
+          if (box.getAttribute('data-qr') === text && box.getAttribute('data-drawn') !== text) showQR(id, text, wrap);
+        }, 4000);
+      }
+      if (!svg) return;
+      box.textContent = '';
+      box.appendChild(svg);
+      box.setAttribute('data-drawn', text);
+      w.hidden = false;
+    });
+  }
   function renderTicketB() {
     var m = model(), b = m.best, tk = $('ticket'), info = tierInfo(m.t), lock = m.state === 'locked',
-        coded = m.state === 'live' && m.t > 0, C = window.CurateContact, prev = current, ck, h, tail = bd ? ' · Badge …' + bd.tail : '';
+        coded = m.state === 'live' && m.t > 0, C = window.CurateContact, prev = current, ck, h, tail = bd ? ' · ' + who() : '',
+        qt = m.state === 'live' ? qrText() : '';   // Everyone too: the desk scans it, then a check-in K- code opens every tier
     current = m;
     if (tk) {
       tk.setAttribute('data-tier', m.state === 'collected' ? 'claimed' : NAMES[m.t]);
@@ -801,7 +872,7 @@
     }
     txt('t-kicker', 'Kleros booth · Curate game');
     tickClock();
-    vis('t-live', coded);
+    vis('t-live', coded || !!qt);
     vis('t-img', true);
     thumbs($('t-img'), info.img);
     if (m.state === 'collected') {
@@ -810,7 +881,8 @@
     } else {
       tierLabel(tierTitle(m.t), m.t);
       txt('t-reward', info.reward);
-      txt('t-hint', lock ? 'Unlock it below.' : coded ? 'Show your badge at the merch desk.' : 'Show this at the booth.');
+      txt('t-hint', lock ? 'Unlock it below.' : coded ? (qt ? 'Show this QR at the merch desk.' : 'Show your badge at the merch desk.') :
+        'Show this at the booth.');
       txt('t-note', lock ? '' : m.soldFrom > 0 ? soldNote(m) : coded ? (paused() ? 'Merch is paused right now.' : 'From your best round') :
         ((MERCH.free || (S.fallbackMerch || {}).free || {}).how || ''));
     }
@@ -819,6 +891,7 @@
     txt('t-org', b ? fmt(b.score) + ' pts' + tail : '');
     ck = vis('t-code', coded || lock);
     if (ck) { ck.textContent = lock ? '······' : coded ? m.code : ''; ck.classList.remove('holding'); ck.style.setProperty('--hold', '0'); }
+    showQR('t-qr', qt);
     // The back: which try, which day and time (tries last the event) and which app; staff use the desk, so no stamp here.
     txt('tb-shift', b ? ['Try ' + (b.tryNo || 1) + ' of ' + COUNTED, b.day || '', b.at || '', appName(b.app)].filter(Boolean).join(' · ') : '');
     txt('tb-stats', b ? fmt(b.score) + ' pts' : '');
@@ -925,14 +998,15 @@
     dropVisitor();
     UI.reset();
   }
-  // Badge mode, booth tablet: the next visitor. Forget the badge, the try and the contact form; a finish not saved
-  // yet keeps retrying from memory (token and score only, never the badge).
+  // Badge mode, booth tablet: the next visitor. Forget the id, the try, the Telegram wait and the contact form; a
+  // finish not saved yet keeps retrying from memory (token and score only, never the id).
   function dropVisitor() {
     var C = window.CurateContact;
     if (!ONLINE) return;
     if (pend && !pend.done) toBackground(pend);
     pend = null; bd = null; srv.badge = null; tok = null; spare = ''; begun = null;
     flow = { busy: 0, offline: false };
+    tgForget(); tg.late = false; tg.err = ''; devFail = false;
     rs = { sum: null };
     if (C) C.hide();
   }
@@ -1064,43 +1138,50 @@
   }
 
   // ---- Badge mode: storage ----
-  // Own phone only: the badge's hash and last 4 (never the code), its last known state for an offline ticket, and
-  // the finish not saved yet. A booth tablet keeps nothing; a blocked browser keeps the memory copy.
+  // Own phone only: the id's hash, kind, last 4 (badge) or sig (telegram), never the badge code or a Telegram
+  // number; its last known state for an offline ticket, the mode it belongs to, and the finish not saved yet. v1
+  // records are badge mode's. A booth tablet keeps nothing; a blocked browser keeps the memory copy.
   function bLoad() {
-    var d = KIOSK || !ONLINE ? null : store(BKEY), p;
-    if (!d || typeof d !== 'object' || d.v !== 1) return;
-    if (/^[0-9a-f]{64}$/.test(d.hash || '')) {
-      bd = { hash: d.hash, tail: String(d.tail || '').slice(-4) };
+    var d = KIOSK || !ONLINE ? null : store(BKEY), p, k;
+    if (!d || typeof d !== 'object' || (d.v !== 1 && d.v !== 2)) return;
+    if (MODES.indexOf(d.mode) > -1) srv.mode = d.mode;   // the server's last word, until it answers again
+    k = d.v === 1 ? 'badge' : d.kind;
+    if (HEX.test(d.hash || '') && (k === 'badge' || k === 'device' || (k === 'tg' && HEX32.test(d.sig || '')))) {
+      bd = { hash: d.hash, tail: String(d.tail || '').slice(-4), kind: k, sig: k === 'tg' ? d.sig : '' };
       srv.badge = { best: d.best || null, contact: !!d.contact, collected: !!d.collected };
     }
     p = d.pending;
     if (p && /^[a-z0-9]{16,24}$/.test(p.token || '') && Date.now() - p.t < MAX_SEND) {
       pend = { hash: d.hash || '', token: p.token, score: p.score | 0, relaxed: !!p.relaxed, endedBy: p.endedBy || 'done', t: p.t, fails: 0 };
     }
+    fit();
   }
   function bSave() {
     var b = bs(), p = pend && !pend.done ? pend : null;
     if (KIOSK || !ONLINE) return;
     if (!bd && !p) { try { localStorage.removeItem(BKEY); } catch (e) { /* blocked: nothing kept */ } return; }
-    store(BKEY, { v: 1, hash: bd ? bd.hash : '', tail: bd ? bd.tail : '', best: bd ? b.best || null : null,
-      contact: !!(bd && b.contact), collected: !!(bd && b.collected),
+    store(BKEY, { v: 2, kind: bd ? bd.kind : '', hash: bd ? bd.hash : '', tail: bd ? bd.tail : '', sig: bd ? bd.sig || '' : '',
+      best: bd ? b.best || null : null, contact: !!(bd && b.contact), collected: !!(bd && b.collected), mode: srv.mode,
       pending: p ? { token: p.token, score: p.score, relaxed: p.relaxed, endedBy: p.endedBy, t: p.t } : null, at: Date.now() });
   }
 
   // ---- Badge mode: transport ----
   // Every request goes through CurateBadge.post (JSON as text/plain, no preflight). A callback may run at once.
-  function post(body, done) {
+  function post(body, done, opts) {
     var B = Bdg(), called = false;
     function once(err, j) { if (called) return; called = true; done(err, j); }
     body.kiosk = KIOSK;
     if (!B || !B.post) { once('offline'); return; }
-    try { B.post(body, once); } catch (e) { if (called) throw e; once('offline'); }
+    try { B.post(body, once, opts); } catch (e) { if (called) throw e; once('offline'); }
   }
   // No answer, or busy/server: try again later. Any other error code is the server refusing.
   function noAnswer(err, j) { return !!err || !j || (!j.ok && (j.error === 'busy' || j.error === 'server')); }
-  // Every reply carries the switches; status also the thresholds in force.
+  // Every reply carries the switches (a new mode drops an id of another kind); status also the thresholds in force
+  // and whether the bot is set up.
   function absorb(j) {
     if (!j) return;
+    if (MODES.indexOf(j.mode) > -1 && j.mode !== srv.mode) { srv.mode = j.mode; fit(); bSave(); renderCopy(); }
+    if (typeof j.tg === 'boolean') { srv.tg = j.tg; if (j.tg) tg.err = ''; }
     if (typeof j.open === 'boolean') srv.open = j.open;
     if (isArr(j.soldOut)) srv.soldOut = j.soldOut.slice();
     if (isArr(j.tiers) && j.tiers.length === TIERS.length) {
@@ -1151,16 +1232,17 @@
   }
 
   // ---- Badge mode: the badge ----
-  // A scan or a typed code: read and hash it, then ask its state. Never spends a try (only Start does).
+  // A scan (badge mode only): read and hash it, then ask its state. Never spends a try (only Start does).
   function setBadge(raw, done) {
     var B = Bdg(), f;
     done = typeof done === 'function' ? done : function () {};
     if (!ONLINE || !B || !can('hash')) { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
+    if (mode() !== 'badge') { renderIntro(); done({ ok: false, error: 'mode' }); return; }   // switched meanwhile
     B.read(raw, function (err, v) {
       if (err === 'nocrypto') { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
-      if (err || !v || !/^[0-9a-f]{64}$/.test(v.hash || '')) { done({ ok: false, error: 'notbadge' }); return; }
+      if (err || !v || !HEX.test(v.hash || '')) { done({ ok: false, error: 'notbadge' }); return; }
       if (!bd || bd.hash !== v.hash) { spare = ''; hideContact(); }   // a start token and the contact form belong to one badge
-      bd = { hash: v.hash, tail: String(v.tail || '').slice(-4) };
+      bd = { hash: v.hash, tail: String(v.tail || '').slice(-4), kind: 'badge', sig: '' };
       srv.badge = null;
       f = flow;
       f.offline = false;
@@ -1174,29 +1256,55 @@
       });
     });
   }
+  // Not your badge? / Use another Telegram: back to the scan or the verify link (a fresh nonce).
   function forgetBadge() {
     bd = null; srv.badge = null; spare = '';
     flow = { busy: 0, offline: false };   // a late reply for the old badge leaves this one alone
     hideContact();
+    tgForget(); tg.late = false;
     bSave();
     renderIntro();
   }
   function hideContact() { var C = window.CurateContact; if (C) C.hide(); clearTimeout(lockTimer); }
-  // A try token: 20 characters the server accepts ([a-z0-9]{16,24}), crypto random where available.
-  function newToken() {
-    var a = 'abcdefghjkmnpqrstuvwxyz23456789', s = '', u = null, i;
-    try { u = new Uint8Array(20); window.crypto.getRandomValues(u); } catch (e) { u = null; }
-    for (i = 0; i < 20; i++) s += a.charAt((u ? u[i] : Math.floor(Math.random() * 256)) % a.length);
+  // n characters of a, crypto random where available: a try token, a Telegram nonce, a phone id.
+  function rnd(a, n) {
+    var s = '', u = null, i;
+    try { u = new Uint8Array(n); window.crypto.getRandomValues(u); } catch (e) { u = null; }
+    for (i = 0; i < n; i++) s += a.charAt((u ? u[i] : Math.floor(Math.random() * 256)) % a.length);
     return s;
+  }
+  // A try token: 20 characters the server accepts ([a-z0-9]{16,24}).
+  function newToken() { return rnd('abcdefghjkmnpqrstuvwxyz23456789', 20); }
+  // None mode: this phone's id, made on first need: 24 random characters, salted and hashed like a badge.
+  var devMaking = null, devFail = false;   // the visitor (flow) whose id is being made; no hash here
+  function device() {
+    var B = Bdg(), f = flow;
+    if (devMaking === f || bd || mode() !== 'none') return;
+    if (!B || !B.hash) { devFail = true; return; }
+    devMaking = f; f.busy++;
+    B.hash('DEVICE' + rnd('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 24), function (err, h) {
+      if (devMaking === f) devMaking = null;
+      f.busy = Math.max(0, f.busy - 1);
+      if (f !== flow || bd || mode() !== 'none') { renderIntro(); return; }
+      if (err || !HEX.test(h || '')) { devFail = true; renderIntro(); return; }
+      bd = { hash: h, tail: '', kind: 'device', sig: '' };
+      srv.badge = null;
+      bSave();
+      f.busy++;
+      renderIntro();
+      askStatus(function () { f.busy = Math.max(0, f.busy - 1); renderIntro(); });
+    });
   }
 
   // ---- Begin a round ----
   // Decides whether the next round counts. Badge mode, not for fun: POST start (a try counts when it starts;
   // quitting never refunds it). done({ ok, counted, shiftNo, tries, reason }) or done({ ok: false, error }).
-  // tries: the counted tries for the whole event (the server's perBadge in badge mode).
+  // tries: the counted tries for the whole event (the server's perBadge in badge mode). Telegram mode: nothing
+  // plays before the bot has seen the player, not even for fun; a Telegram id's start carries its sig.
+  function noHash() { return (mode() !== 'telegram' && !can('hash')) || (mode() === 'none' && devFail); }
   function funReason() {
     var b = bs();
-    if (!can('hash')) return 'nocrypto';
+    if (noHash()) return 'nocrypto';
     if (paused()) return 'paused';   // first: with merch paused, a badge wouldn't help
     if (!bd) return 'nobadge';
     if (flow.offline) return 'offline';
@@ -1213,6 +1321,13 @@
       return;
     }
     if (!(opts && opts.fun) && held()) { renderIntro(); done(begun); return; }
+    if (mode() === 'telegram' && !bd) {   // Try again (no answer while verifying) asks the bot again
+      if (!(opts && opts.fun) && tg.off) tgRetry();
+      if (!(opts && opts.fun) && KIOSK && tg.late) tg.late = false;   // the tablet after waitMs: a new QR, a new wait
+      renderIntro();
+      done({ ok: false, error: 'unverified' });
+      return;
+    }
     tok = null; begun = null;
     if (opts && opts.fun) {
       r = { ok: true, counted: false, shiftNo: 0, tries: COUNTED, reason: funReason() };
@@ -1221,21 +1336,30 @@
       done(r);
       return;
     }
-    if (!can('hash')) { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
-    if (!bd) { done({ ok: false, error: 'nobadge' }); return; }
+    if (noHash()) { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
+    if (!bd) { renderIntro(); done({ ok: false, error: 'nobadge' }); return; }
     // An unconfirmed token goes first: the server dedupes, so a start that saved but lost its reply isn't spent twice.
     token = spare = spare || newToken();
     hash = bd.hash;
     f = flow;
     f.busy++; f.offline = false;
     renderIntro();
-    post({ action: 'start', badge: hash, token: token, app: deckId || '' }, function (err, j) {
+    r = { action: 'start', badge: hash, token: token, app: deckId || '' };
+    if (tgId()) r.sig = bd.sig;
+    post(r, function (err, j) {
       f.busy = Math.max(0, f.busy - 1);
       // The visitor or the badge changed meanwhile (kiosk reset, Not your badge?): this reply is not theirs.
       if (f !== flow || !bd || bd.hash !== hash) { absorb(j); renderIntro(); done({ ok: false, error: 'nobadge' }); return; }
       if (noAnswer(err, j)) { f.offline = true; renderIntro(); done({ ok: false, error: 'offline' }); return; }
       absorb(j);
       spare = '';
+      // The server doesn't know this Telegram id (or the mode changed meanwhile): verify again.
+      if (!bd || bd.hash !== hash || (!j.ok && j.error === 'unverified')) {
+        if (bd && bd.hash === hash) { bd = null; srv.badge = null; bSave(); }
+        renderIntro();
+        done({ ok: false, error: j.ok ? 'nobadge' : j.error || 'unverified' });
+        return;
+      }
       merge(j);
       bSave();
       if (!j.ok || !j.counted) {   // collected, paused or limit (the intro shows it); a refused start spends nothing
@@ -1252,12 +1376,17 @@
   }
 
   // ---- Intro: the start area ----
-  // First match wins (spec 3.3). 'locked': the badge has a tier above stickers and no contact yet.
+  // First match wins (spec 3.3). 'locked': the id has a tier above stickers and no contact yet. Telegram mode before
+  // the bot has seen the player: tgverify (the link), tgwait (after the tap), tgoff (no answer), notelegram.
+  // None mode: device while this phone's id is made.
   var jsqrAsked = false;
+  var INTRO = ['intro-unlock', 'intro-go', 'intro-scan', 'intro-tg', 'intro-fun', 'intro-change', 'intro-cancel'];
   function introState() {
-    var b = bs();
+    var b = bs(), md = mode();
     if (!ONLINE) return 'v6';
-    if (!can('hash')) return 'nocrypto';
+    if (md === 'telegram' && !bd) return srv.tg === false || tg.err ? 'notelegram' : tg.off ? 'tgoff' : tg.tap ? 'tgwait' : 'tgverify';
+    if (noHash()) return 'nocrypto';
+    if (md === 'none' && !bd) return 'device';
     if (flow.offline) return 'offline';
     if (bd && modelB().state === 'locked') return 'locked';
     if (bd && b.collected) return 'collected';
@@ -1277,60 +1406,194 @@
     el.className = cls || 'ghost';
   }
   function renderIntro() {
-    var sec = $('intro'), s = introState(), b = bs(), line = bd ? 'Badge …' + bd.tail : '', note = '', B = Bdg(),
-        more = (b.left > 0 || held()) && !paused(), name = baseTier(modelB().t).name, c,   // the ticket's tier (sold out: lower)
-        tryN = ' · Try ' + (held() ? tok.tryNo : Math.min(COUNTED, (b.triesUsed || 0) + 1)) + ' of ' + COUNTED;
+    var sec = $('intro'), s, b, md = mode(), line, note = '', B = Bdg(), more, name, c, tryN, change, link = '', qr = '', a;
     if (!sec || sec.hidden) return;
-    ['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun', 'intro-change'].forEach(function (id) { btn(id, ''); });
+    if (introState() === 'device') device();   // none mode: this phone's id, made on first need
+    s = introState(); b = bs(); line = who();
+    more = (b.left > 0 || held()) && !paused(); name = baseTier(modelB().t).name;   // the ticket's tier (sold out: lower)
+    tryN = ' · Try ' + (held() ? tok.tryNo : Math.min(COUNTED, (b.triesUsed || 0) + 1)) + ' of ' + COUNTED;
+    change = md === 'telegram' ? 'Use another Telegram' : md === 'badge' ? 'Not your badge?' : '';
+    INTRO.forEach(function (id) { btn(id, ''); });
     if (s === 'v6') {
       line = '';
       c = canCount();
       if (c.reason === 'limit') note = allUsed() + '. This round is for fun.';
       btn('intro-go', 'Start', 'primary');
+    } else if (s === 'tgverify' || s === 'tgwait') {
+      // A booth tablet can't open the visitor's Telegram: the same link as a QR, asked about at once. After waitMs
+      // it shows no new QR (the idle reset takes it back to the title) until someone taps Try again.
+      if (KIOSK && !tg.tap && !tg.late) { tgLink(); tg.tap = Date.now(); s = 'tgwait'; tgPoll(false); }
+      link = KIOSK && tg.late ? '' : tgLink();   // the nonce is made when this state first shows
+      note = tg.late ? 'No answer from Telegram yet. Try again.' : s === 'tgwait' && !KIOSK ?
+        'Tap Start in the Kleros Booth bot, then come back here.' : 'Verify with Telegram to play: ' + fmt(COUNTED) + ' tries for merch.';
+      if (KIOSK) { qr = link; if (!link) btn('intro-go', 'Try again', 'primary'); }
+      else {
+        btn('intro-tg', s === 'tgwait' ? 'Open Telegram again' : 'Verify with Telegram', s === 'tgwait' ? 'second' : 'primary');
+        if (s === 'tgwait') btn('intro-cancel', 'Cancel');
+      }
+    } else if (s === 'tgoff') {
+      note = 'Can’t reach the merch list. Try again.';
+      btn('intro-go', 'Try again', 'primary');
+      btn('intro-cancel', 'Cancel');
+    } else if (s === 'notelegram') {
+      note = 'Telegram check isn’t ready yet. Ask the booth staff.';
     } else if (s === 'nocrypto') {
-      line = ''; note = 'This browser can’t read badges. Play for fun.';
+      line = ''; note = 'This browser can’t ' + (md === 'badge' ? 'read badges' : 'play for merch') + '. Play for fun.';
       btn('intro-fun', 'Play for fun', 'primary');
+    } else if (s === 'device') {
+      note = triesFor();
+      btn('intro-go', 'Start', 'primary');
+      btn('intro-fun', 'Play for fun');
     } else if (s === 'offline') {
       note = 'Can’t reach the merch list. ' + (bd ? 'Try again' : 'Scan your badge again') + ', or play for fun.';
       if (bd) btn('intro-go', 'Try again', 'primary'); else btn('intro-scan', 'Scan your badge', 'primary');   // no badge: nothing to retry
       btn('intro-fun', 'Play for fun');
-      if (bd) btn('intro-change', 'Not your badge?');
+      if (bd) btn('intro-change', change);
     } else if (s === 'locked') {
       if (more) line += tryN;
       note = 'Your ' + name + ' score needs one step.';
       btn('intro-unlock', 'Unlock my ' + name + ' ticket', 'primary');
       if (more) btn('intro-go', 'Start', 'second');
       btn('intro-fun', 'Play for fun');
-      btn('intro-change', 'Not your badge?');
+      btn('intro-change', change);
     } else if (s === 'collected' || s === 'paused' || s === 'left0') {
-      note = s === 'collected' ? 'This badge already got its merch.' : s === 'paused' ? 'Merch is paused right now.' : allUsed() + '.';
+      note = s === 'collected' ? gotMerch() : s === 'paused' ? 'Merch is paused right now.' : allUsed() + '.';
       btn('intro-fun', 'Play for fun', 'primary');
-      if (bd) btn('intro-change', 'Not your badge?');
+      if (bd) btn('intro-change', change);
     } else if (s === 'ready') {
       if (b.left != null || held()) line += tryN;
+      if (md === 'none') note = triesFor();
       btn('intro-go', 'Start', 'primary');
       btn('intro-fun', 'Play for fun');
-      btn('intro-change', 'Not your badge?');
+      btn('intro-change', change);
     } else if (s === 'nocamera') {
       note = 'No camera here. Play on the booth tablet, or play for fun.';
       btn('intro-fun', 'Play for fun', 'primary');
     } else {
-      note = 'Your Devcon badge gives ' + fmt(COUNTED) + ' tries for merch.';
+      note = triesFor();
       btn('intro-scan', 'Scan your badge', 'primary');
       btn('intro-fun', 'Play for fun');
       // iPhones have no BarcodeDetector: fetch the reader while the visitor reads the examples.
       if (!jsqrAsked && B && B.loadJsQR && !can('detector')) { jsqrAsked = true; B.loadJsQR(function () {}); }
     }
     if (flow.busy > 0 && s !== 'v6') {
-      note = 'Checking your badge…';
-      ['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun', 'intro-change'].forEach(function (id) { var el = $(id); if (el) el.disabled = true; });
+      note = md === 'badge' ? 'Checking your badge…' : 'Checking your tries…';
+      INTRO.forEach(function (id) { var el = $(id); if (el) el.disabled = true; });
     }
+    // The link's href is set before the tap (iOS opens the Telegram app only for a real link tap, never from script).
+    a = $('intro-tg');
+    if (a && link && a.href !== link) a.href = link;
     // Pick another app waits too: leaving mid-start would spend a try on a round that never plays.
     c = $('intro-back');
     if (c) c.disabled = flow.busy > 0 && s !== 'v6';
     txt('intro-badge', line);
     vis('intro-badge', !!line);
     txt('intro-note', note);
+    txt('intro-priv-text', 'Verifying adds your Telegram ID to Kleros news. Leave any time: send /stop to the bot.');
+    vis('intro-priv', s === 'tgverify' || s === 'tgwait');
+    txt('intro-qr-cap', 'Scan with your phone camera, tap Start in Telegram.');
+    showQR('intro-qr-img', qr, 'intro-qr');
+  }
+
+  // ---- Telegram mode: verifying ----
+  // The intro's link opens the Kleros Booth bot with a one-time nonce (t.me/<bot>?start=<nonce>); the bot tells the
+  // sheet script, and tgcheck turns the nonce into the player's id and its sig (the raw Telegram number never comes
+  // here). The nonce and the tap's time stay on the phone (kleros_devcon_curate_tg; a tablet keeps them in memory),
+  // so a reload or the way back from Telegram picks the wait up. tgcheck runs every pollMs while the page shows, at
+  // once when it shows again, and stops waitMs after the tap (one last ask, then a new nonce).
+  var tg = { n: '', at: 0, tap: 0, late: false, off: false, err: '', fails: 0, timer: 0, busy: '' };
+  function tgLoad() {
+    var d = KIOSK || !ONLINE ? null : store(TGKEY);
+    if (d && /^[A-Za-z0-9]{24}$/.test(d.n || '')) { tg.n = d.n; tg.at = +d.at || 0; tg.tap = +d.tap || 0; }
+  }
+  function tgSave() {
+    if (KIOSK || !ONLINE) return;
+    if (tg.n) store(TGKEY, { n: tg.n, at: tg.at, tap: tg.tap });
+    else { try { localStorage.removeItem(TGKEY); } catch (e) { /* blocked: nothing kept */ } }
+  }
+  function tgLink() {
+    if (!tg.n) {
+      tg.n = rnd('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', 24);
+      tg.at = Date.now(); tg.tap = 0;
+      tgSave();
+    }
+    return 'https://t.me/' + (TGS.bot || 'KlerosBoothBot') + '?start=' + tg.n;
+  }
+  function tgForget() {
+    clearTimeout(tg.timer);
+    tg.n = ''; tg.at = tg.tap = tg.fails = tg.timer = 0; tg.off = false;
+    tgSave();
+  }
+  function tgOn() { return ONLINE && mode() === 'telegram' && !bd && !!tg.n && !!tg.tap && !tg.off && !tg.err && srv.tg !== false; }
+  // The kiosk's idle reset waits while a visitor verifies on their phone (until the first waitMs runs out).
+  function tgWaiting() { return tgOn() && !tg.late; }
+  // The tap: the link opens Telegram by itself; this only starts the wait.
+  function tgTapped() {
+    if (KIOSK || !tg.n) return;
+    tg.tap = Date.now(); tg.late = tg.off = false; tg.fails = 0;
+    tgSave();
+    renderIntro();
+    tgPoll(false);
+  }
+  function tgRetry() {
+    if (!tg.n) return;
+    tg.tap = Date.now(); tg.off = false; tg.fails = 0;
+    tgSave();
+    tgPoll(true);
+  }
+  function tgCancel() {
+    var a = $('intro-tg');
+    tgForget(); tg.late = false;
+    renderIntro();
+    if (a && !a.hidden) { try { a.focus({ preventScroll: true }); } catch (e) { a.focus(); } }
+  }
+  // now: ask at once (a tap, the page shown again); else in pollMs. Two answers missed in a row: tgoff.
+  function tgPoll(now) {
+    var n = tg.n, f = flow, last;
+    clearTimeout(tg.timer); tg.timer = 0;
+    if (!tgOn() || document.hidden || tg.busy === n) return;
+    last = Date.now() - tg.tap >= (TGS.waitMs || 300000);
+    if (!now && !last) { tg.timer = setTimeout(function () { tg.timer = 0; tgPoll(true); }, TGS.pollMs || 2500); return; }
+    tg.busy = n;
+    post({ action: 'tgcheck', nonce: n }, function (err, j) {
+      if (tg.busy === n) tg.busy = '';
+      if (f !== flow || n !== tg.n || !tgOn()) { if (tgOn() && !tg.timer) tgPoll(false); return; }   // cancelled, verified or a new visitor
+      if (noAnswer(err, j)) {
+        if (++tg.fails >= 2) { tg.off = true; renderIntro(); } else if (last) tgLate(); else tgPoll(false);
+        return;
+      }
+      tg.fails = 0;
+      absorb(j);
+      if (mode() !== 'telegram') renderIntro();
+      else if (j.ok && j.verified && HEX.test(j.badge || '') && HEX32.test(j.sig || '')) tgDone(j);
+      else if (!j.ok && j.error === 'notelegram') { tg.err = j.error; renderIntro(); }
+      else if (!j.ok) { tgForget(); renderIntro(); }   // badrequest: start again with a new nonce
+      else if (last) tgLate();
+      else tgPoll(false);
+    }, { timeoutMs: SV.statusTimeoutMs || 8000 });
+  }
+  function tgLate() { tgForget(); tg.late = true; renderIntro(); }
+  // The bot saw the player: the id is theirs (with its sig), then its tries.
+  function tgDone(j) {
+    var f = flow;
+    tgForget(); tg.late = false;   // the nonce is spent
+    spare = ''; hideContact();
+    bd = { hash: j.badge, tail: '', kind: 'tg', sig: j.sig };
+    srv.badge = null;
+    bSave();
+    UI.nudge();   // the tablet: a full idle period from now, though the visitor verified on their own phone
+    UI.say('Verified with Telegram.');
+    f.busy++;
+    renderIntro();
+    askStatus(function () {
+      var a = document.activeElement, go = $('intro-go');
+      f.busy = Math.max(0, f.busy - 1);
+      renderIntro();
+      // Focus was on the link or Cancel, both gone now: Start takes it, so it never drops to <body>.
+      if (!isHidden('intro') && go && !go.hidden && (!a || a === document.body || a.hidden)) {
+        try { go.focus({ preventScroll: true }); } catch (e) { go.focus(); }
+      }
+    });
   }
 
   // ---- Badge mode: saving the score ----
@@ -1401,6 +1664,9 @@
     on('undo-btn', 'click', undoCollect);
     on('rep-retry', 'click', retryAll);
     window.addEventListener('online', retryAll);
+    // Telegram mode: the verify link (its own tap opens Telegram) and Cancel, which forgets the nonce.
+    on('intro-tg', 'click', tgTapped);
+    on('intro-cancel', 'click', tgCancel);
     // Any way out of Results releases the medal: #report getting hidden, or game.js’s two buttons.
     on('again', 'click', leaveReport);
     on('rep-switch', 'click', leaveReport);
@@ -1413,9 +1679,10 @@
       var r = $('report');
       if (KIOSK && r && !r.hidden) armIdle();
     });
-    // Back from checking in, from another tab or from the bfcache: re-read and upgrade in place.
-    document.addEventListener('visibilitychange', redraw);
-    window.addEventListener('pageshow', function (e) { if (e.persisted) redraw(); });   // frozen pages miss 'storage'
+    // Back from checking in, from another tab or from the bfcache: re-read and upgrade in place. Back from
+    // Telegram: ask about the nonce at once.
+    document.addEventListener('visibilitychange', function () { redraw(); if (!document.hidden) tgPoll(true); });
+    window.addEventListener('pageshow', function (e) { if (e.persisted) redraw(); tgPoll(true); });   // frozen pages miss 'storage'
     window.addEventListener('storage', function (e) {
       if (!KIOSK && (e.key === KEY || e.key === 'kleros_devcon_self' || e.key === null)) redraw();
     });
@@ -1442,12 +1709,14 @@
   function init(ui) {
     var noop = function () {};
     ui = ui || {};
-    UI = { show: ui.show || noop, say: ui.say || noop, reset: ui.reset || noop };
+    UI = { show: ui.show || noop, say: ui.say || noop, reset: ui.reset || noop, nudge: ui.nudge || noop };
     load();
     bLoad();
+    tgLoad();
     wire();
     refreshBrief();
     if (pend) sendFinish(pend);   // a round saved on an earlier visit but never sent (under 6 h old)
+    tgPoll(true);                 // a Telegram wait from before a reload
   }
 
   window.CurateRewards = {
@@ -1459,6 +1728,8 @@
     showTicket: showTicket, refreshBrief: refreshBrief,
     // Badge mode (spec 4.1): online is false in v6 mode, where begin() only reads canCount().
     online: ONLINE, renderIntro: renderIntro, setBadge: setBadge, forgetBadge: forgetBadge, begin: begin,
-    refreshStatus: refreshStatus
+    refreshStatus: refreshStatus,
+    // How players verify (telegram | badge | none); the kiosk's idle reset waits on tgWaiting; qrText: the ticket's QR.
+    mode: mode, tgWaiting: tgWaiting, qrText: qrText
   };
 })();

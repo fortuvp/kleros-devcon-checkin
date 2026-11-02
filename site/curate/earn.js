@@ -1,8 +1,8 @@
-// Curate game: the contact step under a locked ticket (badge mode). One field, email or @Telegram, plus an
-// optional curator tick. It posts to the booth's one sheet script through CurateBadge.post (settings.js
-// server.endpoint, apps-script/staff-desk/), which writes the contacts sheet, never the badge list, and never the
-// check-in backend. Nothing is queued or kept on the device: a contact that can't be sent is typed again.
-// User text reaches the DOM through textContent only.
+// Curate game: the contact step under a locked ticket (badge and none modes; in telegram mode verifying is the
+// contact, so no ticket locks). One field, email or @Telegram, plus an optional curator tick. It posts to the
+// booth's one sheet script through CurateBadge.post (settings.js server.endpoint, apps-script/staff-desk/), which
+// writes the contacts sheet, never the badge list, and never the check-in backend. Nothing is queued or kept on the
+// device: a contact that can't be sent is typed again. User text reaches the DOM through textContent only.
 (function () {
   'use strict';
 
@@ -25,9 +25,9 @@
     for (i = 0; i < 12; i++) s += a.charAt((u ? u[i] : Math.floor(Math.random() * 256)) % a.length);
     return s;
   }
-  // The privacy notice (#curate-privacy) is always in the page: say where to ask for deletion.
+  // The privacy notice (#curate-privacy) is always in the page: say where to ask for deletion (both paragraphs).
   function fillPrivacy() {
-    if (C.privacyEmail) txt('cp-mail', 'ask at the booth or write to ' + C.privacyEmail);
+    if (C.privacyEmail) ['cp-mail', 'cp-mail-tg'].forEach(function (id) { txt(id, 'ask at the booth or write to ' + C.privacyEmail); });
   }
 
   // ---- Form ----

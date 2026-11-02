@@ -1,8 +1,8 @@
 // Curate game engine: the app picker, the intro (rule, two example entries, the badge scanner sheet), the round
 // and the hand-off to the report. Internal names still say "shift"; only the copy says round. One rAF loop
 // drives the clock and drags. rules.js judges, objects.js paints, rewards.js owns storage, the server, the
-// intro's start area, report and ticket (never localStorage or the network here; CurateBadge only to scan).
-// textContent only.
+// intro's start area (the Telegram link and its wait too), report and ticket (never localStorage or the network
+// here; CurateBadge only to scan, in badge mode). textContent only.
 (function () {
   var S = window.CURATE_SETTINGS, D = window.CURATE_DECKS, R = window.CurateRules;
   var KIOSK = /[?&]kiosk=1\b/.test(location.search);
@@ -100,7 +100,8 @@
     el.textContent = '';
     sayT = setTimeout(function () { sayT = 0; el.textContent = el._next; }, 60);
   }
-  var ui = { show: showView, say: say, reset: reset };
+  // nudge: rewards.js re-arms the tablet's idle reset when a visitor verifies on their own phone (no tap here).
+  var ui = { show: showView, say: say, reset: reset, nudge: idleNudge };
 
   // ---- Brief ----
   function setDeck(id) {
@@ -271,13 +272,14 @@
   }
 
   // ---- Kiosk idle on the intro ----
-  // A tablet left on the intro goes back to the title after kioskIdleMs: no visitor inherits a scanned badge.
+  // A tablet left on the intro goes back to the title after kioskIdleMs: no visitor inherits a scanned badge. It
+  // waits while a visitor verifies with Telegram on their own phone (rewards.js stops that wait after waitMs).
   var idleT = 0;
   function idleOff() { if (idleT) clearTimeout(idleT); idleT = 0; }
   function idleArm() {
     idleOff();
     if (!KIOSK || curView !== 'intro') return;
-    idleT = setTimeout(function () { idleT = 0; if (curView === 'intro') reset(); }, S.kioskIdleMs || 60000);
+    idleT = setTimeout(function () { idleT = 0; if (curView === 'intro') { if (rw('tgWaiting')) idleArm(); else reset(); } }, S.kioskIdleMs || 60000);
   }
   function idleNudge() { if (KIOSK && curView === 'intro') idleArm(); }
 
@@ -295,7 +297,7 @@
       beginning = false;
       if (mode !== 'intro' || curView !== 'intro') return;   // left meanwhile
       if (r && r.ok) { began = r; startFlow(); }
-      else focusOn(['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun']);
+      else focusOn(['intro-unlock', 'intro-go', 'intro-tg', 'intro-scan', 'intro-fun']);
     });
   }
   // rewards.js without begin(): canCount()'s answer, spending nothing.
@@ -1079,7 +1081,8 @@
     on('intro-go', function (e) { keyboard = e.detail === 0; begin(false); });
     on('intro-fun', function (e) { keyboard = e.detail === 0; begin(true); });
     on('intro-scan', onIntroScan);
-    on('intro-change', function () { rw('forgetBadge'); openScanner(); });   // Not your badge?
+    // Not your badge? (scan again) / Use another Telegram (back to the verify link).
+    on('intro-change', function () { rw('forgetBadge'); if (rw('mode') === 'badge') openScanner(); else focusOn(['intro-tg', 'intro-go']); });
     on('intro-unlock', function () { rw('showTicket'); });   // the locked ticket, its contact step
     on('intro-back', function () { goBrief(true); });
     on('badge-type', function () { txt('badge-msg', ''); showForm(); });

@@ -1,13 +1,15 @@
 // Devcon badge module for the game (/curate/) and the staff desk (/staff/): one badge, one id, one hash on any
 // phone; only the salted SHA-256 leaves it. Callbacks done(err, value) may run synchronously. QR: BarcodeDetector,
 // else jsQR 1.4.0 (Apache-2.0, /curate/vendor/jsQR.js + jsQR-LICENSE.txt), loaded only when a scan needs it.
+// QR out (3 Nov): the game ticket's and the booth tablet's Telegram link, drawn with qrcode-generator 1.4.4 (MIT,
+// /curate/vendor/qrcode.js + qrcode-LICENSE.txt), loaded only when one shows.
 (function () {
   'use strict';
 
   // ---- Setup ----
   var SALT = 'kleros-devcon-badge|';   // = the v6 desk: old and new pages hash alike
   var FORMATS = ['qr_code', 'aztec', 'data_matrix', 'pdf417'];
-  var jsqrWait = null;   // callbacks queued on the one in-flight jsQR load
+  var waits = {};   // callbacks queued on each in-flight vendor load, by its global's name
 
   // Read at call time: a test harness can swap settings.
   function cfg(k) { return (window.CURATE_SETTINGS || {})[k] || {}; }
@@ -78,23 +80,53 @@
       }, function () { fin('offline'); });
   }
 
-  // ---- jsQR (lazy) ----
-  // One shared load; a failed one is retried by the next call.
-  function loadJsQR(done) {
+  // ---- Vendor scripts (lazy): jsQR, qrcode-generator ----
+  // One shared load each; a failed one is retried by the next call. done(good).
+  function lazy(name, src, done) {
     var doc = window.document, el;
     done = done || function () {};
-    if (window.jsQR) { done(true); return; }
-    if (jsqrWait) { jsqrWait.push(done); return; }
-    jsqrWait = [done];
+    if (window[name]) { done(true); return; }
+    if (waits[name]) { waits[name].push(done); return; }
+    waits[name] = [done];
     el = doc.createElement('script');
-    el.src = '/curate/vendor/jsQR.js';
+    el.src = src;
     el.onload = el.onerror = function () {
-      var list = jsqrWait, good = !!window.jsQR;
-      jsqrWait = null;
+      var list = waits[name], good = !!window[name];
+      waits[name] = null;
       if (!good) el.parentNode.removeChild(el);
       list.forEach(function (f) { try { f(good); } catch (e) { /* one caller must not starve the rest */ } });
     };
     doc.head.appendChild(el);
+  }
+  function loadJsQR(done) { lazy('jsQR', '/curate/vendor/jsQR.js', done); }
+  function loadQR(done) { lazy('qrcode', '/curate/vendor/qrcode.js', done); }
+  // A QR code as an <svg>: dark modules on white, a 4-module quiet zone, medium error correction. Upper-case text
+  // (a ticket) uses the compact alphanumeric mode. null before loadQR() is done, or when the text can't fit.
+  function qr(text) {
+    var Q = window.qrcode, doc = window.document, NS = 'http://www.w3.org/2000/svg', q, n, d = '', r, c, e, svg, el;
+    if (!Q || !doc.createElementNS) return null;
+    try {
+      q = Q(0, 'M');
+      q.addData(String(text), /^[0-9A-Z $%*+\-.\/:]+$/.test(text) ? 'Alphanumeric' : 'Byte');
+      q.make();
+    } catch (err) { return null; }
+    n = q.getModuleCount();
+    for (r = 0; r < n; r++) {   // one rectangle per run of dark modules in a row
+      for (c = 0; c < n; c = e + 1) {
+        e = c;
+        while (e < n && q.isDark(r, e)) e++;
+        if (e > c) d += 'M' + (c + 4) + ' ' + (r + 4) + 'h' + (e - c) + 'v1h' + (c - e) + 'z';
+      }
+    }
+    svg = doc.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + (n + 8) + ' ' + (n + 8));
+    svg.setAttribute('shape-rendering', 'crispEdges');
+    svg.setAttribute('aria-hidden', 'true');
+    el = svg.appendChild(doc.createElementNS(NS, 'rect'));
+    el.setAttribute('width', '100%'); el.setAttribute('height', '100%'); el.setAttribute('fill', '#fff');
+    el = svg.appendChild(doc.createElementNS(NS, 'path'));
+    el.setAttribute('d', d); el.setAttribute('fill', '#000');
+    return svg;
   }
 
   // ---- Scanner ----
@@ -183,5 +215,5 @@
 
   // ---- Export ----
   window.CurateBadge = { SALT: SALT, endpoint: endpoint, can: can, id: id, ok: ok, tail: tail, hash: hash, read: read,
-    post: post, scan: scan, loadJsQR: loadJsQR };
+    post: post, scan: scan, loadJsQR: loadJsQR, loadQR: loadQR, qr: qr };
 })();

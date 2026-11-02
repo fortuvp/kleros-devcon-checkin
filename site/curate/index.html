@@ -165,6 +165,16 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   font:700 16.5px Inter,sans-serif; color:#fff; text-decoration:none;
   background:linear-gradient(95deg,var(--kleros-deep) 0%,var(--kleros) 45%,var(--pink) 100%) padding-box,conic-gradient(from var(--edge-angle,210deg),#c084ff,#27cdfe 25%,#6cc5ff 50%,rgba(192,132,255,.35) 75%,#c084ff) border-box; }
 .intro-start button:disabled { opacity:.55; cursor:default; }
+/* Telegram mode: Verify with Telegram is a real link (iOS opens the app only for a link tap), styled as the buttons */
+a.primary { display:flex; align-items:center; justify-content:center; text-decoration:none; }
+#intro-priv { margin:8px 6px 0; }
+/* QR codes (badge.js draws an <svg>, dark on white with its quiet zone): the ticket's for the desk, the tablet's Telegram link */
+.qr { width:200px; height:200px; margin:0 auto; border-radius:8px; overflow:hidden; background:#fff; }
+.qr svg { display:block; width:100%; height:100%; }
+#t-qr { position:relative; margin-top:14px; }   /* above the sheen, like the text */
+#intro-qr { margin:0 0 8px; text-align:center; }
+#intro-qr .qr { width:220px; height:220px; }
+#intro-qr-cap { margin:6px 0 0; font:600 13px/1.35 Inter,sans-serif; }
 /* Example entry: picture, a Correct/Wrong pill tied to the swipe, the text parts, then the one-line reason */
 .ex { display:grid; grid-template-columns:96px minmax(0,1fr); gap:6px 11px; align-items:center; padding:9px 10px; border-radius:16px; background:var(--field); border:1.5px solid var(--field-line); text-align:left; }
 .ex[data-ok=true] { border-color:rgba(101,220,127,.55); }
@@ -597,9 +607,14 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
     <button type="button" class="primary" id="intro-unlock" hidden>Unlock my ticket</button>
     <button type="button" class="primary" id="intro-go">Start</button>
     <button type="button" class="primary" id="intro-scan" hidden>Scan your badge</button>
+    <!-- Telegram mode: rewards.js sets the link's nonce and label; a booth tablet shows it as a QR instead -->
+    <a class="primary" id="intro-tg" hidden href="https://t.me/KlerosBoothBot">Open Telegram</a>
+    <div id="intro-qr" hidden><div class="qr" id="intro-qr-img" role="img" aria-label="QR code that opens the Kleros Booth bot in Telegram"></div><p id="intro-qr-cap"></p></div>
+    <p class="fine" id="intro-priv" hidden><span id="intro-priv-text"></span> <a class="link" href="#curate-privacy">Privacy</a></p>
     <div class="links">
       <button type="button" class="ghost" id="intro-fun" hidden>Play for fun</button>
       <button type="button" class="ghost" id="intro-change" hidden>Not your badge?</button>
+      <button type="button" class="ghost" id="intro-cancel" hidden>Cancel</button>
       <button type="button" class="ghost" id="intro-back">Pick another app</button>
     </div>
   </div>
@@ -647,6 +662,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
         <hr>
         <div id="t-who"></div>
         <div id="t-org"></div>
+        <div class="qr" id="t-qr" hidden role="img" aria-label="QR code for the merch desk"></div>   <!-- telegram and none modes: what the desk scans -->
         <div id="t-code"></div>
         <div id="t-hint">Show this at the booth.</div>
       </div>
@@ -681,13 +697,18 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   </div>
 </section>
 
-<!-- ---- Privacy: the game's own notice for the contact step (earn.js fills #cp-mail); a plain <details>, so it costs no space ---- -->
+<!-- ---- Privacy: the game's own notice (earn.js fills #cp-mail and #cp-mail-tg); a plain <details>, so it costs no space.
+     rewards.js shows the paragraph for how players verify: Telegram, or the contact step (badge and none modes, v6) ---- -->
 <details id="curate-privacy">
   <summary>Privacy</summary>
-  <p>If you leave an email or @Telegram to unlock merch, Cooperative Kleros keeps it in a private list for the
+  <p id="cp-tg">If you play with Telegram, Cooperative Kleros keeps your Telegram user ID (a number: never your name or
+  username) in a private list, to send you Kleros news through the Kleros Booth bot. We keep it until you send /stop
+  to the bot, which deletes it, or ask us to delete it: <span id="cp-mail-tg">ask at the booth</span>. Your game tries
+  are stored under a scrambled code, in a separate list, never next to your Telegram ID.</p>
+  <p id="cp-contact" hidden>If you leave an email or @Telegram to unlock merch, Cooperative Kleros keeps it in a private list for the
   Kleros newsletter, and for curator info only if you tick that box. A Telegram handle gets one message with the
   newsletter channel link, nothing else. We keep it until you unsubscribe or ask us to delete it:
-  <span id="cp-mail">ask at the booth</span>. Your badge is stored only as a scrambled code, in a separate list,
+  <span id="cp-mail">ask at the booth</span>. <span id="cp-who">Your badge</span> is stored only as a scrambled code, in a separate list,
   never next to your contact.</p>
 </details>
 </main>
@@ -762,6 +783,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
       <li>Kleros jurors decide. The winner takes the deposit.</li>
     </ol>
     <p>Here: Wrong is a challenge. Tap the wrong part for extra points. Effort counts: your score never drops below 10 points per entry you decide.</p>
+    <p id="how-merch" hidden></p>   <!-- rewards.js: who gets the tries, by how players verify -->
     <p class="not-kiosk"><a class="link" href="https://docs.kleros.io/products/curate" target="_blank" rel="noopener">Read about Kleros Curate →</a></p>
     <h3 id="credits-title">Photo credits</h3>
     <ul id="credits-list" aria-labelledby="credits-title"></ul>

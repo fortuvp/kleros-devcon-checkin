@@ -3,7 +3,7 @@
 // outside the Crypto exchange app, and Curate’s jargon on the play screen) and file sizes; with --sim, the §2.8
 // tier simulation (v5 pick model; 2 Nov: 2 counted tries per badge for the whole event). Badge tries (2 Nov): the booth web app
 // (apps-script/staff-desk/Code.gs) runs here against an in-memory Sheets stub, and rewards.js, earn.js and badge.js
-// run against it in fake pages.
+// run against it in fake pages. Verify modes (3 Nov): the same in telegram mode (a fake Telegram Bot API) and none mode.
 // Node 22, no dependencies. It runs the very settings.js, decks.js and rules.js the phones load.
 //   node scripts/curate-check.js          checks only
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
@@ -43,7 +43,7 @@ var S = W.CURATE_SETTINGS, D = W.CURATE_DECKS, R = W.CurateRules;
 function checkSettings() {
   var keys = ['v', 'seconds', 'entries', 'fakes', 'points', 'trust',
     'tiers', 'checkinNeededFrom', 'countedTries', 'kioskMaxTier', 'kioskResetMs', 'kioskIdleMs', 'staffHoldMs',
-    'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch', 'server', 'badge', 'contact'], i, cfg, fm,
+    'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch', 'server', 'verify', 'telegram', 'badge', 'contact'], i, cfg, fm,
     tk = ['teal', 'purple', 'gold'];
   if (!S) return fail('settings.js: window.CURATE_SETTINGS is missing');
   keys.forEach(function (k) { if (S[k] === undefined) fail('settings.js: missing ' + k); });
@@ -57,8 +57,17 @@ function checkSettings() {
     if (!(sv.timeoutMs >= 15000)) fail('settings.js: server.timeoutMs must be ≥ 15000 (above the script’s 6 s lock wait)');
     try { new RegExp(bg.pattern || ''); } catch (e) { fail('settings.js: badge.pattern does not compile: ' + e.message); }
     if (typeof bg.typed !== 'boolean') fail('settings.js: badge.typed must be true or false');
+    // 3 Nov (owner): players never type a badge code; badge mode is scan only.
+    if (bg.typed !== false) fail('settings.js: badge.typed must be false (badge mode is scan only)');
     if (typeof ct.monthly !== 'string' || !ct.monthly) fail('settings.js: contact.monthly is empty');
   })(S.server || {}, S.badge || {}, S.contact || {});
+  // 3 Nov: how players verify until the server answers (its Switches tab wins), and the Telegram bot's link and timing.
+  (function (tg) {
+    if (['telegram', 'badge', 'none'].indexOf(S.verify) < 0) fail('settings.js: verify must be telegram, badge or none');
+    if (S.verify !== 'telegram') warn('settings.js: verify is ' + S.verify + '; the owner chose telegram as the default');
+    if (!/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(tg.bot || '')) fail('settings.js: telegram.bot must be a bot username, without the @');
+    if (!(tg.pollMs >= 1000) || !(tg.waitMs >= 60000) || tg.waitMs <= tg.pollMs) fail('settings.js: telegram.pollMs ≥ 1000 and waitMs ≥ 60000');
+  })(S.telegram || {});
   // 2 Nov (user): 2 tries per ticket, the Devcon badge, for the whole event. Nothing counts tries per day any more.
   ['countedPerDay', 'lastDay'].forEach(function (k) {
     if (S[k] !== undefined) fail('settings.js: ' + k + ' is gone (countedTries is per badge or phone for the whole event, never per day)');
@@ -910,6 +919,10 @@ function jpegHeight(buf) {
 // index.html 77 KB / 22 KB gz (intro, scanner, contact, privacy notice); badge.js is new (10 KB / 4 KB gz).
 // rewards.js 78 KB / 25 KB gz, above the spec’s 56 / 18.5: it holds both modes (v6 per phone and badge mode: tries,
 // saving with retries, switches, the locked ticket), measured 74.2 / 23.6. The total follows (eager files).
+// Verify modes (3 Nov, growth accepted for the ship-day build; the owner may still ask for a lazy Telegram file):
+// rewards.js 92 KB / 29.25 KB gz holds the Telegram verify flow, its tgcheck polling, the kiosk QR, mode-aware copy,
+// the ticket QR text and the QR retry, measured 91.4 / 29.1; badge.js 11.5 KB / 4.75 KB gz adds loadQR and qr() (the
+// SVG drawing; the generator itself is lazy), measured 11.4 / 4.7. The total follows: 338 KB / 108.5 KB gz.
 var BUDGETS = {
   // settings.js +0.5 KB and earn.js: the Earn for real sign-up (30 Oct); +0.25 KB: separate desk and sign-up sheets (2 Nov).
   'settings.js': [4.8 * KB, 0, true], 'earn.js': [6 * KB, 2.5 * KB], 'decks.js': [47.5 * KB, 13.75 * KB, true], 'rules.js': [9.2 * KB, 0, true],
@@ -917,9 +930,9 @@ var BUDGETS = {
   // game.js +0.25 KB gz: a stale start reply is ignored and the scanner skips non-badge codes (2 Nov review).
   'objects.js': [33.5 * KB, 12.5 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [58 * KB, 18.75 * KB],
   // rewards.js +0.5 KB gz in v6: the tries line, the early-end headline and the just-for-fun tier line.
-  'rewards.js': [78 * KB, 25 * KB], 'index.html': [77 * KB, 22 * KB], 'badge.js': [10 * KB, 4 * KB]
+  'rewards.js': [92 * KB, 29.25 * KB], 'index.html': [77 * KB, 22 * KB], 'badge.js': [11.5 * KB, 4.75 * KB]
 };
-var TOTAL = [330 * KB, 104 * KB];   // eager files only: gl.js loads later, and only where WebGL runs; jsQR only to scan
+var TOTAL = [338 * KB, 108.5 * KB];   // eager files only: gl.js loads later, and only where WebGL runs; jsQR only to scan
 function checkSizes() {
   var total = 0, totalGz = 0, imgs = [], imgTotal = 0, big = 0;
   console.log('Sizes (raw / gzip, budget)');
@@ -937,13 +950,14 @@ function checkSizes() {
   console.log('  ' + pad('total', 12) + lpad(total, 6) + ' / ' + lpad(totalGz, 5) + '   ≤ ' + (TOTAL[0] / KB) + ' KB / ' +
     (TOTAL[1] / KB) + ' KB gz, before gl.js and photos');
   if (total > TOTAL[0] || totalGz > TOTAL[1]) warn('site/curate is over the total budget (eager files)');
-  // jsQR loads only when a phone without a built-in QR reader scans a badge: reported apart, out of the total.
-  (function (p) {
-    var buf = fs.existsSync(p) ? fs.readFileSync(p) : null;
-    if (!buf) return fail('site/curate/vendor/jsQR.js is missing (the iPhone badge reader)');
-    console.log('  ' + pad('vendor/jsQR', 12) + lpad(buf.length, 6) + ' / ' + lpad(zlib.gzipSync(buf, { level: 9 }).length, 5) + '   lazy: only when a scan needs it');
-    if (!fs.existsSync(path.join(DIR, 'vendor', 'jsQR-LICENSE.txt'))) fail('site/curate/vendor/jsQR-LICENSE.txt is missing');
-  })(path.join(DIR, 'vendor', 'jsQR.js'));
+  // jsQR loads only when a phone without a built-in QR reader scans a badge, and qrcode-generator (3 Nov) only when a
+  // ticket QR or the tablet's Telegram QR shows: both reported apart, out of the total, each with its licence.
+  [['jsQR', 'only when a scan needs it', 'the iPhone badge reader'], ['qrcode', 'only when a QR shows', 'the ticket QR maker']].forEach(function (v) {
+    var p = path.join(DIR, 'vendor', v[0] + '.js'), buf = fs.existsSync(p) ? fs.readFileSync(p) : null;
+    if (!buf) return fail('site/curate/vendor/' + v[0] + '.js is missing (' + v[2] + ')');
+    console.log('  ' + pad('vendor/' + v[0], 12) + lpad(buf.length, 6) + ' / ' + lpad(zlib.gzipSync(buf, { level: 9 }).length, 5) + '   lazy: ' + v[1]);
+    if (!fs.existsSync(path.join(DIR, 'vendor', v[0] + '-LICENSE.txt'))) fail('site/curate/vendor/' + v[0] + '-LICENSE.txt is missing');
+  });
   if (fs.existsSync(IMG)) imgs = fs.readdirSync(IMG).filter(function (f) { return /\.jpg$/.test(f); });
   imgs.forEach(function (f) {
     var buf = fs.readFileSync(path.join(IMG, f)), n = buf.length, h = jpegHeight(buf);
@@ -960,11 +974,21 @@ function checkSizes() {
 // a fake clock, LockService, PropertiesService, Utilities.formatDate (Intl, booth time zone), ContentService and
 // Logger. Written values are coerced the way Sheets does: a bare yyyy-MM-dd becomes a Date (midnight IST), a numeric
 // string a number, and a leading ' is dropped (the rest stays text). H.writes keeps every value as sent.
+// 3 Nov (verify modes): the Verify with dropdown (data validation builder), Sheet.deleteRow, the document and user
+// locks (H.docBusy; opts.nodoclock: getDocumentLock() answers null, as Apps Script documents for a web app),
+// Utilities.computeHmacSha256Signature (signed bytes, as Apps Script returns them) and getUuid, and UrlFetchApp
+// against a fake Bot API (H.tg): getUpdates serves H.tg.updates from the offset sent, sendMessage (fetchAll) lands in
+// H.tg.sent, H.tg.down makes every fetch throw with the URL (and so the token) in its message, as Apps Script does.
+// ScriptApp (3 Nov review): the project's triggers in H.triggers ({ fn, minutes }), so staffSetup's tgTick shows.
+// opts.mode: Verify with set to that mode (writeMode_) before any case; opts.token: TG_TOKEN set.
 var GS_SRC = fs.existsSync(GS) ? fs.readFileSync(GS, 'utf8') : '';
 var GS_T0 = Date.parse('2026-11-03T05:00:00Z');   // 10:30 IST on the first booth day
+var TG_TOKEN = '7712345678:AAF-check-script-fake-token_x9';   // never a real token: the fake Bot API below answers it
 function gsHarness(opts) {
   opts = opts || {};
-  var H = { clock: GS_T0, lockBusy: false, offline: false, logs: [], toasts: [], alerts: [], writes: [] }, cache = {}, props = {};
+  var H = { clock: GS_T0, lockBusy: false, docBusy: false, offline: false, logs: [], toasts: [], alerts: [], writes: [], menu: [],
+    locks: [], triggers: [] }, cache = {}, props = {};
+  H.tg = { updates: [], sent: [], calls: [], gets: 0, offsets: [], down: false, seq: 500000, username: 'KlerosBoothBot' };
   function coerce(v) {
     H.writes.push(v);
     if (typeof v !== 'string') return v;
@@ -973,7 +997,7 @@ function gsHarness(opts) {
     if (v.charAt(0) === '\'') return v.slice(1);
     return v;
   }
-  function Sheet(name) { this.name = name; this.rows = []; this.prot = []; this.frozen = 0; }
+  function Sheet(name) { this.name = name; this.rows = []; this.prot = []; this.frozen = 0; this.boxes = {}; this.rules = {}; }
   Sheet.prototype.getName = function () { return this.name; };
   Sheet.prototype.getLastRow = function () {
     for (var i = this.rows.length; i > 0; i--) if ((this.rows[i - 1] || []).some(function (c) { return c !== '' && c !== undefined; })) return i;
@@ -985,6 +1009,10 @@ function gsHarness(opts) {
     for (i = 0; i < this.rows.length; i++) if (!this.rows[i]) this.rows[i] = [];
   };
   Sheet.prototype.setFrozenRows = function (n) { this.frozen = n; };
+  Sheet.prototype.deleteRow = function (r) {
+    if (typeof r !== 'number' || r < 1 || r > this.getLastRow()) throw new Error('deleteRow ' + r + ' is outside the sheet');
+    this.rows.splice(r - 1, 1);
+  };
   Sheet.prototype.protect = function () {
     var p = { calls: [], setDescription: function () { p.calls.push('desc'); }, getEditors: function () { return ['owner']; },
       removeEditors: function () { p.calls.push('remove'); }, setWarningOnly: function () { p.calls.push('warn'); } };
@@ -1002,7 +1030,13 @@ function gsHarness(opts) {
       getValues: function () { var out = [], i, j; for (i = 0; i < n; i++) { out.push([]); for (j = 0; j < m; j++) out[i].push(cell(i, j)); } return out; },
       setValues: function (a) { for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) put(i, j, a[i][j]); },
       setValue: function (v) { put(0, 0, v); },
-      insertCheckboxes: function () { for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) if (cell(i, j) === '') put(i, j, false); }
+      insertCheckboxes: function () {
+        for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) { sh.boxes[(r + i) + ':' + (c + j)] = true; if (cell(i, j) === '') put(i, j, false); }
+      },
+      setDataValidation: function (rule) {
+        if (!rule || !rule.built) throw new Error('setDataValidation takes a built rule');
+        for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) sh.rules[(r + i) + ':' + (c + j)] = rule;
+      }
     };
   };
   function Book() { this.sheets = {}; }
@@ -1022,22 +1056,87 @@ function gsHarness(opts) {
     if (f === 'yyyyMMddHHmm') return p.year + p.month + p.day + p.hour + p.minute;
     throw new Error('formatDate ' + f + ' is outside spec 1.3');
   }
-  var ui = { createMenu: function () { return ui; }, addItem: function () { return ui; }, addSeparator: function () { return ui; },
-    addToUi: function () {}, alert: function (s) { H.alerts.push(String(s)); } };
+  var ui = { createMenu: function () { return ui; }, addItem: function (label, fn) { H.menu.push([label, fn]); return ui; },
+    addSeparator: function () { return ui; }, addToUi: function () {}, alert: function (s) { H.alerts.push(String(s)); } };
+  function lock(kind, busy) {
+    return { tryLock: function () { H.locks.push(kind); return !busy(); }, releaseLock: function () {} };
+  }
+  // The fake Bot API: one reply object per request, like UrlFetchApp's HTTPResponse.
+  function reply(code, o) { return { getResponseCode: function () { return code; }, getContentText: function () { return JSON.stringify(o); } }; }
+  function botApi(url, o) {
+    var m = /^https:\/\/api\.telegram\.org\/bot([^\/?]+)\/(\w+)(?:\?(.*))?$/.exec(String(url)), q = {}, off, body;
+    if (!m) throw new Error('UrlFetchApp is only for the Telegram Bot API, not ' + String(url).slice(0, 40));
+    if (H.tg.down) throw new Error('Exception: Address unavailable: ' + url);
+    (m[3] || '').split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+    H.tg.calls.push(m[2]);
+    if (m[1] !== TG_TOKEN) return reply(401, { ok: false, error_code: 401, description: 'Unauthorized' });
+    if (m[2] === 'getMe') return reply(200, { ok: true, result: { id: 7712345678, is_bot: true, username: H.tg.username } });
+    if (m[2] === 'deleteWebhook') return reply(200, { ok: true, result: true });
+    if (m[2] === 'getUpdates') {
+      H.tg.gets++;
+      if (q.allowed_updates !== '["message"]' || q.timeout !== '0' || !(Number(q.limit) >= 1)) throw new Error('getUpdates query ' + m[3]);
+      off = Number(q.offset) || 0;
+      H.tg.offsets.push(off);
+      // Telegram forgets every update below the offset it is sent (they count as read).
+      H.tg.updates = H.tg.updates.filter(function (u) { return u.update_id >= off; });
+      return reply(200, { ok: true, result: H.tg.updates.slice(0, Number(q.limit)) });
+    }
+    if (m[2] === 'sendMessage') {
+      if (!o || String(o.method).toLowerCase() !== 'post' || o.contentType !== 'application/json') throw new Error('sendMessage is a JSON POST');
+      body = JSON.parse(o.payload);
+      H.tg.sent.push({ chat: body.chat_id, text: body.text, preview: body.disable_web_page_preview });
+      return reply(200, { ok: true, result: { message_id: H.tg.sent.length } });
+    }
+    return reply(404, { ok: false, error_code: 404, description: 'Not Found' });
+  }
+  // A private message to the bot (fromId's own chat) queued for the next getUpdates; more: { chat, isBot, noFrom }.
+  H.tg.say = function (fromId, text, more) {
+    var x = more || {}, u = { update_id: ++H.tg.seq, message: { message_id: H.tg.seq, date: Math.floor(H.clock / 1000), text: text,
+      chat: { id: x.chat ? -100123 : fromId, type: x.chat || 'private' } } };
+    if (!x.noFrom) u.message.from = { id: fromId, is_bot: !!x.isBot, first_name: 'Ana', username: 'ana_k' };
+    H.tg.updates.push(u);
+    return u.update_id;
+  };
+  function bytes(v) { return typeof v === 'string' ? Buffer.from(v, 'utf8') : Buffer.from(v.map(function (b) { return (b + 256) % 256; })); }
   var ctx = {
     SpreadsheetApp: {
       getActiveSpreadsheet: function () { return H.bound; },
       openById: function (id) { if (id === ctx.CONTACTS_SHEET_ID && id) return H.contacts; throw new Error('no sheet ' + id); },
-      flush: function () {}, getUi: function () { return ui; }
+      flush: function () {}, getUi: function () { return ui; },
+      newDataValidation: function () {
+        var b = { list: null, dropdown: null,
+          requireValueInList: function (list, dropdown) { b.list = list.slice(); b.dropdown = dropdown; return b; },
+          build: function () { if (!b.list) throw new Error('a rule without a criterion'); return { built: true, list: b.list, dropdown: b.dropdown }; } };
+        return b;
+      }
     },
-    LockService: { getScriptLock: function () { return { tryLock: function () { return !H.lockBusy; }, releaseLock: function () {} }; } },
+    LockService: {
+      getScriptLock: function () { return lock('script', function () { return H.lockBusy; }); },
+      getDocumentLock: function () { return opts.nodoclock ? null : lock('document', function () { return H.docBusy; }); },
+      getUserLock: function () { return lock('user', function () { return H.docBusy; }); }
+    },
     CacheService: { getScriptCache: function () { return {
       get: function (k) { var e = cache[k]; return e && e.t > H.clock ? e.v : null; },
       put: function (k, v, s) { cache[k] = { v: String(v), t: H.clock + (s || 600) * 1000 }; },
       remove: function (k) { delete cache[k]; } }; } },
     PropertiesService: { getScriptProperties: function () { return {
       getProperty: function (k) { return props[k] || null; }, setProperty: function (k, v) { props[k] = String(v); } }; } },
-    Utilities: { formatDate: fmt },
+    Utilities: { formatDate: fmt, getUuid: function () { return crypto.randomUUID(); },
+      // Apps Script's Byte[]: signed, -128..127.
+      computeHmacSha256Signature: function (value, key) {
+        return Array.prototype.map.call(crypto.createHmac('sha256', bytes(key)).update(bytes(value)).digest(), function (b) { return b > 127 ? b - 256 : b; });
+      } },
+    UrlFetchApp: { fetch: botApi, fetchAll: function (reqs) { return reqs.map(function (r) { return botApi(r.url, r); }); } },
+    // Time-driven triggers only, at the intervals Apps Script allows.
+    ScriptApp: {
+      getProjectTriggers: function () { return H.triggers.map(function (t) { return { getHandlerFunction: function () { return t.fn; } }; }); },
+      newTrigger: function (fn) {
+        return { timeBased: function () { return { everyMinutes: function (n) {
+          if ([1, 5, 10, 15, 30].indexOf(n) < 0) throw new Error('everyMinutes ' + n + ' is not an Apps Script interval');
+          return { create: function () { H.triggers.push({ fn: fn, minutes: n }); return {}; } };
+        } }; } };
+      }
+    },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: function (s) { return { s: s, setMimeType: function () { return this; } }; } },
     Logger: { log: function (s) { H.logs.push(String(s)); } }
   };
@@ -1045,6 +1144,17 @@ function gsHarness(opts) {
   vm.runInContext(GS_SRC, ctx, { filename: 'Code.gs' });
   ctx.now_ = function () { return new Date(H.clock); };
   H.ctx = ctx; H.props = props; H.cache = cache;
+  if (opts.token) props.TG_TOKEN = TG_TOKEN;
+  if (opts.mode) ctx.writeMode_(opts.mode);
+  // The Telegram player id and signature, computed here apart from Code.gs (HMAC-SHA256 under TG_SECRET).
+  H.tgId = function (n) { return crypto.createHmac('sha256', props.TG_SECRET).update('tg|' + n).digest('hex'); };
+  H.sig = function (id) { return crypto.createHmac('sha256', props.TG_SECRET).update('sig|' + id).digest('hex').slice(0, 32); };
+  // The Verify with cell, by label, as Sheets holds it.
+  H.verifyCell = function () {
+    var rows = (H.tab('Switches') || { rows: [] }).rows, i;
+    for (i = 1; i < rows.length; i++) if (rows[i] && rows[i][0] === 'Verify with') return { row: i + 1, value: rows[i][1] };
+    return null;
+  };
   H.call = function (b) { return JSON.parse(ctx.doPost({ postData: { contents: typeof b === 'string' ? b : JSON.stringify(b) } }).s); };
   H.tab = function (n) { return H.bound.sheets[n]; };
   H.rows = function (n) { var t = H.tab(n); return t ? t.getLastRow() : 0; };
@@ -1077,8 +1187,10 @@ function checkServer() {
     return h.call(b);
   }
   if (!GS_SRC) return fail('apps-script/staff-desk/Code.gs is missing');
+  // These cases date from badge mode (2 Nov): their starts carry no sig, so each harness that starts a try has
+  // Verify with set to Badge. Telegram (the default) and none mode have their own cases (checkVerify).
   // 2. In sync with settings.js and decks.js: the server derives the tier itself, from the same thresholds.
-  H = gsHarness();
+  H = gsHarness({ mode: 'badge' });
   ok(JSON.stringify(H.ctx.TIERS) === JSON.stringify(S.tiers), 'TIERS ' + JSON.stringify(H.ctx.TIERS) + ' differ from settings.js tiers ' + JSON.stringify(S.tiers));
   ok(H.ctx.TRIES_PER_BADGE === S.countedTries, 'TRIES_PER_BADGE differs from settings.js countedTries');
   ok(H.ctx.PER_DAY === undefined && typeof H.ctx.today_ !== 'function', 'PER_DAY or today_ is back: tries are per badge for the whole event');
@@ -1129,7 +1241,7 @@ function checkServer() {
   ok(start(H, 'nothex').error === 'badbadge' && start(H, A, 'BAD').error === 'badtoken', 'bad badge or token');
   // 4. A new day gives no new tries (2 Nov, user: 2 tries per ticket): not at 00:01 IST, not on the last booth day.
   // A badge with one try on day 1 gets try 2 on day 2, then none. Day is still written, as a record.
-  r = gsHarness(); r.clock = Date.parse('2026-11-03T18:29:00Z');
+  r = gsHarness({ mode: 'badge' }); r.clock = Date.parse('2026-11-03T18:29:00Z');
   start(r, A); start(r, A);
   ok(start(r, A).reason === 'limit', 'the limit at 23:59 IST on day 1');
   r.clock = Date.parse('2026-11-03T18:31:00Z');
@@ -1233,12 +1345,12 @@ function checkServer() {
   H.ctx.showStaffKey();
   ok(H.alerts.some(function (a) { return a.indexOf(H.props.STAFF_KEY) > -1; }), 'showStaffKey');
   // Rows of earlier days count, whatever their Day cell holds (text, or a Date Sheets made of it).
-  r = gsHarness(); r.ctx.staffSetup();
+  r = gsHarness({ mode: 'badge' }); r.ctx.staffSetup();
   start(r, A); start(r, A);
   r.tab('Tries').rows[1][1] = new Date('2026-11-01T00:00:00+05:30'); r.tab('Tries').rows[2][1] = '2026-11-02';
   ok(start(r, A).reason === 'limit', 'tries with an earlier Day (a Date, or text) gave new tries');
   // 11. Caps and the lock: busy, and nothing written.
-  r = gsHarness(); r.ctx.staffSetup();
+  r = gsHarness({ mode: 'badge' }); r.ctx.staffSetup();
   for (i = 0; i < 61; i++) last = start(r, (i % 10 + '').repeat(64));
   ok(last.error === 'busy', 'the 61st start in a minute ' + JSON.stringify(last));
   r.clock += 60000;
@@ -1259,6 +1371,329 @@ function checkServer() {
   (GS_SRC.match(/\berror: '[^']*'|\bfail_\('[^']*'\)/g) || []).forEach(function (m) { ok(/'[a-z]+'/.test(m), 'error code ' + m); });
   console.log('Booth web app (Code.gs)\n  ' + n + ' cases (setup, sync with settings.js, 2 tries per badge, no new tries on a new day, finish, status, contacts sheet, claims, switches, caps, lock)');
 }
+
+// ---- Booth web app: how players verify (3 Nov) ----
+// The Switches "Verify with" row (Telegram by default), setmode, start's signature check, tgcheck against the fake
+// Bot API (gsHarness), the bot's answers and its contacts rows, and the desk's check by ticket QR or typed C- code.
+var TG_SAY = {   // the spec's bot copy, word for word
+  verified: '✅ You’re verified for the Kleros Curate game. Go back to the game to play.\n\nYou’ll also get Kleros news here. We keep your Telegram ID only. Send /stop any time to leave, and we delete it.',
+  help: 'This bot verifies players for the Kleros Curate game at the Kleros booth. Open devcon.kleros.io/curate and tap Verify with Telegram.',
+  stopped: 'Done: you’re off Kleros news and your Telegram ID is deleted. Your game tries still count.',
+  stopRetry: 'Sorry, that didn’t go through. Please send /stop again in a minute.'   // 3 Nov review: a /stop whose delete failed
+};
+function checkVerify() {
+  var n = 0, H, r, q, i, t, tmp, cell, sw, before, gets, nc = [], id1, id2, sig1, code, row, A = 'a'.repeat(64), seq = 0,
+    TG1 = 5550001234, TG2 = 5550009876, TG3 = 5550005555, NOTE = 'Telegram: add TG_TOKEN in Project Settings › Script properties, then run telegramTest';
+  function ok(cond, msg) { n++; if (!cond) fail('Code.gs verify: ' + msg); }
+  function tok(p) { seq++; return ((p || 'vt') + seq + 'qwertyuiopasdfghjkzx').slice(0, 20); }
+  // A nonce as the phone makes it: 24 letters and digits.
+  function nonce() { var s = ('Nn' + (nc.length + 1) + 'aBcDeFgHiJkLmNoPqRsTuVwXyZ').slice(0, 24); nc.push(s); return s; }
+  function start(h, badge, more) {
+    var b = { action: 'start', badge: badge, token: tok(), app: 'sights' }, k;
+    for (k in more || {}) b[k] = more[k];
+    return h.call(b);
+  }
+  function staff(h, b) { b.key = h.props.STAFF_KEY; return h.call(b); }
+  // A phone's tgcheck, past the 2 s poll throttle (the phone asks every 2.5 s).
+  function tgcheck(h, nn) { h.clock += 2100; return h.call({ action: 'tgcheck', nonce: nn }); }
+  function contactRows(h) { return h.contacts.sheets.Contacts.rows.slice(1).filter(function (x) { return x && x.length; }); }
+  function tgRows(h, id) { return contactRows(h).filter(function (x) { return String(x[1]) === String(id) && x[2] === 'telegram id'; }); }
+  if (!GS_SRC) return;
+  // Version, the default mode and the Verify with row: a text cell with its dropdown, never a checkbox.
+  H = gsHarness();
+  ok(H.ctx.SCRIPT_V === '2026-11-03a', 'SCRIPT_V is ' + H.ctx.SCRIPT_V);
+  r = H.call({ action: 'status' });
+  ok(r.ok && r.mode === 'telegram' && r.tg === false, 'a sheet with no Switches tab: mode ' + r.mode + ', tg ' + r.tg);
+  H.ctx.staffSetup();
+  cell = H.verifyCell(); sw = H.tab('Switches');
+  ok(cell && cell.row === 6 && cell.value === 'Telegram', 'Verify with row ' + JSON.stringify(cell));
+  ok(!sw.boxes['6:2'] && sw.rules['6:2'] && sw.rules['6:2'].list.join() === 'Telegram,Badge,None' && sw.rules['6:2'].dropdown === true &&
+    [2, 3, 4, 5].every(function (k) { return sw.boxes[k + ':2'] && !sw.rules[k + ':2']; }), 'Verify with is a dropdown, the others checkboxes');
+  ok(/^Tick or untick/.test(String((sw.rows[6] || [])[0])) && H.tab('Switches').getLastRow() === 7, 'the note left row 7');
+  t = H.props.TG_SECRET;
+  ok(/^[A-Za-z0-9]{32}$/.test(t || '') && H.logs.every(function (l) { return l.indexOf(t) < 0; }), 'staffSetup makes a 32-character TG_SECRET, never logged');
+  ok(H.logs.indexOf(NOTE) > -1 && H.logs.indexOf('Telegram: ready') < 0, 'staffSetup without TG_TOKEN: ' + H.logs.slice(-1));
+  H.props.TG_TOKEN = '  ' + TG_TOKEN + '\n'; H.ctx.staffSetup();
+  ok(H.props.TG_SECRET === t && H.verifyCell().row === 6 && H.tab('Switches').getLastRow() === 7 && H.logs.indexOf('Telegram: ready') > -1,
+    'a second staffSetup changed TG_SECRET, added a row or did not say ready');
+  // staffSetup installs the tgTick trigger (every 5 minutes) once, so /stop is read with no phone verifying.
+  ok(JSON.stringify(H.triggers) === '[{"fn":"tgTick","minutes":5}]' && typeof H.ctx.tgTick === 'function', 'the tgTick trigger ' + JSON.stringify(H.triggers));
+  ok(H.call({ action: 'status' }).tg === true, 'status tg with a token pasted with spaces');
+  // The live sheet (2 Nov): four switch rows and the note in row 7; Verify with goes into row 6, the rest stays.
+  q = gsHarness(); tmp = q.bound.insertSheet('Switches');
+  tmp.rows = [['Switch', 'On'], ['Merch open', false], ['Teal sold out', true], ['Purple sold out', false], ['Gold sold out', false], [],
+    ['Tick or untick: …']];
+  q.ctx.staffSetup();
+  r = q.call({ action: 'status' });
+  ok(q.verifyCell() && q.verifyCell().row === 6 && q.verifyCell().value === 'Telegram' && r.mode === 'telegram' && r.open === false &&
+    r.soldOut.join() === 'teal' && tmp.rows[6][0] === 'Tick or untick: …', 'the live Switches tab ' + JSON.stringify(tmp.rows));
+  // The cell, read by label: any case and spaces; anything else (a typo, blank, a stray tick) reads as Telegram.
+  [['Badge', 'badge'], [' none ', 'none'], ['BADGE', 'badge'], ['Telegram', 'telegram'], ['Telegarm', 'telegram'], ['', 'telegram'],
+    [true, 'telegram']].forEach(function (c) {
+    H.tab('Switches').rows[5][1] = c[0]; delete H.cache.switches;
+    tmp = H.call({ action: 'status' });
+    ok(tmp.mode === c[1], 'Verify with ' + JSON.stringify(c[0]) + ' reads as ' + tmp.mode);
+  });
+  // Cached 20 s; a hand edit clears it; a copy cached by the previous script (no mode) is read again.
+  H.tab('Switches').rows[5][1] = 'Badge';
+  ok(H.call({ action: 'status' }).mode === 'telegram', 'the switches cache did not hold');
+  H.clock += 21000;
+  ok(H.call({ action: 'status' }).mode === 'badge', 'the switches cache outlived 20 s');
+  H.tab('Switches').rows[5][1] = 'None'; H.ctx.onEdit({ range: H.tab('Switches').getRange(6, 2, 1, 1) });
+  ok(H.call({ action: 'status' }).mode === 'none', 'a hand edit of Verify with kept the cache');
+  H.cache.switches = { v: JSON.stringify({ open: true, soldOut: [] }), t: H.clock + 99999 };
+  ok(H.call({ action: 'status' }).mode === 'none', 'a cached copy without mode was used');
+  // Every reply carries the mode, like open and soldOut; a thrown error answers its code only.
+  ok(staff(H, { action: 'stats' }).mode === 'none' && staff(H, { action: 'check', badge: A }).mode === 'none' &&
+    H.call({ action: 'nope' }).mode === undefined, 'mode in the replies');
+  // setmode: staff key, the three values only, the cell, the cache, the log (staff name as plain text).
+  ok(H.call({ action: 'setmode', mode: 'badge' }).error === 'wrongkey' && H.call({ action: 'setmode', key: 'WRONG', mode: 'badge' }).error === 'wrongkey',
+    'setmode without the key');
+  ['', 'Badge', 'evil', null, 'telegram '].forEach(function (m) {
+    ok(staff(H, { action: 'setmode', mode: m, staff: 'Ana' }).error === 'badrequest' && H.verifyCell().value === 'None', 'setmode ' + JSON.stringify(m));
+  });
+  H.call({ action: 'status' });   // cached as none
+  r = staff(H, { action: 'setmode', mode: 'badge', staff: '=Ana' });
+  ok(r.ok && r.mode === 'badge' && H.verifyCell().value === 'Badge' && H.call({ action: 'status' }).mode === 'badge', 'setmode badge ' + JSON.stringify(r));
+  ok(H.logs.indexOf('mode badge by \'=Ana') > -1 && H.logs.every(function (l) { return l.indexOf(H.props.STAFF_KEY) < 0 || /^Staff key/.test(l); }),
+    'setmode log ' + H.logs.slice(-2));
+  r = staff(H, { action: 'setmode', mode: 'none', staff: 'Ana' });
+  ok(r.mode === 'none' && H.verifyCell().value === 'None' && staff(H, { action: 'setmode', mode: 'telegram', staff: 'Ana' }).mode === 'telegram' &&
+    H.verifyCell().value === 'Telegram' && H.call({ action: 'status' }).mode === 'telegram', 'setmode none, then telegram');
+  // The owner's menu: three Verify with items, each writing the cell at once.
+  H.ctx.onOpen();
+  ok(['verifyTelegram', 'verifyBadge', 'verifyNone'].every(function (f) { return H.menu.some(function (m) { return m[1] === f; }) && typeof H.ctx[f] === 'function'; }) &&
+    H.menu.some(function (m) { return m[0] === 'Players verify with Telegram'; }), 'menu ' + JSON.stringify(H.menu));
+  H.ctx.verifyBadge();
+  ok(H.call({ action: 'status' }).mode === 'badge' && H.toasts.indexOf('Players now verify with their badge. Every phone follows within a minute.') > -1,
+    'the menu item did not switch to badge ' + JSON.stringify(H.toasts.slice(-1)));
+  H.ctx.verifyTelegram();
+  ok(H.call({ action: 'status' }).mode === 'telegram', 'the menu item did not switch back to Telegram');
+
+  // tgcheck: the nonce's format, no bot token, then the bot's updates.
+  q = gsHarness(); q.ctx.staffSetup();
+  ['short', 'x'.repeat(41), 'abc-def_ghi.jklmnopqrs', '', 'aaaaaaaaaaaaaaaa\n'].forEach(function (x) {
+    ok(q.call({ action: 'tgcheck', nonce: x }).error === 'badrequest', 'nonce ' + JSON.stringify(x) + ' is not badrequest');
+  });
+  ok(q.call({ action: 'tgcheck' }).error === 'badrequest' && q.call({ action: 'tgcheck', nonce: nonce() }).error === 'notelegram' && q.tg.calls.length === 0,
+    'tgcheck with no TG_TOKEN');
+  H.props.TG_TOKEN = TG_TOKEN;
+  t = nonce(); gets = H.tg.gets;
+  r = tgcheck(H, t);
+  ok(r.ok && r.verified === false && r.badge === undefined && r.mode === 'telegram' && H.tg.gets === gets + 1, 'tgcheck before the bot saw it ' + JSON.stringify(r));
+  i = H.tg.say(TG1, '/start ' + t);
+  r = tgcheck(H, t);
+  id1 = H.tgId(TG1); sig1 = H.sig(id1);
+  ok(r.ok && r.verified === true && r.badge === id1 && r.sig === sig1 && /^[0-9a-f]{64}$/.test(r.badge) && /^[0-9a-f]{32}$/.test(r.sig),
+    'tgcheck after /start: ' + JSON.stringify(r) + ' want ' + id1 + ' / ' + sig1);
+  ok(H.tg.sent.length === 1 && H.tg.sent[0].chat === TG1 && H.tg.sent[0].text === TG_SAY.verified && H.tg.sent[0].preview === true,
+    'the verified answer ' + JSON.stringify(H.tg.sent));
+  row = tgRows(H, TG1);
+  ok(row.length === 1 && row[0][0] === dayOf(H) && row[0][3] === '' && row[0][4] === 'Devcon VIII Mumbai' && row[0][5] === 'curate bot' &&
+    row[0][6] === '' && typeof row[0][1] === 'string' && H.writes.indexOf('\'' + TG1) > -1, 'the contacts row ' + JSON.stringify(row));
+  ok(H.props.TG_OFFSET === String(i + 1), 'TG_OFFSET ' + H.props.TG_OFFSET + ' after update ' + i);
+  // The same nonce again: still verified, from the cache, no poll; for 6 h only.
+  gets = H.tg.gets;
+  r = tgcheck(H, t);
+  ok(r.verified && r.badge === id1 && H.tg.gets === gets, 'a verified nonce asked again ' + JSON.stringify(r));
+  // The same Telegram account with a new link: the same id, one contacts row (cache, then the sheet itself).
+  t = nonce(); H.tg.say(TG1, '/start ' + t);
+  r = tgcheck(H, t);
+  delete H.cache['tgc:' + TG1];
+  tmp = nonce(); H.tg.say(TG1, '/start@KlerosBoothBot ' + tmp);
+  q = tgcheck(H, tmp);
+  ok(r.badge === id1 && q.verified && q.badge === id1 && tgRows(H, TG1).length === 1, 'the same account verified twice: ' +
+    JSON.stringify([r.badge, q.badge]) + ', rows ' + tgRows(H, TG1).length);
+  // Another account: another id. The offset moves on: no update is read twice.
+  t = nonce(); i = H.tg.say(TG2, ' /start   ' + t + ' ');
+  r = tgcheck(H, t);
+  id2 = H.tgId(TG2);
+  ok(r.verified && r.badge === id2 && id2 !== id1 && r.sig === H.sig(id2) && tgRows(H, TG2).length === 1, 'a second account ' + JSON.stringify(r));
+  before = H.tg.sent.length;
+  tgcheck(H, nonce());
+  ok(H.props.TG_OFFSET === String(i + 1) && H.tg.offsets[H.tg.offsets.length - 1] === i + 1 && H.tg.sent.length === before,
+    'an update read twice, or the offset ' + H.props.TG_OFFSET + ' did not move');
+  // /start with no (or a bad) nonce, anything else: help, no contact. Groups, bots, a message without a sender: ignored.
+  before = contactRows(H).length; i = H.tg.sent.length;
+  H.tg.say(TG3, '/start'); H.tg.say(TG3, '/start short'); H.tg.say(TG3, 'hello'); H.tg.say(TG3, '/start ' + nonce() + ' more');
+  t = nonce();
+  H.tg.say(TG3, '/start ' + t, { chat: 'group' }); H.tg.say(TG3, '/start ' + t, { isBot: true }); H.tg.say(TG3, '/start ' + t, { noFrom: true });
+  r = tgcheck(H, t);
+  tmp = H.tg.sent.slice(i);
+  ok(!r.verified && contactRows(H).length === before && tmp.length === 4 && tmp.every(function (x) { return x.text === TG_SAY.help && x.chat === TG3; }),
+    'help answers ' + JSON.stringify(tmp) + ' ' + JSON.stringify(r));
+  // /stop deletes every row of that account (a hand-made duplicate too), answers stopped, and keeps the other's.
+  H.contacts.sheets.Contacts.appendRow(['\'2026-11-03', '\'' + TG1, 'telegram id', '', 'Devcon VIII Mumbai', 'curate bot', '']);
+  H.contacts.sheets.Contacts.appendRow(['\'2026-11-03', 'ana@example.org', 'email', '', '', 'curate', '\'abcdefabcdef']);
+  i = H.tg.sent.length;
+  H.tg.say(TG1, '/stop');
+  tgcheck(H, nonce());
+  ok(tgRows(H, TG1).length === 0 && tgRows(H, TG2).length === 1 && contactRows(H).some(function (x) { return x[1] === 'ana@example.org'; }) &&
+    H.tg.sent.length === i + 1 && H.tg.sent[i].text === TG_SAY.stopped && !H.cache['tgc:' + TG1], '/stop ' + JSON.stringify(contactRows(H)));
+  // After /stop the id still plays (tries count), and verifying again adds the row back.
+  t = nonce(); H.tg.say(TG1, '/start ' + t);
+  ok(tgcheck(H, t).badge === id1 && tgRows(H, TG1).length === 1, 'verifying again after /stop');
+  // The poll runs at most every 2 s for all phones; a nonce lasts 6 h.
+  gets = H.tg.gets;
+  H.clock += 2100; H.call({ action: 'tgcheck', nonce: nonce() }); H.call({ action: 'tgcheck', nonce: nonce() }); H.clock += 1500;
+  H.call({ action: 'tgcheck', nonce: nonce() });
+  ok(H.tg.gets === gets + 1, 'three tgchecks within 2 s polled ' + (H.tg.gets - gets) + ' times');
+  H.clock += 600; H.call({ action: 'tgcheck', nonce: nonce() });
+  ok(H.tg.gets === gets + 2, 'a tgcheck 2.1 s after a poll did not poll');
+  H.clock += 6 * 3600 * 1000;
+  ok(tgcheck(H, nc[1]).verified === false, 'a nonce verified 6 h ago still answers');
+  // The poll takes the document lock, never the script lock: a held write lock doesn't stop it; a held poll lock
+  // answers "not yet" without asking Telegram; a web app with no document lock uses the user lock.
+  t = nonce(); H.tg.say(TG2, '/start ' + t);
+  H.lockBusy = true; H.locks = [];
+  r = tgcheck(H, t);
+  H.lockBusy = false;
+  ok(r.verified && r.badge === id2 && H.locks.indexOf('script') < 0 && H.locks.indexOf('document') > -1, 'tgcheck under a held script lock ' + JSON.stringify([r, H.locks]));
+  t = nonce(); H.tg.say(TG2, '/start ' + t); gets = H.tg.gets;
+  H.docBusy = true; r = tgcheck(H, t); H.docBusy = false;
+  ok(r.ok && r.verified === false && H.tg.gets === gets && tgcheck(H, t).verified === true, 'tgcheck under a held poll lock ' + JSON.stringify(r));
+  q = gsHarness({ nodoclock: true, token: true }); q.ctx.staffSetup();
+  t = nonce(); q.tg.say(TG1, '/start ' + t);
+  r = tgcheck(q, t);
+  ok(r.verified && q.locks.indexOf('user') > -1, 'no document lock: ' + JSON.stringify(r));
+  // Telegram down, or refusing the token: "not yet", nothing read, nothing logged (a fetch error carries the URL).
+  t = nonce(); i = H.tg.say(TG3, '/start ' + t); before = H.props.TG_OFFSET;
+  H.tg.down = true; r = tgcheck(H, t); H.tg.down = false;
+  ok(r.ok && r.verified === false && H.props.TG_OFFSET === before, 'Telegram down ' + JSON.stringify(r));
+  H.props.TG_TOKEN = 'bad' + TG_TOKEN; r = tgcheck(H, t); H.props.TG_TOKEN = TG_TOKEN;
+  ok(r.ok && r.verified === false && H.props.TG_OFFSET === before, 'a refused token ' + JSON.stringify(r));
+  ok(tgcheck(H, t).verified === true && H.props.TG_OFFSET === String(i + 1), 'Telegram back: the waiting /start was not read');
+  // The contacts sheet broken (moved, trashed, access lost; 3 Nov review): verifying goes on. A /stop first in the
+  // batch doesn't block it: every nonce verifies, the offset moves on, the sheet is opened once per poll, the failed
+  // adds wait for the next poll and the /stop asks to be sent again (never "deleted"). Nothing of it is logged.
+  tmp = H.ctx.SpreadsheetApp.openById; q = 0;
+  H.ctx.SpreadsheetApp.openById = function () { q++; throw new Error('boom ' + TG_TOKEN + ' ' + (TG3 + 1)); };
+  i = H.tg.sent.length; t = nonce(); code = nonce();
+  H.tg.say(TG3 + 2, '/stop'); H.tg.say(TG3 + 1, '/start ' + t); H.tg.say(TG3 + 3, '/start ' + code); before = H.tg.say(TG3 + 4, '/start ' + nonce());
+  r = tgcheck(H, t); row = tgcheck(H, code);
+  ok(r.ok && r.verified && r.badge === H.tgId(TG3 + 1) && row.verified && row.badge === H.tgId(TG3 + 3) && H.props.TG_OFFSET === String(before + 1) && q === 1,
+    'a broken contacts sheet stopped verifying ' + JSON.stringify([r, row, H.props.TG_OFFSET, before, q]));
+  ok(H.tg.sent.slice(i).map(function (x) { return x.text === TG_SAY.stopRetry ? 'retry' : x.text === TG_SAY.verified ? 'ok' : x.text; }).join() === 'retry,ok,ok,ok' &&
+    tgRows(H, TG3 + 1).length === 0 && JSON.parse(H.cache.tgq.v).join() === [TG3 + 1, TG3 + 3, TG3 + 4].join(), 'the answers or the waiting adds ' +
+    JSON.stringify([H.tg.sent.slice(i), H.cache.tgq]));
+  // A /stop while its add still waits drops it, so the ID never comes back; the sheet back, the rest are added.
+  i = H.tg.sent.length; H.tg.say(TG3 + 4, '/stop');
+  tgcheck(H, nonce());
+  ok(H.tg.sent.length === i + 1 && H.tg.sent[i].text === TG_SAY.stopRetry && q === 2 && JSON.parse(H.cache.tgq.v).join() === [TG3 + 1, TG3 + 3].join(),
+    'a /stop with its add waiting ' + JSON.stringify([H.tg.sent.slice(i), H.cache.tgq, q]));
+  H.ctx.SpreadsheetApp.openById = tmp;
+  tgcheck(H, nonce());
+  ok(tgRows(H, TG3 + 1).length === 1 && tgRows(H, TG3 + 3).length === 1 && tgRows(H, TG3 + 4).length === 0 && !H.cache.tgq,
+    'the waiting adds after the sheet came back ' + JSON.stringify([contactRows(H).length, H.cache.tgq]));
+  i = H.tg.sent.length; H.tg.say(TG3 + 1, '/stop'); tgcheck(H, nonce());
+  ok(tgRows(H, TG3 + 1).length === 0 && H.tg.sent[i].text === TG_SAY.stopped, '/stop once the sheet is back');
+  // Any other throw in the poll: "not yet" (phones keep asking, no 'server'), one plain log line.
+  tmp = H.ctx.tgPoll_;
+  H.ctx.tgPoll_ = function () { throw new Error('boom ' + TG_TOKEN + ' ' + TG3); };
+  r = tgcheck(H, nonce());
+  H.ctx.tgPoll_ = tmp;
+  ok(r.ok === true && r.verified === false && H.logs[H.logs.length - 1] === 'tgcheck: the poll failed', 'a throw in the poll ' + JSON.stringify(r) + ' ' + H.logs.slice(-1));
+  // tgTick (the trigger): reads the bot with no phone polling, as in badge mode, so /stop deletes the row; the same
+  // lock and 2 s throttle as tgcheck; without a token it does nothing; a throw is one plain log line.
+  q = gsHarness({ token: true, mode: 'badge' }); q.ctx.staffSetup(); q.ctx.staffSetup();
+  ok(q.triggers.length === 1 && q.triggers[0].fn === 'tgTick', 'staffSetup twice: triggers ' + JSON.stringify(q.triggers));
+  t = nonce(); q.tg.say(TG1, '/start ' + t); q.clock += 2100; q.ctx.tgTick();
+  ok(tgRows(q, TG1).length === 1 && q.call({ action: 'tgcheck', nonce: t }).badge === q.tgId(TG1), 'tgTick: a /start');
+  q.tg.say(TG1, '/stop'); q.clock += 5 * 60000; q.locks = []; gets = q.tg.gets;
+  q.ctx.tgTick();
+  ok(tgRows(q, TG1).length === 0 && q.tg.sent[q.tg.sent.length - 1].text === TG_SAY.stopped && q.tg.gets === gets + 1 && q.locks.join() === 'document',
+    'tgTick: a /stop in badge mode ' + JSON.stringify([q.tg.sent.slice(-1), q.locks]));
+  q.ctx.tgTick();
+  ok(q.tg.gets === gets + 1, 'tgTick within 2 s of a poll polled again');
+  q.props.TG_TOKEN = ''; q.clock += 5 * 60000; q.ctx.tgTick();
+  ok(q.tg.gets === gets + 1, 'tgTick without TG_TOKEN asked Telegram');
+  q.props.TG_TOKEN = TG_TOKEN; tmp = q.ctx.tgPoll_; q.ctx.tgPoll_ = function () { throw new Error('boom ' + TG1); };
+  q.ctx.tgTick(); q.ctx.tgPoll_ = tmp;
+  ok(q.logs[q.logs.length - 1] === 'tgTick: the poll failed' && q.logs.join('\n').indexOf(String(TG1)) < 0, 'tgTick after a throw ' + q.logs.slice(-1));
+  // Busy above 2000 tgchecks a minute, all phones together.
+  q = gsHarness({ token: true }); q.ctx.staffSetup(); q.cache['tgn:' + nc[1]] = { v: String(TG1), t: q.clock + 99999 };
+  for (i = 0; i < 2001; i++) r = q.call({ action: 'tgcheck', nonce: nc[1] });
+  ok(r.error === 'busy', 'the 2001st tgcheck in a minute ' + JSON.stringify(r));
+
+  // start in telegram mode: only a signed id spends a try, and its row says Contact yes.
+  before = H.rows('Tries');
+  r = start(H, id1);
+  ok(r.ok === false && r.error === 'unverified' && r.mode === 'telegram' && typeof r.open === 'boolean' && H.rows('Tries') === before,
+    'a start without a sig ' + JSON.stringify(r));
+  [{ sig: '0'.repeat(32) }, { sig: sig1.toUpperCase() }, { sig: sig1.slice(0, 31) }, { sig: H.sig(id2) }, { sig: sig1 + '0' }].forEach(function (x) {
+    ok(start(H, id1, x).error === 'unverified' && H.rows('Tries') === before, 'a start with sig ' + x.sig);
+  });
+  t = tok('ab');
+  r = start(H, id1, { sig: sig1, token: t });
+  row = H.tab('Tries').rows[H.rows('Tries') - 1];
+  ok(r.ok && r.counted && r.tryNo === 1 && r.contact === true && r.mode === 'telegram' && row[10] === 'yes' && row[2] === id1,
+    'a signed start ' + JSON.stringify(r) + ' ' + JSON.stringify(row));
+  // No contact step: a Teal round earns at the desk at once.
+  H.clock += 60000;
+  r = H.call({ action: 'finish', token: t, score: S.tiers[1] + 20 });
+  code = r.best && r.best.code;
+  ok(r.ok && r.tier === 1 && r.contact === true && code === 'C-' + t.slice(0, 6).toUpperCase(), 'the finish ' + JSON.stringify(r));
+  // The desk: the ticket QR (id and sig), a sig that isn't this id's, a none-mode ticket (no sig), a typed C- code.
+  r = staff(H, { action: 'check', badge: id1, sig: sig1 });
+  ok(r.ok && r.badge === id1 && r.contact === true && r.earned === 1 && r.used === false && r.mode === 'telegram', 'check by ticket QR ' + JSON.stringify(r));
+  ['0'.repeat(32), H.sig(id2), sig1.toUpperCase(), 'zz'].forEach(function (s) {
+    ok(staff(H, { action: 'check', badge: id1, sig: s }).error === 'badticket', 'check with sig ' + s + ' is not badticket');
+  });
+  ok(staff(H, { action: 'check', badge: id1, sig: '' }).ok === true, 'a ticket with no sig (none mode) is refused');
+  [code, code.toLowerCase(), code.replace('-', ''), ' ' + code.slice(0, 4) + ' ' + code.slice(4) + ' ', code.toLowerCase().replace('-', ' - ')].forEach(function (c) {
+    r = staff(H, { action: 'check', code: c, badge: A });
+    ok(r.ok && r.badge === id1 && r.earned === 1, 'check by code ' + JSON.stringify(c) + ': ' + JSON.stringify(r));
+  });
+  ['C-ZZZZZZ', 'C-ABC', 'K-' + code.slice(2), 'CC-' + code.slice(2), code + '1'].forEach(function (c) {
+    ok(staff(H, { action: 'check', code: c }).error === 'nocode', 'check by code ' + c + ' is not nocode');
+  });
+  // Two tries share a code's 6 characters: the finished one wins (a ticket shows a finished round's code).
+  q = H.tgId(TG3); tmp = 'qq9zzz' + 'a'.repeat(14);
+  start(H, q, { sig: H.sig(q), token: tmp });
+  start(H, id2, { sig: H.sig(id2), token: 'qq9zzz' + 'b'.repeat(14) }); H.clock += 60000;
+  H.call({ action: 'finish', token: 'qq9zzz' + 'b'.repeat(14), score: 100 });
+  r = staff(H, { action: 'check', code: 'C-QQ9ZZZ' });
+  ok(r.ok && r.badge === id2, 'check by a shared code prefix ' + JSON.stringify(r));
+  // Claim with the resolved id; then the ticket and the code are both used.
+  r = staff(H, { action: 'claim', badge: id1, tier: 'teal', item: 'x', staff: 'Ana', id: 'claimtg00001', how: 'scan' });
+  ok(r.ok && staff(H, { action: 'check', code: code }).used === true && staff(H, { action: 'check', badge: id1, sig: sig1 }).used === true, 'claim ' + JSON.stringify(r));
+  // None and badge modes: any id starts (no sig needed); a signed id still writes Contact yes, an unsigned one doesn't.
+  staff(H, { action: 'setmode', mode: 'none', staff: 'Ana' });
+  r = start(H, 'd'.repeat(64));
+  row = H.tab('Tries').rows[H.rows('Tries') - 1];
+  ok(r.ok && r.counted && r.mode === 'none' && row[10] === '', 'none mode: an unsigned start ' + JSON.stringify(r));
+  q = H.tgId(TG3 + 7);
+  r = start(H, q, { sig: H.sig(q) });
+  ok(r.ok && r.counted && H.tab('Tries').rows[H.rows('Tries') - 1][10] === 'yes', 'none mode: a signed start has no Contact yes');
+  staff(H, { action: 'setmode', mode: 'telegram', staff: 'Ana' });
+  // Privacy: the contacts sheet never holds a player id, sig, token or score; the badge sheet never a Telegram number.
+  tmp = JSON.stringify(H.contacts.sheets);
+  ok(!/[0-9a-f]{32}/.test(tmp) && tmp.indexOf(t) < 0, 'the contacts sheet holds a player id, sig or token');
+  tmp = JSON.stringify(H.bound.sheets);
+  ok([TG1, TG2, TG3].every(function (x) { return tmp.indexOf(String(x)) < 0; }), 'the badge sheet holds a Telegram number');
+  // Logs: never the token, a nonce, a Telegram number or a message.
+  tmp = H.logs.join('\n');
+  ok(tmp.indexOf(TG_TOKEN) < 0 && tmp.indexOf('7712345678') < 0 && nc.every(function (x) { return tmp.indexOf(x) < 0; }) &&
+    [TG1, TG2, TG3].every(function (x) { return tmp.indexOf(String(x)) < 0; }) && tmp.indexOf('/start') < 0 && tmp.indexOf('boom') < 0,
+    'a log line holds the token, a nonce, a Telegram number or a message:\n' + tmp);
+  // telegramTest: getMe then deleteWebhook; the bot's name, a warning for another bot, Telegram's error, never the token.
+  q = gsHarness(); q.ctx.telegramTest();
+  ok(q.logs.indexOf(NOTE) > -1 && !q.tg.calls.length, 'telegramTest without TG_TOKEN ' + q.logs);
+  q.props.TG_TOKEN = TG_TOKEN; q.ctx.telegramTest();
+  ok(q.logs.indexOf('Telegram OK: @KlerosBoothBot') > -1 && q.tg.calls.join() === 'getMe,deleteWebhook' && q.logs.every(function (l) { return !/Warning|failed/.test(l); }),
+    'telegramTest ' + JSON.stringify([q.logs, q.tg.calls]));
+  q.tg.username = 'OtherBot'; q.ctx.telegramTest();
+  ok(q.logs.some(function (l) { return /^Warning: this token is for @OtherBot/.test(l); }), 'telegramTest with another bot ' + q.logs.slice(-2));
+  q.props.TG_TOKEN = 'bad' + TG_TOKEN; q.tg.calls = []; q.ctx.telegramTest();
+  ok(q.logs[q.logs.length - 1] === 'Telegram failed: Unauthorized' && q.tg.calls.join() === 'getMe', 'telegramTest with a bad token ' + q.logs.slice(-1));
+  q.props.TG_TOKEN = TG_TOKEN; q.tg.down = true; q.ctx.telegramTest();
+  ok(q.logs.join('\n').indexOf(TG_TOKEN) < 0 && /^Telegram failed: /.test(q.logs[q.logs.length - 1]), 'telegramTest with Telegram down ' + q.logs.slice(-1));
+  console.log('Booth web app: how players verify\n  ' + n + ' cases (Verify with row and dropdown, mode in every reply, setmode, menu, tgcheck and the bot, ' +
+    'contacts rows and /stop, offset, poll throttle and locks, Telegram down, a broken contacts sheet, tgTick, signed starts, check by ticket QR or C- code, ' +
+    'privacy, telegramTest)');
+}
+// The contacts sheet's Day for now, as Sheets keeps the "'yyyy-MM-dd" text.
+function dayOf(h) { return h.ctx.Utilities.formatDate(new Date(h.clock), 'Asia/Kolkata', 'yyyy-MM-dd'); }
 
 // ---- Rewards ----
 // rewards.js and earn.js in vm "pages" that share one fake localStorage, like two tabs on one phone. No real DOM:
@@ -1307,10 +1742,10 @@ function goLine(began) {
 }
 function page(ls, opts) {
   opts = opts || {};
-  var els = {}, G = opts.server, clk = null, timers = [], ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
+  var els = {}, G = opts.server, clk = null, timers = [], on = {}, ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
     document: { hidden: false, activeElement: null, readyState: 'complete', getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
-      createElement: stubEl, addEventListener: function () {} },
-    addEventListener: function () {}, setTimeout: function () { return 0; }, clearTimeout: function () {},
+      createElement: stubEl, addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); } },
+    addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); }, setTimeout: function () { return 0; }, clearTimeout: function () {},
     setInterval: function () { return 1; }, clearInterval: function () {}, performance: { now: function () { return 0; } },
     requestAnimationFrame: function () { return 0; }, cancelAnimationFrame: function () {} };
   ctx.window = ctx;
@@ -1333,16 +1768,23 @@ function page(ls, opts) {
         if (!BADGE.ok(id, raw)) return done('notbadge', { id: id });
         done(null, { id: id, tail: BADGE.tail(id), hash: badgeHash(id) });
       },
-      // G.lose: the server acts but the reply is lost on the way back (a dropped connection).
-      post: function (body, done) {
+      // None mode's phone id: the same salted hash as a badge (3 Nov).
+      hash: function (bid, done) { if (opts.nocrypto) return done('nocrypto'); done(null, badgeHash(bid)); },
+      // G.lose: the server acts but the reply is lost on the way back (a dropped connection). ctx.posts: every body sent.
+      post: function (body, done, o) {
         var j;
+        ctx.posts.push({ body: JSON.parse(JSON.stringify(body)), opts: o || null });
         if (G.offline) return done('offline');
         j = G.call(JSON.parse(JSON.stringify(body)));
         if (G.lose) { G.lose = false; return done('offline'); }
         done(null, j);
       },
-      loadJsQR: function (done) { done(true); }
+      loadJsQR: function (done) { done(true); },
+      // The QR maker (3 Nov): a stub element that remembers its text; the real one is checked in checkBadgeJs.
+      loadQR: function (done) { done(true); },
+      qr: function (text) { var el = stubEl(); el.setAttribute('data-text', text); return el; }
     };
+    ctx.posts = [];
   }
   els['hdr-logo'] = stubEl(); els['hdr-logo'].setAttribute('href', '/');   // as in the shell
   vm.createContext(ctx);
@@ -1356,7 +1798,8 @@ function page(ls, opts) {
     if (/config/.test(f[0]) && opts.config) opts.config(ctx.KLEROS_BOOTH_CONFIG);
   });
   ctx.CurateRewards.init({ show: function (v) { ctx.view = v; }, say: function (s) { ctx.said = s; },
-    reset: function () { ctx.didReset = (ctx.didReset || 0) + 1; ctx.CurateRewards.refreshBrief(); } });
+    reset: function () { ctx.didReset = (ctx.didReset || 0) + 1; ctx.CurateRewards.refreshBrief(); },
+    nudge: function () { ctx.nudged = (ctx.nudged || 0) + 1; } });
   ctx.text = function (id) { return els[id] ? els[id].textContent : ''; };
   ctx.el = function (id) { return ctx.document.getElementById(id); };
   // Moves the shared clock on and runs the timers that are due (badge-mode pages only).
@@ -1364,6 +1807,8 @@ function page(ls, opts) {
     G.clock += ms;
     timers.slice().forEach(function (t) { if (t.fn && t.at <= G.clock) { var fn = t.fn; t.fn = null; fn(); } });
   };
+  // Fires a document or window event (visibilitychange, pageshow, …) at what the page listens with.
+  ctx.fire = function (t, e) { (on[t] || []).forEach(function (fn) { fn(e || {}); }); };
   return ctx;
 }
 // One round through the public API, as game.js calls it: startShift when the clock starts, then finishShift.
@@ -1527,7 +1972,7 @@ function checkRewards() {
 // rewards.js and earn.js with server.endpoint set, against Code.gs in the harness above (spec 9.B): a scan spends
 // nothing, a try counts at Start, a ticket above stickers unlocks with a contact, the kiosk keeps nothing.
 function checkBadgeMode() {
-  var n = 0, G = gsHarness(), T = S.tiers, LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
+  var n = 0, G = gsHarness({ mode: 'badge' }), T = S.tiers, LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
     PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3], ls, p, q, r, m, rows, k, kls, best, before;   // Gold: the server caps scores at the best round
   function ok(cond, msg) { n++; if (!cond) fail('badge mode: ' + msg); }
   function R(pg) { return pg.CurateRewards; }
@@ -1694,6 +2139,264 @@ function checkBadgeMode() {
   console.log('Badge mode\n  ' + n + ' cases (scan, 2 tries per badge, none back on a later day, locked ticket and contact, late unlock, lost replies, refused and unsent finishes, paused, kiosk)');
 }
 
+// ---- Telegram and none modes (3 Nov) ----
+// rewards.js against Code.gs with Verify with on Telegram (the bot answers through the fake Bot API) or None: the
+// verify link and its nonce, the wait, verified then Start, an unverified start, the ticket's QR text (read back as
+// the desk reads it), the booth tablet's QR, and none mode's phone id with the contact step it keeps.
+function checkTelegramMode() {
+  var n = 0, G = gsHarness({ token: true }), T = S.tiers, TG = S.telegram || {}, TEAL = Math.floor((T[1] + T[2]) / 2),
+    TG1 = 5550001234, TG2 = 5550009876, LINK = /^https:\/\/t\.me\/KlerosBoothBot\?start=([A-Za-z0-9]{24})$/, ls, p, q, k, kls, r, m, a,
+    nn, rows, id, rec, qr, before;
+  function ok(cond, msg) { n++; if (!cond) fail('telegram mode: ' + msg); }
+  function R(pg) { return pg.CurateRewards; }
+  function begin(pg, fun) { var out; R(pg).begin('sights', { fun: !!fun }, function (x) { out = x; }); return out; }
+  function play(pg, final) {
+    var i = R(pg).startShift('sights');
+    G.clock += 30000;
+    R(pg).finishShift({ deck: 'sights', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6, evidence: 1,
+      wrong: 0, leaks: 1, trust: 85, reviewed: 10, entries: 10, endedBy: 'done', counted: i.counted, shiftNo: i.shiftNo, code: i.code,
+      misses: [], reason: '' });
+    return i;
+  }
+  function shown(pg, id) { return pg.el(id).hidden === false; }
+  function nonceOf(pg) { var x = LINK.exec(pg.el('intro-tg').href || ''); return x ? x[1] : ''; }
+  function stored(l, key) { return JSON.parse(l.getItem(key || 'kleros_devcon_curate_badge') || 'null'); }
+  // The desk's reading of a ticket QR (site/staff/desk.js gameTicket): KC1, the id and the sig, lower-cased.
+  function deskCheck(text) {
+    var x = String(text).split('.'), b = { action: 'check', key: G.props.STAFF_KEY, badge: String(x[1] || '').toLowerCase() };
+    if (x[2]) b.sig = x[2].toLowerCase();
+    return G.call(b);
+  }
+  ok(TG.bot === 'KlerosBoothBot' && G.ctx.TG_BOT === TG.bot, 'settings.js telegram.bot ' + TG.bot + ' / Code.gs TG_BOT ' + G.ctx.TG_BOT + ' (the spec’s bot)');
+  G.ctx.staffSetup();
+  // Before verifying: the link (a real <a> with the bot and a 24-character nonce), no Start and no Play for fun.
+  ls = new Store(); p = page(ls, { server: G });
+  ok(R(p).mode() === 'telegram' && p.text('ladder-fine').indexOf('Verify with Telegram: 2 tries for merch.') === 0, 'title line ' + p.text('ladder-fine'));
+  R(p).renderIntro();
+  nn = nonceOf(p);
+  ok(nn && shown(p, 'intro-tg') && p.text('intro-tg') === 'Verify with Telegram' && /\bid="intro-tg"/.test(fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').match(/<a\b[^>]*>/g).join(' ')),
+    'the verify link ' + p.el('intro-tg').href + ' / ' + p.text('intro-tg'));
+  ok(!shown(p, 'intro-go') && !shown(p, 'intro-fun') && !shown(p, 'intro-scan') && !shown(p, 'intro-cancel') && !shown(p, 'intro-change'),
+    'Start, Play for fun, Scan, Cancel or Use another Telegram shows before verifying');
+  ok(p.text('intro-note') === 'Verify with Telegram to play: 2 tries for merch.' && shown(p, 'intro-priv') &&
+    p.text('intro-priv-text') === 'Verifying adds your Telegram ID to Kleros news. Leave any time: send /stop to the bot.', 'intro note ' + p.text('intro-note'));
+  rows = G.rows('Tries');
+  r = begin(p, true); q = begin(p);
+  ok(r && r.ok === false && r.error === 'unverified' && q && q.error === 'unverified' && G.rows('Tries') === rows, 'a round before verifying ' + JSON.stringify([r, q]));
+  R(p).setBadge('AB12CD34', function (x) { r = x; });
+  ok(stored(ls, 'kleros_devcon_curate_tg').n === nn && r && r.error === 'mode' && !stored(ls), 'the nonce is not kept, or a badge scan counts: ' + JSON.stringify(r));
+  // A reload keeps the link (and its nonce); the tap starts the wait.
+  q = page(ls, { server: G }); R(q).renderIntro();
+  ok(nonceOf(q) === nn, 'a reload made a new nonce');
+  p.el('intro-tg').click();
+  ok(p.text('intro-note') === 'Tap Start in the Kleros Booth bot, then come back here.' && p.text('intro-tg') === 'Open Telegram again' &&
+    nonceOf(p) === nn && shown(p, 'intro-cancel') && !shown(p, 'intro-fun') && stored(ls, 'kleros_devcon_curate_tg').tap > 0, 'tgwait ' + p.text('intro-note'));
+  before = G.tg.gets;
+  p.tick(TG.pollMs);
+  m = p.posts.filter(function (x) { return x.body.action === 'tgcheck'; });
+  ok(G.tg.gets === before + 1 && m.length === 1 && m[0].body.nonce === nn && m[0].opts && m[0].opts.timeoutMs === S.server.statusTimeoutMs &&
+    p.text('intro-note') === 'Tap Start in the Kleros Booth bot, then come back here.', 'the first poll ' + JSON.stringify(m));
+  // A reload during the wait asks at once, with the same nonce.
+  G.clock += 2100; q = page(ls, { server: G });
+  ok(q.posts.some(function (x) { return x.body.action === 'tgcheck' && x.body.nonce === nn; }), 'a reload while waiting did not ask about the nonce');
+  // In Telegram the page is hidden: no polls. Back on it: one at once, which sees the Start the player tapped.
+  p.document.hidden = true; before = p.posts.length;
+  p.tick(TG.pollMs); p.tick(TG.pollMs);
+  ok(p.posts.length === before, 'a hidden page polled ' + (p.posts.length - before) + ' times');
+  // The player taps Start in Telegram: the id and its sig are kept, never the Telegram number.
+  G.tg.say(TG1, '/start ' + nn);
+  p.document.hidden = false; p.fire('visibilitychange');
+  id = G.tgId(TG1); rec = stored(ls);
+  ok(p.text('intro-badge') === 'Telegram ✓ · Try 1 of 2' && shown(p, 'intro-go') && p.text('intro-go') === 'Start' && shown(p, 'intro-fun') &&
+    p.text('intro-change') === 'Use another Telegram' && !shown(p, 'intro-tg') && !shown(p, 'intro-cancel') && !shown(p, 'intro-priv'),
+    'verified intro ' + p.text('intro-badge') + ' / ' + p.text('intro-note'));
+  ok(rec && rec.v === 2 && rec.kind === 'tg' && rec.hash === id && rec.sig === G.sig(id) && rec.mode === 'telegram' && !ls.getItem('kleros_devcon_curate_tg') &&
+    JSON.stringify(ls.d).indexOf(String(TG1)) < 0, 'the stored id ' + JSON.stringify(rec));
+  R(p).refreshBrief();
+  ok(p.text('ladder-fine').indexOf('Telegram ✓ · 2 tries for merch.') === 0, 'title line once verified ' + p.text('ladder-fine'));
+  // Start carries the sig; the try's row says Contact yes, so a Teal round is a live ticket with no contact step.
+  r = begin(p);
+  m = p.posts.filter(function (x) { return x.body.action === 'start'; });
+  ok(r && r.ok && r.counted && r.shiftNo === 1 && m.length === 1 && m[0].body.sig === rec.sig && G.tab('Tries').rows[G.rows('Tries') - 1][10] === 'yes',
+    'Start ' + JSON.stringify(r));
+  play(p, TEAL);
+  m = R(p).model();
+  ok(m.state === 'live' && m.t === 1 && p.text('to-ticket') === 'Show my merch ticket', 'Results after a Teal round ' + m.state + ' / ' + p.text('to-ticket'));
+  R(p).showTicket();
+  qr = 'KC1.' + id.toUpperCase() + '.' + rec.sig.toUpperCase();
+  ok(R(p).qrText() === qr && p.el('t-qr').getAttribute('data-qr') === qr && p.el('t-qr').getAttribute('data-drawn') === qr && shown(p, 't-qr') &&
+    /^[0-9A-Z.]+$/.test(qr), 'the ticket QR ' + p.el('t-qr').getAttribute('data-qr'));
+  ok(p.text('t-hint') === 'Show this QR at the merch desk.' && / · Telegram ✓$/.test(p.text('t-org')) && /^C-[A-Z0-9]{6}$/.test(p.text('t-code')) &&
+    p.el('contact').hidden !== false, 'the ticket ' + p.text('t-hint') + ' / ' + p.text('t-org') + ' / ' + p.text('t-code'));
+  // The desk reads it: the QR, a QR with a wrong sig, the C- code typed under it; then a claim with the id it names.
+  r = deskCheck(qr);
+  ok(r.ok && r.badge === id && r.contact === true && r.earned === 1, 'the desk scanning the ticket ' + JSON.stringify(r));
+  ok(deskCheck(qr.slice(0, -1) + (qr.slice(-1) === '0' ? '1' : '0')).error === 'badticket', 'a ticket QR with a wrong sig');
+  r = G.call({ action: 'check', key: G.props.STAFF_KEY, code: p.text('t-code').toLowerCase() });
+  ok(r.ok && r.badge === id && r.earned === 1, 'the desk typing the C- code ' + JSON.stringify(r));
+  // A stored sig the server doesn't know (forged, or another TG_SECRET): Start drops the id and shows the link again.
+  q = new Store();
+  q.setItem('kleros_devcon_curate_badge', JSON.stringify({ v: 2, kind: 'tg', hash: G.tgId(TG2), tail: '', sig: '0'.repeat(32), best: null,
+    contact: false, collected: false, mode: 'telegram', pending: null, at: G.clock }));
+  q = page(q, { server: G }); R(q).renderIntro();
+  ok(q.text('intro-badge') === 'Telegram ✓ · Try 1 of 2', 'a stored Telegram id at load ' + q.text('intro-badge'));
+  rows = G.rows('Tries');
+  r = begin(q);
+  ok(r && r.ok === false && r.error === 'unverified' && G.rows('Tries') === rows && LINK.test(q.el('intro-tg').href) && shown(q, 'intro-tg') &&
+    !shown(q, 'intro-go') && !(stored(q.localStorage) || {}).hash, 'an unverified start ' + JSON.stringify(r));
+  // Use another Telegram: the id goes, a new link shows.
+  R(p).forgetBadge();
+  ok(!stored(ls) && shown(p, 'intro-tg') && LINK.test(p.el('intro-tg').href) && nonceOf(p) !== nn, 'Use another Telegram');
+  // Cancel forgets the wait; no answer for waitMs: a new nonce and "No answer from Telegram yet".
+  nn = nonceOf(p); p.el('intro-tg').click(); p.el('intro-cancel').click();
+  ok(!shown(p, 'intro-cancel') && p.text('intro-tg') === 'Verify with Telegram' && nonceOf(p) !== nn && !stored(ls, 'kleros_devcon_curate_tg').tap, 'Cancel');
+  nn = nonceOf(p); p.el('intro-tg').click(); p.tick(TG.waitMs);
+  ok(p.text('intro-note') === 'No answer from Telegram yet. Try again.' && nonceOf(p) && nonceOf(p) !== nn && !shown(p, 'intro-cancel'),
+    'after waitMs ' + p.text('intro-note'));
+  // The list unreachable while verifying: two missed answers, then Try again asks at once.
+  nn = nonceOf(p); p.el('intro-tg').click();
+  G.offline = true; p.tick(TG.pollMs); p.tick(TG.pollMs); G.offline = false;
+  ok(p.text('intro-note') === 'Can’t reach the merch list. Try again.' && p.text('intro-go') === 'Try again' && !shown(p, 'intro-fun'),
+    'offline while verifying ' + p.text('intro-note'));
+  G.tg.say(TG1, '/start ' + nn); G.clock += 2100;
+  r = begin(p);
+  ok(r && r.error === 'unverified' && p.text('intro-badge') === 'Telegram ✓ · Try 2 of 2', 'Try again after offline ' + p.text('intro-badge') + ' / ' + p.text('intro-note'));
+  // The bot not set up (no TG_TOKEN): say so, offer nothing.
+  q = gsHarness(); q.ctx.staffSetup();
+  k = page(new Store(), { server: q }); R(k).renderIntro();
+  ok(k.text('intro-note') === 'Telegram check isn’t ready yet. Ask the booth staff.' && !shown(k, 'intro-tg') && !shown(k, 'intro-go') && !shown(k, 'intro-fun'),
+    'no bot token ' + k.text('intro-note'));
+  // A badge-mode id stored before the switch to Telegram (v1) is dropped: ids never mix.
+  q = new Store();
+  q.setItem('kleros_devcon_curate_badge', JSON.stringify({ v: 1, hash: badgeHash('AB12CD34'), tail: 'CD34', best: null, contact: true, collected: false,
+    pending: null, at: G.clock }));
+  k = page(q, { server: G }); R(k).renderIntro();
+  ok(!(stored(q) || {}).hash && shown(k, 'intro-tg') && !k.text('intro-badge'), 'a stored badge under Telegram mode ' + JSON.stringify(stored(q)));
+  // The booth tablet: the link as a QR for the visitor's phone, asked about at once, nothing stored.
+  kls = new Store(); k = page(kls, { server: G, kiosk: true }); R(k).renderIntro();
+  a = k.el('intro-qr-img').getAttribute('data-qr') || '';
+  ok(LINK.test(a) && shown(k, 'intro-qr') && !shown(k, 'intro-tg') && k.text('intro-qr-cap') === 'Scan with your phone camera, tap Start in Telegram.' &&
+    R(k).tgWaiting() === true && Object.keys(kls.d).length === 0, 'the kiosk QR ' + a + ' ' + JSON.stringify(kls.d));
+  G.tg.say(TG2, '/start ' + LINK.exec(a)[1]);
+  G.clock += 2100; k.tick(TG.pollMs);
+  ok(k.text('intro-badge') === 'Telegram ✓ · Try 1 of 2' && !shown(k, 'intro-qr') && Object.keys(kls.d).length === 0 && R(k).tgWaiting() === false,
+    'the kiosk after the visitor verified ' + k.text('intro-badge') + ' ' + JSON.stringify(kls.d));
+  // 3 Nov review: verifying re-arms the tablet's idle reset (game.js hands rewards.js its idleNudge), so the visitor
+  // gets a full idle period to look back from Telegram; nothing on the tablet was tapped.
+  ok(k.nudged === 1 && /var ui = \{[^}]*\bnudge: idleNudge\b/.test(fs.readFileSync(path.join(DIR, 'game.js'), 'utf8')),
+    'verifying did not re-arm the kiosk idle reset (nudged ' + k.nudged + ')');
+  // No answer within waitMs on the tablet: no new QR nobody waits on (the idle reset may take it back to the title),
+  // and a Try again that makes a new QR and a new wait.
+  k = page(new Store(), { server: G, kiosk: true }); R(k).renderIntro();
+  a = k.el('intro-qr-img').getAttribute('data-qr');
+  k.tick(TG.waitMs);
+  before = k.posts.length; k.tick(TG.pollMs); k.tick(TG.pollMs);
+  ok(k.text('intro-note') === 'No answer from Telegram yet. Try again.' && !shown(k, 'intro-qr') && k.el('intro-qr-img').getAttribute('data-qr') === '' &&
+    shown(k, 'intro-go') && k.text('intro-go') === 'Try again' && R(k).tgWaiting() === false && k.posts.length === before,
+    'the kiosk after waitMs ' + k.text('intro-note') + ' / ' + k.text('intro-go') + ' / ' + (k.posts.length - before) + ' polls');
+  r = begin(k);
+  ok(r && r.error === 'unverified' && LINK.test(k.el('intro-qr-img').getAttribute('data-qr') || '') && k.el('intro-qr-img').getAttribute('data-qr') !== a &&
+    shown(k, 'intro-qr') && !shown(k, 'intro-go') && R(k).tgWaiting() === true && k.text('intro-note') !== 'No answer from Telegram yet. Try again.',
+    'Try again on the kiosk ' + k.el('intro-qr-img').getAttribute('data-qr'));
+  // An Everyone ticket carries the QR too (with the live clock, no C- code): the desk scans it, sees under Teal, and
+  // a check-in K- code then opens any tier.
+  ls = new Store(); p = page(ls, { server: G }); R(p).renderIntro();
+  nn = nonceOf(p); G.tg.say(TG2 + 1, '/start ' + nn); p.el('intro-tg').click(); p.tick(TG.pollMs);
+  id = G.tgId(TG2 + 1); rec = stored(ls);
+  r = begin(p);
+  ok(rec && rec.hash === id && r && r.counted, 'a third player verified and started ' + JSON.stringify(r));
+  // The QR maker fails to load (Wi-Fi dropped): the QR stays hidden, then draws on its own 4 s later.
+  q = p.CurateBadge.loadQR; k = 0;
+  p.CurateBadge.loadQR = function (done) { k++; done(false); };
+  play(p, Math.floor(T[1] / 2));
+  R(p).showTicket();
+  qr = 'KC1.' + id.toUpperCase() + '.' + rec.sig.toUpperCase();
+  a = k;
+  ok(R(p).model().t === 0 && p.el('t-qr').getAttribute('data-qr') === qr && !shown(p, 't-qr') && k > 0, 'a QR whose maker failed to load ' +
+    p.el('t-qr').getAttribute('data-qr') + ' (' + k + ' loads)');
+  R(p).showTicket(); p.tick(4000);
+  ok(k === a + 2 && !shown(p, 't-qr'), 'the QR load was not tried again, or twice at once (' + (k - a) + ' loads)');
+  p.CurateBadge.loadQR = q; p.tick(4000);
+  ok(p.el('t-qr').getAttribute('data-drawn') === qr && shown(p, 't-qr') && shown(p, 't-live') && !shown(p, 't-code') && p.text('t-hint') === 'Show this at the booth.',
+    'the Everyone ticket QR ' + p.el('t-qr').getAttribute('data-drawn') + ' / ' + p.text('t-hint'));
+  r = deskCheck(qr);
+  ok(r.ok && r.badge === id && r.earned === 0 && r.game && r.game.tier === 0, 'the desk scanning an Everyone ticket ' + JSON.stringify(r));
+  r = G.call({ action: 'claim', key: G.props.STAFF_KEY, badge: id, tier: 'purple', item: 'x', ticket: 'K-EVR123', staff: 'Ana', id: 'claimevr0001', how: 'scan' });
+  ok(r.ok, 'an Everyone ticket with a check-in K- code ' + JSON.stringify(r));
+
+  // None mode: the phone makes its own id (salted hash of 24 random characters); the contact step stays.
+  q = gsHarness({ mode: 'none' }); q.ctx.staffSetup();
+  ls = new Store(); p = page(ls, { server: q }); R(p).renderIntro();
+  rec = stored(ls);
+  ok(R(p).mode() === 'none' && rec && rec.kind === 'device' && /^[0-9a-f]{64}$/.test(rec.hash) && !rec.sig && p.text('intro-note') === 'Your phone gets 2 tries for merch.' &&
+    shown(p, 'intro-go') && shown(p, 'intro-fun') && !shown(p, 'intro-tg') && !shown(p, 'intro-scan') && !shown(p, 'intro-change'),
+    'none mode intro ' + p.text('intro-note') + ' ' + JSON.stringify(rec));
+  ok(p.posts.some(function (x) { return x.body.action === 'status' && x.body.badge === rec.hash; }), 'none mode: the new id’s tries were not asked');
+  k = page(ls, { server: q }); R(k).renderIntro();
+  ok(stored(ls).hash === rec.hash, 'a reload made a second phone id');
+  G = q;   // play() moves this server's clock
+  r = begin(p);
+  ok(r && r.ok && r.counted && q.tab('Tries').rows[q.rows('Tries') - 1][10] === '' && q.tab('Tries').rows[q.rows('Tries') - 1][2] === rec.hash, 'none mode Start ' + JSON.stringify(r));
+  play(p, TEAL);
+  ok(R(p).model().state === 'locked' && p.text('to-ticket') === 'Unlock my merch ticket', 'none mode: a Teal round is not locked until a contact');
+  R(p).showTicket();
+  p.el('contact-input').value = 'ana@example.org'; p.el('contact-form').fire('submit');
+  R(p).showTicket();
+  qr = 'KC1.' + rec.hash.toUpperCase() + '.';
+  ok(R(p).model().state === 'live' && R(p).qrText() === qr && p.el('t-qr').getAttribute('data-qr') === qr && / · This phone$/.test(p.text('t-org')) &&
+    p.text('t-hint') === 'Show this QR at the merch desk.', 'none mode ticket ' + p.el('t-qr').getAttribute('data-qr') + ' / ' + p.text('t-org'));
+  r = deskCheck(qr);
+  ok(r.ok && r.badge === rec.hash && r.contact === true && r.earned === 1, 'the desk scanning a none-mode ticket ' + JSON.stringify(r));
+  console.log('Telegram and none modes\n  ' + n + ' cases (verify link and nonce, no play before verifying, wait, reload, hidden page, verified then Start, Contact yes, ticket QR read by ' +
+    'the desk, unverified start, another Telegram, Cancel, waitMs, offline, no bot token, a badge id dropped, kiosk QR, kiosk idle after verifying and after waitMs, ' +
+    'Everyone ticket QR and a K- code, QR load retry, none mode id, contact step and QR)');
+}
+
+// ---- Staff desk (3 Nov review) ----
+// site/staff/desk.js in a vm against stub elements and a booth script (gsHarness) whose replies wait until flush(), so a
+// reply can land while a screen is open. Today: Advanced follows a mode the sheet reports while it is open.
+function checkDesk() {
+  var n = 0, G = gsHarness({ token: true }), els = {}, waiting = [], radios, ctx, ls = new Store();
+  function ok(cond, msg) { n++; if (!cond) fail('desk.js: ' + msg); }
+  function flush() { var w = waiting; waiting = []; w.forEach(function (f) { f(); }); }
+  function radio(v) { return radios.filter(function (r) { return r.value === v; })[0]; }
+  G.ctx.staffSetup(); G.ctx.writeMode_('none');
+  radios = ['telegram', 'badge', 'none'].map(function (v) { var r = stubEl(); r.value = v; return r; });
+  ls.setItem('kleros_curate_desk', JSON.stringify({ key: G.props.STAFF_KEY, staff: 'Ana' }));
+  ctx = { console: console, localStorage: ls, location: { search: '' }, navigator: {}, CURATE_SETTINGS: S, KLEROS_BOOTH_CONFIG: {},
+    confirm: function () { return true; }, scrollTo: function () {},
+    document: { readyState: 'complete', addEventListener: function () {}, createElement: stubEl,
+      getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
+      querySelectorAll: function (q) { return q === 'input[name="adv-mode"]' ? radios : []; },
+      querySelector: function (q) { return q === 'input[name="adv-mode"]:checked' ? radios.filter(function (r) { return r.checked; })[0] || null : null; } },
+    CurateBadge: { endpoint: function () { return 'https://test/exec'; },
+      post: function (body, done) { waiting.push(function () { done(null, G.call(JSON.parse(JSON.stringify(body)))); }); } } };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(STAFF, 'desk.js'), 'utf8'), ctx, { filename: 'desk.js' });
+  // Advanced opened before the first reply: the spec's Telegram guess, pre-selected.
+  ok(els.home.hidden === false && waiting.length === 1, 'home did not ask for stats');
+  els['adv-go'].click();
+  ok(els.adv.hidden === false && els['adv-now'].textContent === 'Now: players verify with Telegram.' && radio('telegram').checked && els['adv-apply'].disabled,
+    'Advanced before any reply ' + els['adv-now'].textContent);
+  // The stats reply says None while Advanced is open: the panel follows (its line, its selection, Change disabled).
+  flush();
+  ok(els['adv-now'].textContent === 'Now: players verify with no check.' && radio('none').checked && !radio('telegram').checked && els['adv-apply'].disabled &&
+    els['h-mode'].textContent === 'Players verify with no check.', 'Advanced after a reply said none: ' + els['adv-now'].textContent + ' / ' +
+    radios.filter(function (r) { return r.checked; }).map(function (r) { return r.value; }));
+  // Once the lead picked a mode, a later reply moves the line but never their pick (Cancel, then home asks again).
+  els['adv-cancel'].click(); els['adv-go'].click();
+  ok(waiting.length === 1 && radio('none').checked && els['adv-now'].textContent === 'Now: players verify with no check.', 'Advanced opened again');
+  radio('none').checked = false; radio('telegram').checked = true; els['adv-modes'].fire('change');
+  els['adv-confirm'].value = 'change'; els['adv-confirm'].fire('input');
+  ok(!els['adv-apply'].disabled, 'Telegram picked and CHANGE typed against none: Change for everyone is still off');
+  G.ctx.writeMode_('badge');
+  flush();
+  ok(els['adv-now'].textContent === 'Now: players verify with their badge.' && radio('telegram').checked && !radio('badge').checked && !els['adv-apply'].disabled,
+    'a reply moved the lead’s pick: ' + els['adv-now'].textContent);
+  console.log('Staff desk\n  ' + n + ' cases (Advanced follows a mode reply while open, keeps the lead’s pick)');
+}
+
 // ---- badge.js ----
 // The shared badge module, loaded for real: ids stay the v6 desk's, Kleros's own links and ticket codes are not
 // badges; both pages load it (defer, before the scripts that use it) and neither loads jsQR up front.
@@ -1701,7 +2404,38 @@ function checkBadgeJs() {
   var n = 0, B = BADGE;
   function ok(cond, msg) { n++; if (!cond) fail('badge.js: ' + msg); }
   if (!B) return fail('badge.js: window.CurateBadge is missing');
-  ['endpoint', 'can', 'id', 'ok', 'tail', 'hash', 'read', 'post', 'scan', 'loadJsQR'].forEach(function (f) { ok(typeof B[f] === 'function', f + ' is missing'); });
+  ['endpoint', 'can', 'id', 'ok', 'tail', 'hash', 'read', 'post', 'scan', 'loadJsQR', 'loadQR', 'qr'].forEach(function (f) { ok(typeof B[f] === 'function', f + ' is missing'); });
+  ok(B.qr('KC1.X') === null, 'qr() draws before loadQR() is done');
+  // The QRs the game draws (3 Nov), end to end: badge.js qr() with the vendored qrcode-generator makes an <svg>; drawn
+  // to pixels here and read with the vendored jsQR, it gives back the exact text (the ticket the desk parses, the
+  // tablet's Telegram link). A ticket is upper case, so it must fit the compact alphanumeric kind (version 5, 37 modules).
+  (function () {
+    var ctx = { console: console, navigator: {}, CURATE_SETTINGS: S }, hex = crypto.createHash('sha256').update('qr').digest('hex');
+    function node(tag) { var a = {}; return { tag: tag, a: a, kids: [], setAttribute: function (k, v) { a[k] = String(v); }, appendChild: function (c) { this.kids.push(c); return c; } }; }
+    ctx.window = ctx; ctx.document = { createElementNS: function (ns, tag) { return node(tag); } };
+    vm.createContext(ctx);
+    try {
+      ['qrcode.js', 'jsQR.js'].forEach(function (f) { vm.runInContext(fs.readFileSync(path.join(DIR, 'vendor', f), 'utf8'), ctx, { filename: 'vendor/' + f }); });
+      vm.runInContext(fs.readFileSync(path.join(DIR, 'badge.js'), 'utf8'), ctx, { filename: 'badge.js' });
+    } catch (e) { return fail('badge.js: the QR files threw on load: ' + e.message); }
+    [['KC1.' + hex.toUpperCase() + '.' + hex.slice(0, 32).toUpperCase(), 37], ['KC1.' + hex.toUpperCase() + '.', 33],
+      ['https://t.me/KlerosBoothBot?start=aB3dE5fG7hJ9kL1mN2pQ4rS6', 0]].forEach(function (c) {
+      var svg = ctx.CurateBadge.qr(c[0]), N, d, S4 = 4, w, px, re = /M(\d+) (\d+)h(\d+)v1h-\d+z/g, mm, x, y, i, j, got, min = 99;
+      if (!svg || svg.tag !== 'svg') return ok(false, 'qr() made no <svg> for ' + c[0]);
+      N = Number((svg.a.viewBox || '').split(' ')[2]);
+      d = (svg.kids[1] || { a: {} }).a.d || '';
+      w = N * S4; px = new Uint8ClampedArray(w * w * 4).fill(255);
+      while ((mm = re.exec(d))) {
+        min = Math.min(min, +mm[1], +mm[2]);
+        for (y = +mm[2] * S4; y < (+mm[2] + 1) * S4; y++) for (x = +mm[1] * S4; x < (+mm[1] + +mm[3]) * S4; x++) { i = (y * w + x) * 4; px[i] = px[i + 1] = px[i + 2] = 0; }
+      }
+      j = ctx.jsQR(px, w, w);
+      got = j ? j.data : null;
+      ok(got === c[0], 'the QR for ' + c[0].slice(0, 20) + '… reads back as ' + got);
+      ok(min === 4 && (svg.kids[0] || { a: {} }).a.fill === '#fff' && svg.kids[1].a.fill === '#000', 'the QR has no 4-module quiet zone, or is not dark on white');
+      if (c[1]) ok(N - 8 <= c[1], c[0].slice(0, 12) + '… makes a ' + (N - 8) + '-module QR, more than ' + c[1] + ' (not the alphanumeric kind)');
+    });
+  })();
   ok(B.SALT === 'kleros-devcon-badge|', 'SALT changed: the desk and the game would hash apart from the v6 desk');
   [['?id=AB12CD34', 'AB12CD34'], ['https://x/t/AB12CD34', 'AB12CD34'], ['AB12CD34', 'AB12CD34'], [' ab12-cd34 ', 'AB12CD34'],
     ['https://x/ticket?ref=XYZ9', 'TICKETXYZ9'], ['https://x/u/abc12/badge', 'UABC12BADGE']].forEach(function (c) {
@@ -1719,10 +2453,10 @@ function checkBadgeJs() {
     ok(tags.every(function (t) { return /\sdefer\b/.test(t) && /src="\//.test(t); }), pg[0] + ': every script is defer and root-absolute');
     ok(pg[1].every(function (f, i) { return order.indexOf(f) > -1 && (!i || order.indexOf(f) > order.indexOf(pg[1][i - 1])); }),
       pg[0] + ': scripts out of order: ' + order.join(', '));
-    ok(order.indexOf('jsQR.js') < 0, pg[0] + ': jsQR loads up front');
+    ok(order.indexOf('jsQR.js') < 0 && order.indexOf('qrcode.js') < 0, pg[0] + ': jsQR or qrcode loads up front');
   });
   ok(!fs.existsSync(path.join(STAFF, 'vendor')), 'site/staff/vendor is back (jsQR lives in /curate/vendor/)');
-  console.log('badge.js\n  ' + n + ' cases (ids, badge test, hash salt, script order in both pages)');
+  console.log('badge.js\n  ' + n + ' cases (ids, badge test, hash salt, ticket and Telegram QRs read back with jsQR, script order in both pages)');
 }
 
 // ---- GL watchdog ----
@@ -1911,18 +2645,23 @@ checkDealing();
 checkLint();
 checkCopy();
 try { checkServer(); } catch (e) { fail('Code.gs: the server checks threw ' + e.message); }
+try { checkVerify(); } catch (e) { fail('Code.gs verify: the checks threw ' + e.stack); }
 try { checkRewards(); } catch (e) { fail('rewards.js: the ticket checks threw ' + e.message); }
 try { checkBadgeMode(); } catch (e) { fail('badge mode: the checks threw ' + e.stack); }
+try { checkTelegramMode(); } catch (e) { fail('telegram mode: the checks threw ' + e.stack); }
+try { checkDesk(); } catch (e) { fail('desk.js: the checks threw ' + e.stack); }
 try { checkBadgeJs(); } catch (e) { fail('badge.js: the checks threw ' + e.message); }
 checkWatchdog();
 checkSizes();
 if (SIM) simulate();
 // Not automated (spec 9.G): check these by hand before the booth opens.
 console.log('Manual QA before opening\n' +
-  '  the intro, up to Start / Scan your badge, fits above the fold at 375×548\n' +
-  '  a badge scan on an iPhone (jsQR) and on an Android phone (BarcodeDetector)\n' +
-  '  a full kiosk cycle on the tablet: scan, round, locked ticket, unlock, reset, scan\n' +
-  '  the full guide in apps-script/staff-desk/README.md (2 tries per badge for the whole event; delete test rows after)');
+  '  the intro, up to Verify with Telegram / Start, fits above the fold at 375×548\n' +
+  '  Verify with Telegram on an iPhone and an Android phone against the live script: the link opens the Telegram app, Start, back to the game verified\n' +
+  '  the merch desk scanning a ticket QR on another phone, and typing its C- code\n' +
+  '  a full kiosk cycle on the tablet: the Telegram QR, a visitor verifies on their phone, round, ticket, reset\n' +
+  '  badge mode only if it is switched on: a badge scan on an iPhone (jsQR) and on an Android phone (BarcodeDetector)\n' +
+  '  the full guide in apps-script/staff-desk/README.md (2 tries per player for the whole event; delete test rows after)');
 warnings.forEach(function (w) { console.log('warn  ' + w); });
 if (errors.length) {
   errors.forEach(function (e) { console.log('FAIL  ' + e); });
