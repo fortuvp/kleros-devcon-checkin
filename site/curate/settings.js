@@ -24,7 +24,7 @@ window.CURATE_SETTINGS = {
   // endpoint: its /exec URL. Empty: v6 mode (tries and tickets on this phone) and the desk says Not connected yet.
   // timeoutMs: writes (above the script's 6 s lock wait plus a cold start); statusTimeoutMs: status reads;
   // statusMs: how often the title asks again for the switches and the badge's tries.
-  server: { endpoint: '', timeoutMs: 20000, statusTimeoutMs: 8000, statusMs: 30000 },
+  server: { endpoint: 'https://script.google.com/macros/s/AKfycbx6kHB55iLyIvlmef-lyZ-H0tAnhF5pHZfJmh2JkUo67TMlBi_x0ScTtOuDS6_e2ChuDA/exec', timeoutMs: 20000, statusTimeoutMs: 8000, statusMs: 30000 },
   // badge: a Devcon badge is the player's id in badge mode (badge.js). pattern: a regex the normalised id must
   // match (set it from /staff/?test=1 on real badges; empty: 8+ characters with a letter and a digit).
   // typed: false when /staff/?test=1 shows the printed code isn't the QR's id (then only scans count).
