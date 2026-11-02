@@ -53,6 +53,14 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
 #result input { background:rgba(0,0,0,.22); border-color:rgba(255,255,255,.4); }
 #r-msg { margin-top:10px; font-weight:600; }
 #result #r-free { color:rgba(255,255,255,.85); }
+/* Switches (merch open, paused, sold out) and the game's word on a badge */
+#h-switch { margin-top:12px; font-weight:600; }
+.warn { color:var(--warn); }
+#r-game { font-size:17px; margin-top:12px; padding:10px 12px; border-radius:12px; background:rgba(0,0,0,.2); }
+.items h2.off { opacity:.75; }
+/* Test mode (calibration) */
+#t-prev { white-space:pre-line; overflow-wrap:anywhere; }
+#t-warn { margin-top:12px; padding:10px 12px; border-radius:12px; background:var(--warn); color:#1d1050; font-weight:700; }
 </style>
 </head>
 <body>
@@ -75,6 +83,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
     <button type="button" class="big" id="scan-go">Scan badge</button>
     <button type="button" class="ghost" id="type-go">Type the badge code</button>
     <div class="counts" aria-label="Handed out today"><div class="c-teal"><b id="n-teal">–</b>Teal</div><div class="c-purple"><b id="n-purple">–</b>Purple</div><div class="c-gold"><b id="n-gold">–</b>Gold</div></div>
+    <p id="h-switch" class="muted"></p>
     <p class="muted" style="margin-top:14px">One item per badge. Stickers need no scan.</p>
     <button type="button" class="ghost" id="rekey">Change key or name</button>
   </section>
@@ -82,7 +91,6 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
   <section id="scan" hidden>
     <h1>Point at the badge code</h1>
     <div class="cam"><video id="video" playsinline muted autoplay></video><i aria-hidden="true"></i></div>
-    <canvas id="frame" hidden></canvas>
     <button type="button" class="ghost" id="scan-type">Type it instead</button>
     <button type="button" class="ghost" id="scan-cancel">Cancel</button>
   </section>
@@ -91,7 +99,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
     <h1>Badge code</h1>
     <p id="type-msg" class="muted"></p>
     <form id="type-form">
-      <label for="badge-text">The code printed on the badge</label><input id="badge-text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <label for="badge-text">Type it from the badge on their lanyard, not from a phone or paper.</label><input id="badge-text" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <button type="submit">Check</button>
     </form>
     <button type="button" class="ghost" id="type-cancel">Cancel</button>
@@ -103,9 +111,13 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
     <div id="r-icon" aria-hidden="true"></div>
     <div id="r-word"></div>
     <p id="r-line"></p>
+    <p id="r-game" hidden></p>
+    <button type="button" class="ghost" id="r-recheck" hidden>Check again</button>
+    <p id="t-prev" class="muted" hidden></p>
+    <p id="t-warn" role="alert" hidden></p>
     <div class="items" id="r-items" hidden>
-      <label for="r-ticket">Ticket code from their screen (optional, stops one ticket going with two badges)</label><input id="r-ticket" placeholder="K-ABC123 or C-ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8">
-      <p>Read the colour on their ticket, then tap what you hand over:</p>
+      <label for="r-ticket">Check-in ticket instead? Type its code and read its colour.</label><input id="r-ticket" placeholder="K-ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8">
+      <p>Tap what you hand over:</p>
       <div id="r-buttons"></div>
     </div>
     <p id="r-msg"></p>
@@ -117,7 +129,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
 
 <script defer src="/config.js"></script>
 <script defer src="/curate/settings.js"></script>
-<script defer src="/staff/vendor/jsQR.js"></script>
+<script defer src="/curate/badge.js"></script>
 <script defer src="/staff/desk.js"></script>
 </body>
 </html>

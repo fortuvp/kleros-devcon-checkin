@@ -1,108 +1,118 @@
-// Curate game: the "earn for real" mini form on Results. One field, Telegram or email.
-// It posts to the game owner's own sign-up sheet script (settings.js earn.endpoint, an Apps Script web app: see
-// apps-script/earn-signups/), never to the check-in backend or the staff badge desk. While no endpoint is set the form stays hidden,
-// so no sign-up is silently lost; ?earnpreview=1 shows it anyway for a look. A sign-up that can't be sent
-// waits on the phone (kleros_devcon_curate_earn) and goes out on the next load. User text reaches the DOM
-// through textContent only.
+// Curate game: the contact step under a locked ticket (badge mode). One field, email or @Telegram, plus an
+// optional curator tick. It posts to the booth's one sheet script through CurateBadge.post (settings.js
+// server.endpoint, apps-script/staff-desk/), which writes the contacts sheet, never the badge list, and never the
+// check-in backend. Nothing is queued or kept on the device: a contact that can't be sent is typed again.
+// User text reaches the DOM through textContent only.
 (function () {
   'use strict';
 
   // ---- Setup ----
-  var S = window.CURATE_SETTINGS || {}, E = { endpoint: (S.earn || {}).endpoint || '', monthly: (S.earn || {}).monthly }, CFG = window.KLEROS_BOOTH_CONFIG || {};
-  var KIOSK = /[?&]kiosk=1\b/.test(location.search), PREVIEW = /[?&]earnpreview=1\b/.test(location.search);
-  var KEY = 'kleros_devcon_curate_earn';
+  var S = window.CURATE_SETTINGS || {}, C = S.contact || {}, CFG = window.KLEROS_BOOTH_CONFIG || {};
   var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, TG = /^@?[A-Za-z][A-Za-z0-9_]{4,31}$/;
-  var sending = false, tries = 0;
+  var cur = null, sending = false;   // cur: the open step ({ badge, kiosk, onDone, onInput, id })
 
   function $(id) { return document.getElementById(id); }
-  function txt(id, s) { var el = $(id); if (el) el.textContent = s; return el; }
-  // A booth tablet keeps nothing: each visitor gets a fresh form, and their contact never stays on the device.
-  function load() {
-    if (KIOSK) return { queue: [], done: false };
-    try { return JSON.parse(localStorage.getItem(KEY) || 'null') || { queue: [], done: false }; } catch (e) { return { queue: [], done: false }; }
-  }
-  function save() { if (KIOSK) return; try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* private mode: memory only */ } }
-  var st = load();
-  if (!st.queue) st.queue = [];
+  function txt(id, s) { var el = $(id); if (el) el.textContent = s == null ? '' : String(s); return el; }
+  // The retired Earn for real queue (v6): its sign-ups went to a sheet script that no longer exists.
+  try { localStorage.removeItem('kleros_devcon_curate_earn'); } catch (e) { /* blocked storage: nothing to remove */ }
 
-  function kindOf(v) { return EMAIL.test(v) ? 'email' : TG.test(v) ? 'telegram' : ''; }
+  function kindOf(v) { return v.length > 120 ? '' : EMAIL.test(v) ? 'email' : TG.test(v) ? 'telegram' : ''; }
   function tidy(v, kind) { return kind === 'telegram' && v.charAt(0) !== '@' ? '@' + v : v; }
+  // One id per shown step, reused on retry, so the script writes one contacts row however often it is sent.
   function newId() {
-    var s = '', a = 'abcdefghijkmnpqrstuvwxyz23456789', i;
-    for (i = 0; i < 12; i++) s += a.charAt(Math.floor(Math.random() * a.length));
+    var a = 'abcdefghjkmnpqrstuvwxyz23456789', s = '', u = null, i;
+    try { u = new Uint8Array(12); window.crypto.getRandomValues(u); } catch (e) { u = null; }
+    for (i = 0; i < 12; i++) s += a.charAt((u ? u[i] : Math.floor(Math.random() * 256)) % a.length);
     return s;
   }
-
-  // ---- Sending ----
-  // text/plain keeps the request simple (no CORS preflight), as the check-in page does with its backend.
-  function send(item) {
-    return fetch(E.endpoint, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(item) })
-      .then(function (r) { return r.json(); })
-      .then(function (j) { if (!j || !j.ok) throw new Error((j && j.error) || 'not saved'); });
-  }
-  // One at a time, oldest first. Retries are safe: the sheet script skips an id it already saved.
-  function flush() {
-    if (sending || !E.endpoint || !st.queue.length || !window.fetch) return;
-    sending = true;
-    send(st.queue[0]).then(function () {
-      sending = false; tries = 0; st.queue.shift(); save(); flush();
-    }, function () {
-      sending = false;
-      // Try again while the visitor stays (20 s, 40 s, 80 s…), then on the next load or when back online.
-      if (tries < 6) setTimeout(flush, 20000 * Math.pow(2, tries++));
-    });
+  // The privacy notice (#curate-privacy) is always in the page: say where to ask for deletion.
+  function fillPrivacy() {
+    if (C.privacyEmail) txt('cp-mail', 'ask at the booth or write to ' + C.privacyEmail);
   }
 
   // ---- Form ----
   function msg(s, bad) {
-    var el = $('earn-msg');
+    var el = $('contact-msg');
     if (!el) return;
     el.className = bad ? 'earn-msg bad' : 'earn-msg';
     el.textContent = s || '';
   }
-  // Results (re)shown: the box appears only when sign-ups can reach the sheet, and only until this phone signed up.
-  function render() {
-    var box = $('earn');
-    if (!box) return;
-    box.hidden = !(E.endpoint || PREVIEW) || (st.done && !KIOSK);
-    if (box.hidden) return;
-    txt('earn-line', 'Kleros pays curators ' + (E.monthly || '$5,000+') + ' every month.');
-    if (CFG.privacyContact) txt('earn-privacy', 'Cooperative Kleros keeps your handle or email only to tell you how to start curating. To see or delete it, ask at the booth or ' + CFG.privacyContact + '.');
+  function busy(on) {
+    var b = $('contact-go');
+    sending = on;
+    if (!b) return;
+    b.disabled = on;
+    b.textContent = on ? 'Unlocking…' : 'Unlock';
+  }
+  function clear() {
+    var input = $('contact-input'), tick = $('contact-curator');
+    if (input) input.value = '';
+    if (tick) tick.checked = false;
+    msg('');
+  }
+  // opts: { badge: hex64, tier: 1..3, kiosk, onDone(reply), onInput() }.
+  function show(opts) {
+    var box = $('contact'), form = $('contact-form'), input = $('contact-input'), h = $('contact-title');
+    opts = opts || {};
+    cur = { badge: opts.badge || '', kiosk: !!opts.kiosk, onDone: opts.onDone, onInput: opts.onInput, id: newId() };
+    busy(false);
+    clear();
+    if (form) form.hidden = false;
+    txt('contact-curator-text', 'Also tell me how to earn as a curator: Kleros pays curators ' + (C.monthly || '$5,000+') +
+      ' every month.');
+    fillPrivacy();
     // A shared booth tablet must not suggest the last visitor's email.
-    if (KIOSK) $('earn-contact').setAttribute('autocomplete', 'off');
-    if (KIOSK || !st.done) { $('earn-form').hidden = false; $('earn-contact').value = ''; msg(''); }
+    if (input && cur.kiosk) input.setAttribute('autocomplete', 'off');
+    if (!box) return;
+    box.hidden = false;
+    // The title, not the input: an iPhone keyboard would cover the ticket above.
+    if (h) { try { h.focus({ preventScroll: true }); } catch (e) { h.focus(); } }
+    try { box.scrollIntoView({ block: 'nearest' }); } catch (e) { /* old browsers: no options */ }
+  }
+  function hide() {
+    var box = $('contact');
+    cur = null;
+    busy(false);
+    clear();
+    if (box) box.hidden = true;
+  }
+  function failed(code) {
+    if (code === 'badcontact') return 'Enter an email or a @Telegram handle.';
+    if (code === 'notry') return 'Play a round first.';
+    return 'Can’t send right now. Check the connection and try again.';
   }
   function submit(ev) {
-    var input = $('earn-contact'), v = input.value.trim(), kind = kindOf(v), item;
-    ev.preventDefault();
-    if (!kind) { msg('Enter an email or a @Telegram handle.', true); input.focus(); return; }
-    item = { action: 'earn', id: newId(), contact: tidy(v, kind), kind: kind, source: 'curate', event: CFG.event || '',
-      app: (($('rep-kicker') || {}).textContent || '').slice(0, 60),
-      score: parseInt((($('rep-score') || {}).textContent || '').replace(/\D/g, ''), 10) || 0, at: new Date().toISOString() };
-    if (!E.endpoint) { $('earn-form').hidden = true; msg('Preview only: no sign-up sheet is set yet.'); return; }
-    st.queue.push(item);
-    st.done = true;
-    save();
-    input.value = '';
-    $('earn-form').hidden = true;
-    msg('Thanks! We’ll message you soon.');
-    $('earn-msg').focus();   // the focused button just went away
-    flush();
+    var input = $('contact-input'), tick = $('contact-curator'), B = window.CurateBadge, me = cur,
+        v = input ? String(input.value || '').trim() : '', kind = kindOf(v);
+    if (ev && ev.preventDefault) ev.preventDefault();
+    if (!me || sending) return;
+    if (!kind) { msg('Enter an email or a @Telegram handle.', true); if (input) input.focus(); return; }
+    if (!B || !B.post) { msg(failed(''), true); return; }
+    busy(true);
+    msg('');
+    B.post({ action: 'contact', badge: me.badge, contact: tidy(v, kind), curator: !!(tick && tick.checked), id: me.id,
+             event: String(CFG.event || ''), kiosk: me.kiosk }, function (err, j) {
+      if (cur !== me) return;   // hidden or shown again meanwhile (a kiosk reset): this reply is stale
+      busy(false);
+      if (err || !j || !j.ok) { msg(failed(!err && j ? j.error : ''), true); return; }
+      var form = $('contact-form'), done = me.onDone;
+      if (form) form.hidden = true;
+      if (input) input.value = '';
+      if (tick) tick.checked = false;
+      if (typeof done === 'function') done(j);
+    });
   }
+  function touched() { if (cur && typeof cur.onInput === 'function') cur.onInput(); }
 
   // ---- Wiring ----
   function init() {
-    var form = $('earn-form'), report = $('report');
-    if (!form || !report) return;
+    var form = $('contact-form');
+    fillPrivacy();
+    if (!form) return;
     form.addEventListener('submit', submit);
-    // Re-render whenever Results come into view (rewards.js toggles the hidden attribute).
-    if (window.MutationObserver) {
-      new MutationObserver(function () { if (!report.hidden) render(); }).observe(report, { attributes: true, attributeFilter: ['hidden'] });
-    }
-    render();
-    flush();
-    window.addEventListener('online', flush);
+    ['input', 'keydown', 'change'].forEach(function (t) { form.addEventListener(t, touched); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+
+  window.CurateContact = { show: show, hide: hide };
 })();

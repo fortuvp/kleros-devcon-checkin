@@ -1,4 +1,4 @@
-// Curate game content: three fictional apps that each need one clean list, and every entry. Data only:
+// Curate game content: three fictional apps that each need one list fixed, and every entry. Data only:
 // rules.js deals the round, game.js shows it. Facts (sights, cities, capitals, flags, web domains, tokens,
 // tickers and websites) were checked by hand, the v6 additions on 30 Oct 2026; re-check before merge. Every
 // why is one short line (≤ 48 characters): it shows in the red flash when a fake gets marked Correct. `node scripts/curate-check.js` validates
@@ -492,10 +492,10 @@
   // ---- Decks ----
   // One deck per app, in title-screen order. `client` is the app’s short name (Results, ticket); `pick` is its
   // title-screen card (app, one need line, and its picture: img, flag, or coin plus coins, a trio). Each deck
-  // has one list of 4 parts: the picture (objField) first, then three text rows. The policy is the practice
-  // coach’s idle hint. Practice is one fake that never enters a round. Results copy (v6 §6): `headlines` by
-  // trust (≥ 90, 70–89, < 70) and `company`, one line: [no fake got in, a fake got in]. `mission` shows for a
-  // moment before the Go banner.
+  // has one list of 4 parts: the picture (objField) first, then three text rows. The policy is the intro’s
+  // rule line. `intro.good` is the intro’s correct example (never dealt in a round); `practice[0]` is its wrong
+  // example, the same entry with one part wrong (a twin, so it never enters a round either). Results copy
+  // (v6 §6): `headlines` by trust (≥ 90, 70–89, < 70). `mission` shows for a moment before the Go banner.
   var HEADLINES = ['Great job', 'Not bad', 'Too many fakes got in'];
   window.CURATE_DECKS = {
     sights: {
@@ -503,14 +503,14 @@
       pick: { app: 'Travel guide app', need: 'needs real sights', img: '/curate/img/taj-mahal.jpg' },
       copy: {
         mission: 'Keep the sights real.',
-        headlines: HEADLINES,
-        company: ['Clean list: the guide keeps earning.', 'Fakes got in: the guide lost travellers.']
+        headlines: HEADLINES
       },
       coach: { fact: 'The Eiffel Tower is in Paris.' },
       lists: {
         sights: { name: 'Sights', policy: 'Photo, name, city and country must all match.',
                   fields: [['photo', 'Photo'], ['name', 'Name'], ['city', 'City'], ['country', 'Country']], objField: 'photo' }
       },
+      intro: { good: 's-eiffel' },   // the intro’s correct example; practice[0] is its wrong one
       split: { sights: [10, 4] },   // [entries, fakes]
       practice: sights([
         ['p-eiffel', 'eiffel', 1, 'eiffel', 'Eiffel Tower', 'Marseille', 'France', 'The Eiffel Tower is in Paris, not Marseille.',
@@ -523,8 +523,7 @@
       pick: { app: 'Atlas app for schools', need: 'needs the right flags and capitals', flag: FLAGS['in'][0] },
       copy: {
         mission: 'Keep the atlas right.',
-        headlines: HEADLINES,
-        company: ['Clean list: the atlas keeps earning.', 'Wrong facts got in: the atlas lost schools.']
+        headlines: HEADLINES
       },
       coach: { fact: 'India’s capital is New Delhi.' },
       lists: {
@@ -532,6 +531,7 @@
                      fields: [['flag', 'Flag'], ['country', 'Country'], ['capital', 'Capital'], ['domain', 'Web domain']],
                      objField: 'flag' }
       },
+      intro: { good: 'c-in' },
       split: { countries: [10, 4] },
       practice: country([
         ['p-india', 'in', 1, 'in', 'India', 'Mumbai', '.in', 'Mumbai is big, but New Delhi is the capital.',
@@ -545,14 +545,14 @@
               coin: LOGOS.btc[0], coins: [LOGOS.btc[0], LOGOS.eth[0], LOGOS.usdc[0]] },
       copy: {
         mission: 'Keep the token list real.',
-        headlines: HEADLINES,
-        company: ['Clean list: the exchange keeps earning.', 'Fakes got in: the exchange lost users.']
+        headlines: HEADLINES
       },
       coach: { fact: 'Bitcoin’s website is bitcoin.org.' },
       lists: {
         tokens: { name: 'Tokens', policy: 'Logo, name, ticker and website must all match.',
                   fields: [['logo', 'Logo'], ['name', 'Name'], ['ticker', 'Ticker'], ['site', 'Website']], objField: 'logo' }
       },
+      intro: { good: 't-btc' },
       split: { tokens: [10, 4] },
       practice: tokens([
         ['p-btc', 'btc', 1, 'btc', 'Bitcoin', 'BTC', 'bitcoin-giveaway.com', 'Giveaway sites are a trick. It’s bitcoin.org.',

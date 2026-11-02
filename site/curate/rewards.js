@@ -1,6 +1,8 @@
-// Curate game rewards: prize strip, counted rounds, the report and the live merch ticket.
-// The only reader of kleros_devcon_self (never written here) and the only writer of kleros_devcon_curate.
-// No network calls. User data reaches the DOM through textContent only.
+// Curate game rewards: prize strip, counted rounds, the intro's start area, the report and the merch ticket.
+// Two modes (settings.js server.endpoint): badge mode, where the sheet script counts each Devcon badge's tries
+// and keeps its best score (network through CurateBadge.post only), and v6 mode (no endpoint), where tries and
+// the ticket live on this phone. The only reader of kleros_devcon_self (v6 only, never written here) and the only
+// writer of kleros_devcon_curate and kleros_devcon_curate_badge. User data reaches the DOM through textContent only.
 (function () {
   'use strict';
 
@@ -25,6 +27,31 @@
   function hhmm(at) { var d = new Date(at); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function lowerFirst(s) { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); }
   function kioskCap() { return S.kioskMaxTier == null ? 1 : S.kioskMaxTier; }
+  function isArr(a) { return Object.prototype.toString.call(a) === '[object Array]'; }   // replies may come from another realm
+
+  // ---- Badge mode: state ----
+  // The badge is the player's id; the server's word on it is cached in srv.badge ({ today, left, best, contact,
+  // collected }, any subset: no `left` = status not answered yet). Kiosk keeps all of it in memory, one visitor.
+  var SV = S.server || {};
+  var ONLINE = !!SV.endpoint;
+  var BKEY = 'kleros_devcon_curate_badge';
+  var MAX_SEND = 6 * 60 * 60 * 1000;   // = Code.gs MAX_SEND_MS: an older finish is refused anyway
+  var bd = null;                       // { hash, tail }: never the badge code
+  var srv = { open: true, soldOut: [], tiers: null, badge: null, asked: 0 };
+  var flow = { busy: 0, offline: false };   // the intro: a request in flight; the last start got no answer
+  var tok = null, spare = '', begun = null; // this round's try { token, tryNo }; an unconfirmed start token; begin()'s answer
+  var pend = null, bg = [];                 // the finish not saved yet (one, kept on the phone); kiosk ones left behind
+  var rs = { sum: null };                   // the round on Results: { sum, g, g0, fun, ci, p, state }
+  function Bdg() { return window.CurateBadge || null; }   // looked up at call time: the check script swaps it
+  function can(k) { var B = Bdg(); try { return !!(B && B.can && B.can()[k]); } catch (e) { return false; } }
+  function paused() { return ONLINE && srv.open === false; }
+  // Tries left hold for one booth day (IST): a page left open past midnight forgets them until status answers.
+  function bs() {
+    var b = srv.badge;
+    if (b && b.left != null && b.day !== istDay()) { delete b.left; delete b.today; }
+    return b || {};
+  }
+  function bestTier() { var b = bd && bs().best; return b ? b.tier || 0 : 0; }
   // An unknown id (say a 'travel' run stored before v4) falls back to the first deck in decks.js order.
   function firstDeck() {
     var D = window.CURATE_DECKS || {}, k;
@@ -57,7 +84,8 @@
   function triesLeft(n) { return n + (n === 1 ? ' try' : ' tries') + ' left today'; }
   function count(n, one, many) { return fmt(n) + ' ' + (n === 1 ? one : many); }   // “1 fake”, “3 fakes”
   function allUsed() { return PER_DAY === 1 ? 'Today’s try is used' : (PER_DAY === 2 ? 'Both' : 'All ' + PER_DAY) + ' tries used today'; }
-  function isSoldOut(i) { return i > 0 && (S.soldOut || []).indexOf(NAMES[i]) > -1; }
+  // settings.js soldOut is the static fallback; in badge mode the Switches tab adds to it.
+  function isSoldOut(i) { return i > 0 && ((S.soldOut || []).indexOf(NAMES[i]) > -1 || (ONLINE && srv.soldOut.indexOf(NAMES[i]) > -1)); }
   function baseTier(i) {
     var t = i === 0 ? (MERCH.free || (S.fallbackMerch || {}).free || {}) : (MERCH.tiers[i - 1] || {});
     var sub = i > 0 && S.substitutes ? S.substitutes[NAMES[i]] : null;
@@ -85,7 +113,7 @@
   // merchOf() is never called or copied: it mutates the record.
   function read(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
   function checkin() {
-    if (KIOSK) return null;
+    if (KIOSK || ONLINE) return null;   // badge mode: no check-in gate, and the check-in record is never read
     var me = read('kleros_devcon_self');
     if (!me || !me.ticket) return null;
     var ok = !!(me.confirmed || !me.newsletter || !(CFG.endpoint || '').trim() || !(CFG.blog && CFG.blog.url));
@@ -166,9 +194,19 @@
     if (st.counted >= PER_DAY) return { counted: false, left: 0, reason: 'limit', next: 0, perDay: PER_DAY };
     return { counted: true, left: PER_DAY - st.counted, reason: '', next: st.counted + 1, perDay: PER_DAY };
   }
-  // Called when the clock starts, so quitting does not refund the shift.
+  // Called when the clock starts, so quitting does not refund the shift. Badge mode: the server already counted
+  // the try at begin(); this only hands back what begin() got.
   function startShift(deckId) {
-    var c = canCount(), r = { counted: c.counted, shiftNo: 0, code: null, perDay: c.perDay };
+    var r;
+    if (ONLINE) {
+      sync(); st.deck = deckId || st.deck; save();
+      r = { counted: !!(begun && begun.counted && tok), shiftNo: begun ? begun.shiftNo || 0 : 0,
+            code: begun && begun.counted && tok ? 'C-' + tok.token.slice(0, 6).toUpperCase() : null, perDay: PER_DAY };
+      if (tok) tok.used = true;   // this round plays the try: never handed out again by begin()
+      return r;
+    }
+    var c = canCount();
+    r = { counted: c.counted, shiftNo: 0, code: null, perDay: c.perDay };
     if (KIOSK) { st.best = null; st.runs = []; }   // one kiosk shift is one visitor: never show an earlier best
     st.deck = deckId || st.deck;
     if (c.counted) { st.counted++; r.shiftNo = st.counted; r.code = code(); }
@@ -181,14 +219,19 @@
     var a = vis('hdr-link', !KIOSK), logo = $('hdr-logo'), me;
     if (logo && KIOSK) logo.removeAttribute('href');   // a booth tablet never opens the check-in page, by key either
     if (!a || KIOSK) return;
-    me = read('kleros_devcon_self');
+    me = ONLINE ? null : read('kleros_devcon_self');
     a.href = '/';
     a.textContent = me && me.ticket ? 'Your check-in ticket →' : 'Booth check-in →';
   }
   // The first matching line wins (§1.3 S1); nothing relevant hides the chip.
   function renderWelcome() {
-    var m = model(), ci = m.ci, best = st.best, line = '', go = '', n;
-    if (!KIOSK) {
+    var m, ci, best, line = '', go = '', n, b = bs(), g = ONLINE ? modelB().t : 0;   // the ticket's tier: a sold-out one hands down
+    if (ONLINE) {   // badge mode: from the remembered badge (a tablet remembers none)
+      if (bd && b.collected) line = 'Merch collected. Play for fun.';
+      else if (g > 0 && b.contact) { line = 'Your ' + baseTier(g).name + ' ticket is ready ·'; go = 'Show it →'; }
+      else if (g > 0) { line = 'Your ' + baseTier(g).name + ' score needs one step ·'; go = 'Unlock →'; }
+    } else if (!KIOSK) {
+      m = model(); ci = m.ci; best = st.best;
       if (st.collected) line = 'Merch collected. Play for fun.';
       else if (ci && ci.claimed) line = 'You already checked in at the booth. Play for fun.';
       else if (best && m.state === 'live' && m.t > 0) { line = 'Your ' + baseTier(m.t).name + ' ticket is ready ·'; go = 'Show staff →'; }
@@ -205,8 +248,10 @@
   // A chip’s short line: points, or what the tier needs on top.
   function ladderHow(i) {
     var info = tierInfo(i);
+    if (i > 0 && paused()) return 'Paused';
     if (info.soldOut) return 'Gone today';
     if (i === 0) return 'Finish a round';
+    if (ONLINE) return fmt(TIERS[i]) + ' pts';   // badge mode: no check-in, and a tablet has no cap
     if (KIOSK && i > kioskCap()) return fmt(TIERS[i]) + ' pts · own phone';
     return fmt(TIERS[i]) + ' pts' + (i >= NEED ? ' + check-in' : '');
   }
@@ -222,10 +267,10 @@
   }
   function chip(i) {
     var info = tierInfo(i), li = make('li', 'chip t-' + NAMES[i]), th = make('span', 'thumbs', null, 'thumbs'),
-        tx = make('span', 'chip-txt'), b = make('b'), im,
-        sr = info.reward + (info.soldOut ? ': gone today, scores here get ' + info.short : '') +
-          (KIOSK && i > kioskCap() ? ': play on your own phone' : '');
-    if (KIOSK && i > kioskCap()) li.className += ' is-locked';   // out of the tablet’s reach
+        tx = make('span', 'chip-txt'), b = make('b'), im, capped = KIOSK && !ONLINE && i > kioskCap(),
+        sr = info.reward + (i > 0 && paused() ? ': paused right now' : info.soldOut ? ': gone today, scores here get ' + info.short : '') +
+          (capped ? ': play on your own phone' : '');
+    if (capped) li.className += ' is-locked';   // v6: out of the tablet’s reach
     if (info.soldOut) li.className += ' is-sold';
     li.setAttribute('data-tier', NAMES[i]);
     li.title = sr;
@@ -242,7 +287,7 @@
     return li;
   }
   function renderLadder() {
-    var list = $('ladder-list'), i, c = canCount(), ci = checkin(), lead;
+    var list = $('ladder-list'), i, c = canCount(), ci = checkin(), lead, bb = bs();
     if (list) {
       while (list.firstChild) list.removeChild(list.firstChild);
       for (i = 0; i < 4; i++) list.appendChild(chip(i));
@@ -250,8 +295,17 @@
     // v6: the tries rule under the strip, then the one-item rule once (the merch note may already say it).
     var once = /one item per person/i.test(MERCH.note || ''),
         rule = (once ? '' : ' One item per person.') + (MERCH.note ? ' ' + MERCH.note + '.' : '');
+    // Badge mode: the badge's tries, first match wins (no “scan” here: the title has no scan button).
+    if (ONLINE) {
+      if (paused()) lead = 'Merch is paused right now. Play for fun.';
+      else if (bd && bb.collected) lead = 'Merch collected. Play for fun.';
+      else if (bd && bb.left === 0) lead = allUsed() + '. Play for fun.';
+      else if (bd && bb.left > 0 && bb.left < PER_DAY) lead = bb.left + ' of ' + fmt(PER_DAY) + ' tries left today.';
+      else lead = 'Your Devcon badge gives ' + fmt(PER_DAY) + ' tries a day for merch.';
+      txt('ladder-fine', lead + rule);
+    }
     // A booth tablet has no tries: every round is the next visitor.
-    if (KIOSK) txt('ladder-fine', 'Booth tablet: one try each, up to ' + baseTier(kioskCap()).name + '.' + rule);
+    else if (KIOSK) txt('ladder-fine', 'Booth tablet: one try each, up to ' + baseTier(kioskCap()).name + '.' + rule);
     else {
       // v6: follows today’s tries, so a fun round never passes for a counted one.
       if (c.reason === 'limit') lead = allUsed() + '. Play for fun.';
@@ -265,9 +319,10 @@
     leaveReport();
     stopTicket();
     clearTimeout(idleTimer);
-    if (KIOSK) st = null;   // a booth tablet: every return to the brief is the next visitor
+    if (KIOSK) { st = null; dropVisitor(); }   // a booth tablet: every return to the brief is the next visitor
     sync();
     renderHeader(); renderWelcome(); renderLadder();
+    refreshStatus(false);   // badge mode: switches and the badge's tries (throttled)
   }
 
   // ---- Medal ----
@@ -325,6 +380,7 @@
     sum = sum || {};
     var run = {}, k, old = st.best, nb, oldT;
     for (k in sum) if (sum.hasOwnProperty(k)) run[k] = sum[k];
+    if (ONLINE) { finishOnline(run, sum.misses); return; }
     run.misses = [].concat(sum.misses || []).slice(0, 3);   // keeps the stored object small
     run.day = today();
     run.at = sum.at || Date.now();
@@ -340,13 +396,33 @@
       st.best = nb;
     }
     save();
-    renderReport(run, sum.misses);   // the stored run keeps only 3 misses; the report counts them all
+    showReport(run, sum.misses);   // the stored run keeps only 3 misses; the report counts them all
+  }
+  function showReport(run, misses) {
+    renderReport(run, misses);
     UI.show('report');
     mountMedal();
     var h = $('rep-title');
     if (h) { try { h.focus({ preventScroll: true }); } catch (e) { h.focus(); } }
     countUp(run.final || 0);
     armIdle();
+  }
+  // Badge mode: Results at once with the local tier, then the score goes to the server (finish). Nothing of the
+  // round is written to kleros_devcon_curate; a counted round stays pending (on the phone) until a reply.
+  function finishOnline(run, misses) {
+    var counted = !!(run.counted && tok);
+    if (run.counted && !tok) run.reason = 'offline';   // no try token: the server never counted this round
+    run.counted = counted;
+    run.tier = tierFor(run.final || 0);
+    if (counted) {
+      if (pend && !pend.done) toBackground(pend);   // an older unsaved round keeps retrying from memory
+      pend = { hash: bd ? bd.hash : '', token: tok.token, score: Math.max(0, Math.round(run.final || 0)), relaxed: !!run.relaxed,
+               endedBy: run.endedBy === 'time' || run.endedBy === 'quit' ? run.endedBy : 'done', t: Date.now(), fails: 0 };
+      bSave();
+    }
+    tok = null; begun = null;
+    showReport(run, misses);
+    if (counted) sendFinish(pend);   // after the render: a reply may come back at once
   }
   // 900 ms easeOutExpo; set at once under reduced motion.
   function countUp(n) {
@@ -398,19 +474,47 @@
   }
   // The headline follows the trust band (≥90 / 70–89 / <70) from the deck copy; these cover a deck without one.
   var HEADLINES = ['Well done', 'Not bad', 'Too many fakes got in'];   // the brief’s “Great job” trips the job-word check
-  // The one company line: did any fake reach the app’s users? [clean, leaky], from the deck copy when it has them.
-  var COMPANY = ['Clean list: the app keeps earning.', 'Fakes got in: the app lost users.'];
   function band3(list, fb, band) { var s = list && list[band]; return s ? String(s) : fb[band]; }
   // Ranks by tier when no check-in name; settings.js wins when it has them.
   var RANKS = ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'];
   function againText(c) {
-    return KIOSK ? 'Next curator' : c.counted ? 'Play again' : 'Play for fun';
+    if (KIOSK) return 'Next curator';
+    // Badge mode: another counted try is possible unless the known badge has none left.
+    if (ONLINE) return !bd || (bs().left !== 0 && !bs().collected && !paused()) ? 'Play again' : 'Play for fun';
+    return c && c.counted ? 'Play again' : 'Play for fun';
+  }
+  function isFun(sum) { return ONLINE ? !sum.counted : !sum.counted && !KIOSK; }
+  // The booth day in India (Devcon VIII is in Mumbai), as Code.gs counts days.
+  function istDay() { return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); }
+  function v6Tier() { var m = model(); return m.state === 'live' ? m.t : 0; }
+  // Why a round was just for fun, and what to do. v6 rounds that carry no reason: collected or out of tries.
+  function funWhy(sum) {
+    var r = sum.reason || (ONLINE ? '' : st.collected ? 'collected' : 'limit'), bt;
+    if (r === 'limit') {
+      bt = ONLINE ? bestTier() : v6Tier();
+      return allUsed() + '.' + (bt > 0 ? ' Your ' + baseTier(bt).name + ' ticket still counts.' :
+        istDay() < (S.lastDay || '9999') ? ' New tries tomorrow.' : '');
+    }
+    if (r === 'collected') return ONLINE ? 'This badge already got its merch.' : 'You already collected merch on this phone.';
+    if (r === 'nobadge') return 'No badge scanned. Scan it next round to play for merch.';
+    if (r === 'paused') return 'Merch is paused right now. Ask at the booth.';
+    if (r === 'offline') return 'We couldn’t reach the merch list, so this round was for fun.';
+    if (r === 'nocrypto') return 'This browser can’t read badges, so this round was for fun.';
+    return 'You picked Play for fun. Tap Start next time to play for merch.';
   }
   // “Try 1 of 2 · 1 try left today”, “Both tries used today”, or why this round was just for fun.
-  // left comes from storage now, so a try another tab started since is already taken off.
+  // v6: left comes from storage now, so a try another tab started since is already taken off.
   function triesText(sum, c) {
-    if (KIOSK || !sum) return '';
-    if (!sum.counted) return st.collected ? 'Merch collected · just for fun' : 'Just for fun · ' + lowerFirst(allUsed());
+    var left, bt;
+    if (!sum) return '';
+    if (isFun(sum)) return funWhy(sum);
+    if (ONLINE) {
+      left = bs().left != null ? bs().left : Math.max(0, PER_DAY - (sum.shiftNo || 1));
+      bt = bestTier();
+      return 'Try ' + (sum.shiftNo || 1) + ' of ' + PER_DAY + ' · ' + (bt > rs.g ? 'Your best, ' + baseTier(bt).name +
+        ', still counts.' : left > 0 ? triesLeft(left) : allUsed());
+    }
+    if (KIOSK) return '';
     if (c.left > 0) return 'Try ' + (sum.shiftNo || 1) + ' of ' + PER_DAY + ' · ' + triesLeft(c.left);
     return allUsed();
   }
@@ -418,14 +522,16 @@
   function renderReport(sum, misses) {
     var d = deckOf(sum.deck), copy = d.copy || {}, trust = sum.trust == null ? 100 : sum.trust,
         band = trust >= 90 ? 0 : trust >= 70 ? 1 : 2, final = sum.final || 0, ci = checkin(),
-        g0 = tierFor(final), g = g0, info, next = '', c = canCount(), pending, fun = !sum.counted && !KIOSK,
+        g0 = tierFor(final), g = g0, c = canCount(), pending, fun = isFun(sum), leaks = sum.leaks || 0,
         right = (sum.caught || 0) + (sum.listed || 0), of = sum.entries || S.entries || sum.reviewed || 0,
         // Trust only drops on mistakes, so a round timed out or ended early is capped by the count right too.
         early = sum.endedBy === 'time' || sum.endedBy === 'quit',
         cb = !early ? 0 : right >= of - 1 ? 0 : right >= Math.ceil(of * 0.7) ? 1 : 2;
-    if (KIOSK) g = Math.min(g, kioskCap());
-    repTier = g;   // the medal shows the tier this round earns here (capped on a booth tablet)
+    if (KIOSK && !ONLINE) g = Math.min(g, kioskCap());   // v6 only: in badge mode the badge is the identity
+    // The medal shows the tier this round earns here; a round just for fun gets the free one, so nothing looks won.
+    repTier = fun ? 0 : g;
     repSum = sum;
+    rs = { sum: sum, g: g, g0: g0, fun: fun, ci: ci, p: ONLINE && !fun ? pend : null, state: ONLINE && !fun ? 'saving' : '' };
     hideOld();
     txt('rep-kicker', d.client);
     // Capped by the count, not by fakes: say why.
@@ -433,44 +539,87 @@
       band3(copy.headlines, HEADLINES, Math.max(band, cb)));
     // A fake marked Wrong is right even with the wrong part picked: the part only changes the points.
     txt('rep-sub', fmt(right) + ' of ' + fmt(of) + ' right');
-    // A round cut short with few cards seen says nothing about the list, so it gets no company line.
-    slot('rep-company', 'rep-payoff', cb === 2 && !sum.leaks ? '' : (sum.leaks > 0 ? (copy.company || [])[1] || COMPANY[1] : (copy.company || [])[0] || COMPANY[0]));
-    info = tierInfo(g);
-    if (g < 3 && !fun && !(KIOSK && g >= kioskCap())) next = ' · ' + fmt(TIERS[g + 1] - final) + ' pts to ' + baseTier(g + 1).name;
-    // The score may be past the cap: say why a kiosk gets the cap’s reward.
-    if (KIOSK && g0 > g) next = ' · Own phone for ' + kioskAbove();
-    // A duplicate check-in already holds this person's one item, so the score names no reward.
-    // A round just for fun wins nothing, so it names only the tier the score reached.
-    txt('rep-tier-line', ci && ci.claimed ? 'Merch goes with your first check-in. Play for fun.' :
-      fun ? (g > 0 ? baseTier(g).name + ' score' : '') : tierTitle(g) + ' · ' + info.reward + next);
-    thumbs($('rep-thumbs'), (ci && ci.claimed) || fun ? [] : info.img);
-    // The strip shows only when this counted round earned a gated tier that a check-in would unlock.
-    pending = sum.counted && !KIOSK && g >= NEED && !(ci && (ci.ok || ci.claimed)) && !st.collected && !isSoldOut(g) ? g : 0;
+    // What happened to the app's list, in plain words: how many fakes were marked Correct. A round cut short
+    // with few cards seen says nothing about the list, so it gets no line.
+    slot('rep-company', 'rep-payoff', cb === 2 && !leaks ? '' : leaks > 0 ?
+      count(leaks, 'wrong entry', 'wrong entries') + ' got through.' : 'No wrong entry got through.');
+    // v6: the strip shows only when this counted round earned a gated tier that a check-in would unlock.
+    pending = !ONLINE && sum.counted && !KIOSK && g >= NEED && !(ci && (ci.ok || ci.claimed)) && !st.collected && !isSoldOut(g) ? g : 0;
     renderGold('rep-gold', 'rep-gold-go', pending, ci);
     renderMisses([].concat(misses || sum.misses || []));
-    slot('rep-tries', 'rep-fine', triesText(sum, c));
-    txt('to-ticket', 'Show my merch ticket');
+    renderLines();
     txt('again', againText(c));
     txt('rep-switch', 'Try another app');   // game.js wires it back to the title screen
+  }
+  // The tier and tries lines, and in badge mode the save line and #to-ticket: they follow the finish reply.
+  function renderLines() {
+    var sum = rs.sum, g = rs.g, ci = rs.ci, info, next = '', line, imgs = [], tries;
+    if (!sum) return;
+    if (rs.fun || rs.state === 'refused') {
+      // Just for fun (or a score the server refused): what the score reached, and that it wins no merch.
+      line = g > 0 ? 'Your score reached ' + baseTier(g).name + ', but this round wins no merch.' : 'This round wins no merch.';
+      tries = rs.fun ? funWhy(sum) : triesText(sum, canCount());
+    } else {
+      info = tierInfo(g);
+      if (g < 3 && !(KIOSK && !ONLINE && g >= kioskCap())) next = ' · ' + fmt(tierMin(g + 1) - (sum.final || 0)) + ' pts to ' + baseTier(g + 1).name;
+      // v6: the score may be past the tablet's cap: say why a kiosk gets the cap’s reward.
+      if (KIOSK && !ONLINE && rs.g0 > g) next = ' · Own phone for ' + kioskAbove();
+      line = tierTitle(g) + ' · ' + info.reward + next;
+      imgs = info.img;
+      tries = triesText(sum, canCount());
+    }
+    // v6: a duplicate check-in already holds this person's one item, so the score names no reward.
+    if (ci && ci.claimed) { line = 'Merch goes with your first check-in. Play for fun.'; imgs = []; }
+    txt('rep-tier-line', line);
+    thumbs($('rep-thumbs'), imgs);
+    slot('rep-tries', 'rep-fine', tries);
+    if (ONLINE) renderSave(); else txt('to-ticket', 'Show my merch ticket');
+  }
+  // Badge mode: #rep-save says where the score stands; #to-ticket waits for it.
+  function renderSave() {
+    var p = rs.p, s = rs.state, b = bs(), bt = bestTier(), line = '', tt = $('to-ticket'), stuck = !!p && p.fails >= 3;
+    if (!rs.sum) return;
+    if (s === 'saving') line = !p || !p.fails ? 'Saving your score…' : stuck ? 'Can’t reach the merch list. Keep this page open.' :
+      'Not saved yet. Trying again…';
+    else if (s === 'refused') line = 'This round couldn’t be saved, so it wins no merch.';
+    else if (s === 'saved' && paused()) line = 'Merch is paused right now. Your score is saved.';
+    txt('rep-save', line);
+    vis('rep-save', !!line);
+    vis('rep-retry', s === 'saving' && stuck && !p.busy);
+    if (!tt) return;
+    // A round that wins nothing leads to a ticket only when the badge already has one.
+    tt.hidden = (rs.fun || s === 'refused') && !(bt > 0);
+    tt.disabled = s === 'saving';
+    tt.textContent = s !== 'saving' && bt > 0 && !b.contact && !b.collected ? 'Unlock my merch ticket' : 'Show my merch ticket';
   }
   function armIdle() {
     clearTimeout(idleTimer);
     if (!KIOSK) return;
-    idleTimer = setTimeout(function () { var r = $('report'); if (r && !r.hidden) kioskReset(); }, S.kioskIdleMs || 60000);
+    idleTimer = setTimeout(function () {
+      var r = $('report');
+      if (!r || r.hidden) return;
+      if (rs.p && rs.p.busy) { armIdle(); return; }   // a finish in flight: the next visitor waits for it
+      kioskReset();
+    }, S.kioskIdleMs || 60000);
   }
 
   // ---- Ticket model ----
   // §3.4: one item per person, so the ticket shows max(game tier, check-in tier) once the gates are applied.
+  // Badge mode: when the server's thresholds differ (an old Code.gs is live), Results and the ticket follow it.
   function tierFor(p) {
-    if (window.CurateRules && CurateRules.tierFor) return CurateRules.tierFor(p);
-    for (var i = TIERS.length - 1; i > 0; i--) if (p >= TIERS[i]) return i;
+    var t = ONLINE && srv.tiers, i;
+    if (!t && window.CurateRules && CurateRules.tierFor) return CurateRules.tierFor(p);
+    t = t || TIERS;
+    for (i = t.length - 1; i > 0; i--) if (p >= t[i]) return i;
     return 0;
   }
+  function tierMin(i) { return ((ONLINE && srv.tiers) || TIERS)[i] || 0; }
   function lastCountedRun() {
     for (var i = st.runs.length - 1; i >= 0; i--) if (st.runs[i].counted) return st.runs[i];
     return null;
   }
   function model() {
+    if (ONLINE) return modelB();
     sync();
     rollDay();
     var ci = checkin(), best = st.best, m = { state: 'live', ci: ci, best: best, t: 0, g: 0, pending: 0,
@@ -492,6 +641,20 @@
     // The check-in ticket (same K- code) already covers this: one item per person, so no second claimable ticket.
     if (c > 0 && t <= c) { m.state = 'checkin'; return m; }
     m.code = ci && ci.ok ? ci.ticket : best.code;
+    return m;
+  }
+  // Badge mode, from the server's word on the badge: collected, locked (a tier above stickers, no contact yet),
+  // or live (the best tier with sold-out tiers handed down; t 0 is the Everyone ticket, no code).
+  function modelB() {
+    var b = bs(), best = bd ? b.best || null : null, m = { state: 'live', ci: null, best: best, t: 0, g: 0, pending: 0,
+      source: 'game', soldFrom: -1, code: '', contact: !!b.contact }, t;
+    if (bd && b.collected) { m.state = 'collected'; m.t = m.g = best ? best.tier || 0 : 0; return m; }
+    if (!best) return m;
+    t = m.g = best.tier || 0;
+    while (t > 0 && isSoldOut(t)) { if (m.soldFrom < 0) m.soldFrom = t; t--; }
+    m.t = t;
+    if (t > 0 && !b.contact) m.state = 'locked';
+    else if (t > 0) m.code = best.code || '';
     return m;
   }
   // The Gold strip copy, shared by the report and the ticket. Names come from config, so it follows NEED too.
@@ -520,13 +683,13 @@
     if (KIOSK) return 'Show this at the booth. Own phone for ' + kioskAbove() + '.';
     return 'Show this at the booth.';
   }
+  function soldNote(m) {   // no generated plural: rewards are free text
+    var from = baseTier(m.soldFrom);
+    return from.reward + ': gone for today. Your ' + from.name + ' score gets ' + tierInfo(m.t).short + '.';
+  }
   function noteFor(m) {
-    var from;
     if (blocked) return 'This browser won’t keep your ticket if you close it.';
-    if (m.soldFrom > 0) {   // no generated plural: rewards are free text
-      from = baseTier(m.soldFrom);
-      return from.reward + ': gone for today. Your ' + from.name + ' score gets ' + tierInfo(m.t).short + '.';
-    }
+    if (m.soldFrom > 0) return soldNote(m);
     return m.source === 'checkin' ? 'From your check-in' : 'From your round';
   }
   function renderBack(m) {
@@ -541,6 +704,7 @@
     if (vis('tb-staff-btn', staff)) txt('tb-staff-btn', 'Mark as collected');
   }
   function renderTicket() {
+    if (ONLINE) { renderTicketB(); return; }
     // canCount() first: model() re-reads storage last, so b below is the live best that save() writes.
     var c = canCount(), m = model(), ci = m.ci, b = m.best, live = m.state === 'live', tk = $('ticket'), info = tierInfo(m.t),
         thanks = 'Thanks for playing. Play again for fun.', who, ck;
@@ -605,6 +769,89 @@
     }
   }
 
+  // ---- Ticket render, badge mode ----
+  // Locked: the tier with a hidden code and the contact step under it. Live: the game code (C-) staff read
+  // with the badge at the desk. Everyone: stickers, no code. Collected: the badge already got its merch.
+  var lockTimer = 0;
+  function appName(id) { var D = window.CURATE_DECKS || {}; return D.hasOwnProperty(id) && D[id] ? D[id].client : ''; }
+  function renderTicketB() {
+    var m = model(), b = m.best, tk = $('ticket'), info = tierInfo(m.t), lock = m.state === 'locked',
+        coded = m.state === 'live' && m.t > 0, C = window.CurateContact, prev = current, ck, h, tail = bd ? ' · Badge …' + bd.tail : '';
+    current = m;
+    if (tk) {
+      tk.setAttribute('data-tier', m.state === 'collected' ? 'claimed' : NAMES[m.t]);
+      if (lock) tk.setAttribute('data-locked', ''); else tk.removeAttribute('data-locked');
+      if (tk.classList.contains('flipped')) unfocusFace(tk);
+      tk.classList.remove('flipped');
+      if (!tk.hasAttribute('tabindex')) tk.setAttribute('tabindex', '0');
+    }
+    txt('t-kicker', 'Kleros booth · Curate game');
+    tickClock();
+    vis('t-live', coded);
+    vis('t-img', true);
+    thumbs($('t-img'), info.img);
+    if (m.state === 'collected') {
+      txt('t-tier', 'Collected'); txt('t-reward', info.reward); txt('t-hint', 'Thanks for playing. Play again for fun.');
+      txt('t-note', '');
+    } else {
+      tierLabel(tierTitle(m.t), m.t);
+      txt('t-reward', info.reward);
+      txt('t-hint', lock ? 'Unlock it below.' : coded ? 'Show your badge at the merch desk.' : 'Show this at the booth.');
+      txt('t-note', lock ? '' : m.soldFrom > 0 ? soldNote(m) : coded ? (paused() ? 'Merch is paused right now.' : 'From your best round') :
+        ((MERCH.free || (S.fallbackMerch || {}).free || {}).how || ''));
+    }
+    vis('t-note', !!($('t-note') || {}).textContent);
+    txt('t-who', (S.ranks || RANKS)[m.g] || '');
+    txt('t-org', b ? fmt(b.score) + ' pts' + tail : '');
+    ck = vis('t-code', coded || lock);
+    if (ck) { ck.textContent = lock ? '······' : coded ? m.code : ''; ck.classList.remove('holding'); ck.style.setProperty('--hold', '0'); }
+    // The back: which try, when and which app; staff use the desk, so no stamp here.
+    txt('tb-shift', b ? ['Try ' + (b.tryNo || 1) + ' of ' + PER_DAY, b.at || '', appName(b.app)].filter(Boolean).join(' · ') : '');
+    txt('tb-stats', b ? fmt(b.score) + ' pts' : '');
+    txt('tb-code', coded ? 'Game code ' + m.code + tail : '');
+    vis('tb-staff', false); vis('tb-staff-btn', false);
+    vis('t-gold', false); vis('t-back', false);
+    vis('t-next', KIOSK && !lock);   // the tablet's countdown waits while the contact step is open
+    txt('t-again', againText());
+    if (!C) return;
+    // A redraw of the same locked ticket for the same badge leaves the form alone: the visitor may be typing.
+    if (lock && !(prev && prev.state === 'locked' && prev.t === m.t && formFor === bd.hash && !isHidden('contact'))) {
+      h = formFor = bd.hash;
+      C.show({ badge: h, tier: m.t, kiosk: KIOSK, onDone: function (j) { unlocked(j, h); }, onInput: armLock });
+      armLock();
+    } else if (!lock) { C.hide(); clearTimeout(lockTimer); }
+  }
+  var formFor = '';   // the badge hash the contact form was shown for
+  function isHidden(id) { var el = $(id); return !el || el.hidden; }
+  // The contact went through: the same ticket, unlocked, with the tier-up bump.
+  function unlocked(j, hash) {
+    var tk = $('ticket'), s;
+    absorb(j);
+    if (!bd || bd.hash !== hash) return;   // another badge is on screen now: the server holds this one's flag
+    s = srv.badge || (srv.badge = {});
+    s.contact = true;
+    bSave();
+    clearTimeout(lockTimer);
+    renderTicketB();
+    if (tk) {
+      tk.classList.remove('bump'); void tk.offsetWidth; tk.classList.add('bump');
+      setTimeout(function () { tk.classList.remove('bump'); }, 900);
+      try { tk.focus({ preventScroll: true }); } catch (e) { tk.focus(); }
+    }
+    UI.say('Ticket unlocked');
+    nextLeft = Math.round((S.kioskResetMs || 20000) / 1000);   // the tablet's 20 s start only now
+    if (KIOSK) txt('t-next', 'Next curator in ' + nextLeft + ' s');
+  }
+  // Kiosk, locked ticket: only kioskIdleMs with no typing resets the tablet.
+  function armLock() {
+    clearTimeout(lockTimer);
+    if (!KIOSK) return;
+    lockTimer = setTimeout(function () {
+      var v = $('ticketv');
+      if (v && !v.hidden && current && current.state === 'locked') kioskReset();
+    }, S.kioskIdleMs || 60000);
+  }
+
   // ---- Ticket mechanics: clock, flip, hold, staff sheet, undo, kiosk ----
   var clockTimer = 0, renderedDay = '', nextLeft = 0, undoTimer = 0, staffPrev = null, staffFor = null;
   var hold = { on: false, t0: 0, raf: 0 }, suppressFlip = false, holdEndAt = -1e9, myStamp = null;
@@ -622,9 +869,10 @@
   function onTick() {
     var v = $('ticketv');
     if (!v || v.hidden) { stopTicket(); return; }   // left the view: the interval goes with it
-    if (today() !== renderedDay) { renderedDay = today(); renderTicket(); }   // past midnight: no live ticket
+    if (!ONLINE && today() !== renderedDay) { renderedDay = today(); renderTicket(); }   // v6, past midnight: no live ticket
     tickClock();
     if (KIOSK) {
+      if (current && current.state === 'locked') return;   // badge mode: the contact step holds the tablet (armLock)
       nextLeft--;
       if (nextLeft <= 0) { kioskReset(); return; }
       txt('t-next', 'Next curator in ' + nextLeft + ' s');
@@ -643,19 +891,38 @@
     stopTicket();
     renderTicket();
     UI.show('ticket');
-    var tk = $('ticket');   // the button that led here is gone, so focus never drops to <body>
-    if (tk) { try { tk.focus({ preventScroll: true }); } catch (e) { tk.focus(); } }
+    // The button that led here is gone, so focus never drops to <body>. A locked ticket: the contact step, now that
+    // it can take focus and scroll (renderTicket ran while the view was still hidden).
+    var tk = $('ticket'), cx = $('contact'), ct = $('contact-title');
+    if (current && current.state === 'locked' && cx && !cx.hidden && ct) {
+      try { ct.focus({ preventScroll: true }); } catch (e) { ct.focus(); }
+      try { cx.scrollIntoView({ block: 'nearest' }); } catch (e) { /* old browsers: no options */ }
+    } else if (tk) { try { tk.focus({ preventScroll: true }); } catch (e) { tk.focus(); } }
     renderedDay = today();
     nextLeft = Math.round((S.kioskResetMs || 20000) / 1000);
     if (KIOSK) txt('t-next', 'Next curator in ' + nextLeft + ' s');
     clockTimer = setInterval(onTick, 1000);
+    refreshStatus(false);   // badge mode: a ticket opened from the title catches up with the desk and the switches
   }
   function kioskReset() {
     leaveReport();
     stopTicket();
     clearTimeout(idleTimer);
+    clearTimeout(lockTimer);
     st = null;   // the next visitor starts clean
+    dropVisitor();
     UI.reset();
+  }
+  // Badge mode, booth tablet: the next visitor. Forget the badge, the try and the contact form; a finish not saved
+  // yet keeps retrying from memory (token and score only, never the badge).
+  function dropVisitor() {
+    var C = window.CurateContact;
+    if (!ONLINE) return;
+    if (pend && !pend.done) toBackground(pend);
+    pend = null; bd = null; srv.badge = null; tok = null; spare = ''; begun = null;
+    flow = { busy: 0, offline: false };
+    rs = { sum: null };
+    if (C) C.hide();
   }
   // The face turning away is hidden from focus (CSS visibility), so focus inside it moves to the ticket.
   function unfocusFace(tk) { var a = document.activeElement; if (a && a !== tk && tk.contains(a)) tk.focus(); }
@@ -681,7 +948,7 @@
   function holdStart(e) {
     var el = $('t-code');
     suppressFlip = false;
-    if (!el || KIOSK || !current || current.state !== 'live' || !(current.t > 0) || (e.button && e.button > 0)) return;
+    if (!el || KIOSK || ONLINE || !current || current.state !== 'live' || !(current.t > 0) || (e.button && e.button > 0)) return;
     hold.on = true; hold.t0 = now();
     el.classList.add('holding');
     try { el.setPointerCapture(e.pointerId); } catch (err) { /* older browsers: pointerleave still cancels */ }
@@ -711,7 +978,7 @@
   // ---- Staff sheet and undo ----
   function openStaff() {
     var m = model(), info, p;
-    if (KIOSK) return;
+    if (KIOSK || ONLINE) return;   // badge mode: staff check the badge at the desk
     if (m.state !== 'live') { renderTicket(); return; }   // another tab stamped it or it changed: show that instead
     if (!(m.t > 0)) return;   // Everyone: stickers are free, and a stamp would stop later shifts from counting
     info = tierInfo(m.t);
@@ -784,6 +1051,323 @@
     else if (!e.shiftKey && (document.activeElement === last || !sheet.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
   }
 
+  // ---- Badge mode: storage ----
+  // Own phone only: the badge's hash and last 4 (never the code), its last known state for an offline ticket, and
+  // the finish not saved yet. A booth tablet keeps nothing; a blocked browser keeps the memory copy.
+  function bLoad() {
+    var d = KIOSK || !ONLINE ? null : store(BKEY), p;
+    if (!d || typeof d !== 'object' || d.v !== 1) return;
+    if (/^[0-9a-f]{64}$/.test(d.hash || '')) {
+      bd = { hash: d.hash, tail: String(d.tail || '').slice(-4) };
+      srv.badge = { best: d.best || null, contact: !!d.contact, collected: !!d.collected };
+    }
+    p = d.pending;
+    if (p && /^[a-z0-9]{16,24}$/.test(p.token || '') && Date.now() - p.t < MAX_SEND) {
+      pend = { hash: d.hash || '', token: p.token, score: p.score | 0, relaxed: !!p.relaxed, endedBy: p.endedBy || 'done', t: p.t, fails: 0 };
+    }
+  }
+  function bSave() {
+    var b = bs(), p = pend && !pend.done ? pend : null;
+    if (KIOSK || !ONLINE) return;
+    if (!bd && !p) { try { localStorage.removeItem(BKEY); } catch (e) { /* blocked: nothing kept */ } return; }
+    store(BKEY, { v: 1, hash: bd ? bd.hash : '', tail: bd ? bd.tail : '', best: bd ? b.best || null : null,
+      contact: !!(bd && b.contact), collected: !!(bd && b.collected),
+      pending: p ? { token: p.token, score: p.score, relaxed: p.relaxed, endedBy: p.endedBy, t: p.t } : null, at: Date.now() });
+  }
+
+  // ---- Badge mode: transport ----
+  // Every request goes through CurateBadge.post (JSON as text/plain, no preflight). A callback may run at once.
+  function post(body, done) {
+    var B = Bdg(), called = false;
+    function once(err, j) { if (called) return; called = true; done(err, j); }
+    body.kiosk = KIOSK;
+    if (!B || !B.post) { once('offline'); return; }
+    try { B.post(body, once); } catch (e) { if (called) throw e; once('offline'); }
+  }
+  // No answer, or busy/server: try again later. Any other error code is the server refusing.
+  function noAnswer(err, j) { return !!err || !j || (!j.ok && (j.error === 'busy' || j.error === 'server')); }
+  // Every reply carries the switches; status also the thresholds in force.
+  function absorb(j) {
+    if (!j) return;
+    if (typeof j.open === 'boolean') srv.open = j.open;
+    if (isArr(j.soldOut)) srv.soldOut = j.soldOut.slice();
+    if (isArr(j.tiers) && j.tiers.length === TIERS.length) {
+      if (j.tiers.join() === TIERS.join()) srv.tiers = null;
+      else {
+        if (!srv.tiers) console.warn('curate: server tiers differ from settings.js');
+        srv.tiers = j.tiers.slice();
+      }
+    }
+  }
+  // The badge's own fields from a status, start or finish reply.
+  function merge(b) {
+    var s = srv.badge || (srv.badge = {});
+    if (!b) return;
+    ['today', 'left', 'best', 'contact', 'collected'].forEach(function (k) { if (b[k] !== undefined) s[k] = b[k]; });
+    if (b.left != null && b.today == null) s.today = Math.max(0, PER_DAY - b.left);
+    if (b.left != null) s.day = istDay();
+  }
+  // Whatever is on screen catches up with the server's word.
+  function refreshViews() {
+    var b = $('brief'), v = $('ticketv'), r = $('report'), m;
+    if (b && !b.hidden) { renderWelcome(); renderLadder(); }
+    renderIntro();
+    if (v && !v.hidden) { m = model(); if (!current || sig(m) !== sig(current)) renderTicket(); }
+    if (r && !r.hidden && rs.sum) { renderLines(); txt('again', againText(canCount())); }
+  }
+  // Leaving the intro mid-start never wastes a try: a counted start whose round never began is played next.
+  function held() { return !!(tok && !tok.used && begun && begun.counted && bd && tok.hash === bd.hash); }
+
+  // ---- Badge mode: status ----
+  function askStatus(done) {
+    var hash = bd ? bd.hash : '', body = { action: 'status' }, f = flow;
+    if (hash) body.badge = hash;
+    srv.asked = Date.now();
+    post(body, function (err, j) {
+      if (!noAnswer(err, j) && j.ok) {
+        absorb(j);
+        f.offline = false;   // the list answers again; an unconfirmed start token is still re-sent first
+        if (hash && bd && bd.hash === hash) { if (j.badge) merge(j.badge); bSave(); }
+      }
+      if (done) done();
+      refreshViews();
+    });
+  }
+  // The title, the ticket and Play for fun ask; at most every statusMs unless forced.
+  function refreshStatus(force) {
+    if (!ONLINE || (!force && Date.now() - srv.asked < (SV.statusMs || 30000))) return;
+    askStatus(null);
+  }
+
+  // ---- Badge mode: the badge ----
+  // A scan or a typed code: read and hash it, then ask its state. Never spends a try (only Start does).
+  function setBadge(raw, done) {
+    var B = Bdg(), f;
+    done = typeof done === 'function' ? done : function () {};
+    if (!ONLINE || !B || !can('hash')) { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
+    B.read(raw, function (err, v) {
+      if (err === 'nocrypto') { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
+      if (err || !v || !/^[0-9a-f]{64}$/.test(v.hash || '')) { done({ ok: false, error: 'notbadge' }); return; }
+      if (!bd || bd.hash !== v.hash) { spare = ''; hideContact(); }   // a start token and the contact form belong to one badge
+      bd = { hash: v.hash, tail: String(v.tail || '').slice(-4) };
+      srv.badge = null;
+      f = flow;
+      f.offline = false;
+      bSave();
+      f.busy++;
+      renderIntro();
+      askStatus(function () {
+        f.busy = Math.max(0, f.busy - 1);   // the visitor's own count: a kiosk reset meanwhile made a new one
+        renderIntro();   // before done: game.js closes the scanner and focuses the first button shown
+        done({ ok: true, tail: bd ? bd.tail : '', state: introState() });
+      });
+    });
+  }
+  function forgetBadge() {
+    bd = null; srv.badge = null; spare = '';
+    flow = { busy: 0, offline: false };   // a late reply for the old badge leaves this one alone
+    hideContact();
+    bSave();
+    renderIntro();
+  }
+  function hideContact() { var C = window.CurateContact; if (C) C.hide(); clearTimeout(lockTimer); }
+  // A try token: 20 characters the server accepts ([a-z0-9]{16,24}), crypto random where available.
+  function newToken() {
+    var a = 'abcdefghjkmnpqrstuvwxyz23456789', s = '', u = null, i;
+    try { u = new Uint8Array(20); window.crypto.getRandomValues(u); } catch (e) { u = null; }
+    for (i = 0; i < 20; i++) s += a.charAt((u ? u[i] : Math.floor(Math.random() * 256)) % a.length);
+    return s;
+  }
+
+  // ---- Begin a round ----
+  // Decides whether the next round counts. Badge mode, not for fun: POST start (a try counts when it starts;
+  // quitting never refunds it). done({ ok, counted, shiftNo, perDay, reason }) or done({ ok: false, error }).
+  function funReason() {
+    var b = bs();
+    if (!can('hash')) return 'nocrypto';
+    if (paused()) return 'paused';   // first: with merch paused, a badge wouldn't help
+    if (!bd) return 'nobadge';
+    if (flow.offline) return 'offline';
+    if (b.collected) return 'collected';
+    if (b.left === 0) return 'limit';
+    return 'fun';   // tries left, but the player picked Play for fun
+  }
+  function begin(deckId, opts, done) {
+    var c, token, hash, r, f;
+    done = typeof done === 'function' ? done : function () {};
+    if (!ONLINE) {   // v6: spends nothing here; startShift spends the try when the clock starts
+      c = canCount();
+      done({ ok: true, counted: c.counted, shiftNo: c.next, perDay: c.perDay, reason: c.reason });
+      return;
+    }
+    if (!(opts && opts.fun) && held()) { renderIntro(); done(begun); return; }
+    tok = null; begun = null;
+    if (opts && opts.fun) {
+      r = { ok: true, counted: false, shiftNo: 0, perDay: PER_DAY, reason: funReason() };
+      if (r.reason === 'offline') refreshStatus(true);   // so the intro and Results show the real tries left
+      begun = r;
+      done(r);
+      return;
+    }
+    if (!can('hash')) { renderIntro(); done({ ok: false, error: 'nocrypto' }); return; }
+    if (!bd) { done({ ok: false, error: 'nobadge' }); return; }
+    // An unconfirmed token goes first: the server dedupes, so a start that saved but lost its reply isn't spent twice.
+    token = spare = spare || newToken();
+    hash = bd.hash;
+    f = flow;
+    f.busy++; f.offline = false;
+    renderIntro();
+    post({ action: 'start', badge: hash, token: token, app: deckId || '' }, function (err, j) {
+      f.busy = Math.max(0, f.busy - 1);
+      // The visitor or the badge changed meanwhile (kiosk reset, Not your badge?): this reply is not theirs.
+      if (f !== flow || !bd || bd.hash !== hash) { absorb(j); renderIntro(); done({ ok: false, error: 'nobadge' }); return; }
+      if (noAnswer(err, j)) { f.offline = true; renderIntro(); done({ ok: false, error: 'offline' }); return; }
+      absorb(j);
+      spare = '';
+      merge(j);
+      bSave();
+      if (!j.ok || !j.counted) {   // collected, paused or limit (the intro shows it); a refused start spends nothing
+        if (!j.ok) f.offline = true;
+        renderIntro();
+        done({ ok: false, error: j.ok ? j.reason || 'limit' : j.error || 'offline' });
+        return;
+      }
+      tok = { token: token, tryNo: j.tryNo || 1, hash: hash };
+      begun = { ok: true, counted: true, shiftNo: tok.tryNo, perDay: j.perDay || PER_DAY, reason: '' };
+      renderIntro();
+      done(begun);
+    });
+  }
+
+  // ---- Intro: the start area ----
+  // First match wins (spec 3.3). 'locked': the badge has a tier above stickers and no contact yet.
+  var jsqrAsked = false;
+  function introState() {
+    var b = bs();
+    if (!ONLINE) return 'v6';
+    if (!can('hash')) return 'nocrypto';
+    if (flow.offline) return 'offline';
+    if (bd && modelB().state === 'locked') return 'locked';
+    if (bd && b.collected) return 'collected';
+    if (paused()) return 'paused';
+    if (bd && b.left === 0 && !held()) return 'left0';
+    if (bd) return 'ready';
+    if (!can('camera') && (S.badge || {}).typed === false) return 'nocamera';
+    return 'nobadge';
+  }
+  function btn(id, label, cls) {
+    var el = $(id);
+    if (!el) return;
+    el.hidden = !label;
+    el.disabled = false;
+    if (!label) return;
+    el.textContent = label;
+    el.className = cls || 'ghost';
+  }
+  function renderIntro() {
+    var sec = $('intro'), s = introState(), b = bs(), line = bd ? 'Badge …' + bd.tail : '', note = '', B = Bdg(),
+        more = (b.left > 0 || held()) && !paused(), name = baseTier(modelB().t).name, c,   // the ticket's tier (sold out: lower)
+        tryN = ' · Try ' + (held() ? tok.tryNo : Math.min(PER_DAY, (b.today || 0) + 1)) + ' of ' + PER_DAY;
+    if (!sec || sec.hidden) return;
+    ['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun', 'intro-change'].forEach(function (id) { btn(id, ''); });
+    if (s === 'v6') {
+      line = '';
+      c = canCount();
+      if (c.reason === 'limit') note = allUsed() + '. This round is for fun.';
+      btn('intro-go', 'Start', 'primary');
+    } else if (s === 'nocrypto') {
+      line = ''; note = 'This browser can’t read badges. Play for fun.';
+      btn('intro-fun', 'Play for fun', 'primary');
+    } else if (s === 'offline') {
+      note = 'Can’t reach the merch list. ' + (bd ? 'Try again' : 'Scan your badge again') + ', or play for fun.';
+      if (bd) btn('intro-go', 'Try again', 'primary'); else btn('intro-scan', 'Scan your badge', 'primary');   // no badge: nothing to retry
+      btn('intro-fun', 'Play for fun');
+      if (bd) btn('intro-change', 'Not your badge?');
+    } else if (s === 'locked') {
+      if (more) line += tryN;
+      note = 'Your ' + name + ' score needs one step.';
+      btn('intro-unlock', 'Unlock my ' + name + ' ticket', 'primary');
+      if (more) btn('intro-go', 'Start', 'second');
+      btn('intro-fun', 'Play for fun');
+      btn('intro-change', 'Not your badge?');
+    } else if (s === 'collected' || s === 'paused' || s === 'left0') {
+      note = s === 'collected' ? 'This badge already got its merch.' : s === 'paused' ? 'Merch is paused right now.' : allUsed() + '.';
+      btn('intro-fun', 'Play for fun', 'primary');
+      if (bd) btn('intro-change', 'Not your badge?');
+    } else if (s === 'ready') {
+      if (b.left != null || held()) line += tryN;
+      btn('intro-go', 'Start', 'primary');
+      btn('intro-fun', 'Play for fun');
+      btn('intro-change', 'Not your badge?');
+    } else if (s === 'nocamera') {
+      note = 'No camera here. Play on the booth tablet, or play for fun.';
+      btn('intro-fun', 'Play for fun', 'primary');
+    } else {
+      note = 'Your Devcon badge gives ' + fmt(PER_DAY) + ' tries a day for merch.';
+      btn('intro-scan', 'Scan your badge', 'primary');
+      btn('intro-fun', 'Play for fun');
+      // iPhones have no BarcodeDetector: fetch the reader while the visitor reads the examples.
+      if (!jsqrAsked && B && B.loadJsQR && !can('detector')) { jsqrAsked = true; B.loadJsQR(function () {}); }
+    }
+    if (flow.busy > 0 && s !== 'v6') {
+      note = 'Checking your badge…';
+      ['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun', 'intro-change'].forEach(function (id) { var el = $(id); if (el) el.disabled = true; });
+    }
+    // Pick another app waits too: leaving mid-start would spend a try on a round that never plays.
+    c = $('intro-back');
+    if (c) c.disabled = flow.busy > 0 && s !== 'v6';
+    txt('intro-badge', line);
+    vis('intro-badge', !!line);
+    txt('intro-note', note);
+  }
+
+  // ---- Badge mode: saving the score ----
+  // Retries after 3, 6, 12, 24, 48 s, then every 60 s while the page is open (kiosk ones left behind: every 30 s).
+  var BACKOFF = [3, 6, 12, 24, 48];
+  function sendFinish(p) {
+    if (!p || p.busy || p.done) return;
+    if (Date.now() - p.t > MAX_SEND) { settle(p, null); return; }
+    p.busy = true;
+    if (rs.p === p) renderSave();
+    post({ action: 'finish', token: p.token, score: p.score, relaxed: p.relaxed, endedBy: p.endedBy }, function (err, j) {
+      p.busy = false;
+      if (noAnswer(err, j)) {
+        p.fails++;
+        clearTimeout(p.timer);
+        p.timer = setTimeout(function () { sendFinish(p); }, (p.bg ? 30 : BACKOFF[p.fails - 1] || 60) * 1000);
+        if (rs.p === p) renderSave();
+        return;
+      }
+      settle(p, j);
+    });
+  }
+  // A reply, saved or refused, ends it (so does 6 h without one). Only the round on Results changes what it shows.
+  function settle(p, j) {
+    p.done = true;
+    clearTimeout(p.timer);
+    bg = bg.filter(function (x) { return x !== p; });
+    absorb(j);
+    if (p.bg) return;
+    if (pend === p) pend = null;
+    if (j && j.ok && bd && bd.hash === p.hash) merge(j);   // only the badge that started this try
+    bSave();
+    if (rs.p === p) {
+      rs.state = j && j.ok ? 'saved' : 'refused';
+      if (j && j.ok && typeof j.tier === 'number') rs.g = j.tier;   // the server's tier wins
+    }
+    // Wherever the player is now (Play again may have reached the intro first): the new best and contact flag.
+    refreshViews();
+  }
+  function toBackground(p) {
+    p.bg = true;
+    if (bg.indexOf(p) < 0) bg.push(p);
+    if (!p.busy) { clearTimeout(p.timer); p.timer = setTimeout(function () { sendFinish(p); }, 30000); }
+  }
+  // Back online, or a tap on #rep-retry: send what is waiting now.
+  function retryAll() {
+    [pend].concat(bg).forEach(function (p) { if (p && !p.done && !p.busy) { clearTimeout(p.timer); sendFinish(p); } });
+  }
+
   // ---- Init and API ----
   var wired = false;
   function on(id, type, fn) { var el = $(id); if (el) el.addEventListener(type, fn); }
@@ -803,6 +1387,8 @@
     on('staff-ok', 'click', confirmStaff);
     on('staff-cancel', 'click', function () { closeStaff(); });
     on('undo-btn', 'click', undoCollect);
+    on('rep-retry', 'click', retryAll);
+    window.addEventListener('online', retryAll);
     // Any way out of Results releases the medal: #report getting hidden, or game.js’s two buttons.
     on('again', 'click', leaveReport);
     on('rep-switch', 'click', leaveReport);
@@ -824,7 +1410,8 @@
   }
   // What the ticket shows; an unchanged ticket is left alone, so a flipped ticket or an open sheet stays put.
   function sig(m) {
-    return [m.state, m.t, m.code, m.pending, m.soldFrom, m.best && m.best.at, m.ci && m.ci.name].join('|');
+    return [m.state, m.t, m.code, m.pending, m.soldFrom, m.best && m.best.at, m.best && (m.best.final || m.best.score),
+      m.ci && m.ci.name, paused()].join('|');
   }
   function redraw() {
     var v = $('ticketv'), b = $('brief'), r = $('report'), m;
@@ -835,16 +1422,20 @@
       cancelHold();
       if (staffFor) closeStaff(false);
       renderTicket();
-    } else if (b && !b.hidden) { renderHeader(); renderWelcome(); renderLadder(); }   // another tab’s try changes the tries line
+    } else if (b && !b.hidden) { renderHeader(); renderWelcome(); renderLadder(); refreshStatus(false); }   // another tab’s try changes the tries line
+    else if (r && !r.hidden && ONLINE) { if (rs.sum) renderLines(); }
     else if (r && !r.hidden) { m = canCount(); txt('again', againText(m)); slot('rep-tries', 'rep-fine', triesText(repSum, m)); }
+    else { renderIntro(); if ($('intro') && !$('intro').hidden) refreshStatus(false); }   // back after midnight: today's tries
   }
   function init(ui) {
     var noop = function () {};
     ui = ui || {};
     UI = { show: ui.show || noop, say: ui.say || noop, reset: ui.reset || noop };
     load();
+    bLoad();
     wire();
     refreshBrief();
+    if (pend) sendFinish(pend);   // a round saved on an earlier visit but never sent (under 6 h old)
   }
 
   window.CurateRewards = {
@@ -853,6 +1444,9 @@
     lastIds: lastIds, saveLastIds: saveLastIds,
     tierInfo: tierInfo, canCount: canCount, model: model,   // model: read by scripts/curate-check.js
     startShift: startShift, finishShift: finishShift,
-    showTicket: showTicket, refreshBrief: refreshBrief
+    showTicket: showTicket, refreshBrief: refreshBrief,
+    // Badge mode (spec 4.1): online is false in v6 mode, where begin() only reads canCount().
+    online: ONLINE, renderIntro: renderIntro, setBadge: setBadge, forgetBadge: forgetBadge, begin: begin,
+    refreshStatus: refreshStatus
   };
 })();

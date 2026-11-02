@@ -61,6 +61,8 @@
     var last = lastIds || [], seen = {}, open = [], rest = [], got = {}, k, r, t;
     if (!deck) for (k in D) { deck = D[k]; break; }   // an unknown id plays the first deck
     items = deck.items; split = deck.split;
+    // The intro’s correct example is never dealt: the round would replay an entry the player just saw.
+    if (deck.intro) items = items.filter(function (it) { return it.id !== deck.intro.good; });
     rand = rand || Math.random;
     // Never open on the twin of a practice card (e.g. the Eiffel Tower right after practising on it).
     var pt = {};
@@ -83,6 +85,17 @@
     if (open.length === 3) open = rand() < 0.5 ? [open[1], open[0], open[2]] : [open[1], open[2], open[0]];
     for (t = 0; t < TRIES; t++) { r = arrange(open, rest, deck.late, rand); if (r.ok) break; }
     return { deck: deck.id, items: r.items.map(copy) };
+  }
+
+  // ---- Intro ----
+  // The intro’s two examples: a correct entry and its twin with one part wrong (practice[0]). Copies, so the
+  // caller can’t change the deck. null when the deck has none.
+  function intro(deckId) {
+    var deck = (window.CURATE_DECKS || {})[deckId], good = null, bad, i;
+    if (!deck || !deck.intro || !deck.practice || !deck.practice.length) return null;
+    for (i = 0; i < deck.items.length; i++) if (deck.items[i].id === deck.intro.good) good = deck.items[i];
+    bad = deck.practice[0];
+    return good && !good.bad && bad.bad ? { good: copy(good), bad: copy(bad) } : null;
   }
 
   // ---- Window ----
@@ -151,5 +164,5 @@
   }
 
   window.CurateRules = { buildRun: buildRun, windowFor: windowFor, newScore: newScore, judge: judge, apply: apply,
-      finish: finish, tierFor: tierFor };
+      finish: finish, tierFor: tierFor, intro: intro };
 })();

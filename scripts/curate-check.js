@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Curate game checks: content schema and facts, round dealing, ES5 lint, user copy (banned words, web3 words
 // outside the Crypto exchange app, and Curate’s jargon on the play screen) and file sizes; with --sim, the §2.8
-// tier simulation (v5 pick model, v6: 2 tries a day).
+// tier simulation (v5 pick model, v6: 2 tries a day). Badge tries (2 Nov): the booth web app
+// (apps-script/staff-desk/Code.gs) runs here against an in-memory Sheets stub, and rewards.js, earn.js and badge.js
+// run against it in fake pages.
 // Node 22, no dependencies. It runs the very settings.js, decks.js and rules.js the phones load.
 //   node scripts/curate-check.js          checks only
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
@@ -11,9 +13,10 @@
 // runbook) moves the tier mix away from §2.8 on purpose: the --sim table then shows the new shares; update
 // TARGET below once the team agrees on them.
 'use strict';
-var fs = require('fs'), path = require('path'), vm = require('vm'), zlib = require('zlib');
+var fs = require('fs'), path = require('path'), vm = require('vm'), zlib = require('zlib'), crypto = require('crypto');
 
 var ROOT = path.join(__dirname, '..'), DIR = path.join(ROOT, 'site', 'curate');
+var STAFF = path.join(ROOT, 'site', 'staff'), GS = path.join(ROOT, 'apps-script', 'staff-desk', 'Code.gs');
 var FIT = process.argv.indexOf('--fit') > -1, SIM = FIT || process.argv.indexOf('--sim') > -1;
 var errors = [], warnings = [];
 function fail(msg) { errors.push(msg); }
@@ -40,9 +43,23 @@ var S = W.CURATE_SETTINGS, D = W.CURATE_DECKS, R = W.CurateRules;
 function checkSettings() {
   var keys = ['v', 'seconds', 'relaxedSeconds', 'entries', 'fakes', 'points', 'trust',
     'tiers', 'checkinNeededFrom', 'countedPerDay', 'kioskMaxTier', 'kioskResetMs', 'kioskIdleMs', 'staffHoldMs',
-    'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch'], i, cfg, fm, tk = ['teal', 'purple', 'gold'];
+    'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch', 'server', 'badge', 'contact', 'lastDay'], i, cfg, fm,
+    tk = ['teal', 'purple', 'gold'];
   if (!S) return fail('settings.js: window.CURATE_SETTINGS is missing');
   keys.forEach(function (k) { if (S[k] === undefined) fail('settings.js: missing ' + k); });
+  // Badge tries (2 Nov): one server block replaces the desk and sign-up blocks.
+  ['staffDesk', 'earn'].forEach(function (k) { if (S[k] !== undefined) fail('settings.js: ' + k + ' is gone (server holds the one endpoint)'); });
+  (function (sv, bg, ct) {
+    if (typeof sv.endpoint !== 'string' || (sv.endpoint &&
+      !/^https:\/\/script\.google\.com\/(a\/macros\/[^\/]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(sv.endpoint))) {
+      fail('settings.js: server.endpoint must be empty or an Apps Script /exec URL');
+    }
+    if (!(sv.timeoutMs >= 15000)) fail('settings.js: server.timeoutMs must be ≥ 15000 (above the script’s 6 s lock wait)');
+    try { new RegExp(bg.pattern || ''); } catch (e) { fail('settings.js: badge.pattern does not compile: ' + e.message); }
+    if (typeof bg.typed !== 'boolean') fail('settings.js: badge.typed must be true or false');
+    if (typeof ct.monthly !== 'string' || !ct.monthly) fail('settings.js: contact.monthly is empty');
+  })(S.server || {}, S.badge || {}, S.contact || {});
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(S.lastDay || '')) fail('settings.js: lastDay must be yyyy-MM-dd');
   ['catch', 'evidence', 'letThrough', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus',
     'perSecondLeft', 'bonusMaxMistakes', 'bonusMinEvidence'].forEach(function (k) {
     if (typeof S.points[k] !== 'number') fail('settings.js: points.' + k + ' is not a number');
@@ -385,9 +402,10 @@ var POLICY_MAX = 52;
 var COPY_MAX = [['pick.app', 24, 5], ['pick.need', 36, 8], ['copy.mission', 28, 6]];
 // The red flash says why in one line (v6 §2): every why fits 48 characters.
 var WHY_MAX = 48;
-// Results (v6 §6): a headline per trust band (≥ 90, 70–89, < 70) and one company line [no fake got in, a fake
-// got in]. Headline and company lines are short; the v5 quote, payoffs and sub line are gone.
-var HEAD_MAX = 24, COMPANY_MAX = 44, GONE = ['pick.sub', 'copy.quotes', 'copy.quoteBy', 'copy.payoffs'];
+// Results (v6 §6): a headline per trust band (≥ 90, 70–89, < 70), short; the v5 quote, payoffs and sub line are
+// gone. Badge tries (2 Nov): the company line is plain words from rewards.js (“No wrong entry got through.”), so
+// copy.company is gone too.
+var HEAD_MAX = 24, GONE = ['pick.sub', 'copy.quotes', 'copy.quoteBy', 'copy.payoffs', 'copy.company'];
 // The soft flash line (v6 §2: a fake marked Wrong, the wrong part picked): game.js verdict() builds it from the
 // field label, lower-cased, and the fix, e.g. 'The wrong part was the city: Agra.'
 var EV_LINE = 'The wrong part was the ', EV_MAX = 64;
@@ -468,7 +486,7 @@ function checkSchema() {
         if (MONEY.test(x)) fail(at + ': the Crypto exchange app talks money: ' + x);
       });
       if (typeof c.mission !== 'string' || !c.mission) fail(dk + ': copy.mission is missing');
-      [['headlines', 3, HEAD_MAX], ['company', 2, COMPANY_MAX]].forEach(function (k) {
+      [['headlines', 3, HEAD_MAX]].forEach(function (k) {
         var a = c[k[0]];
         if (!Array.isArray(a) || a.length !== k[1] || !a.every(function (x) { return typeof x === 'string' && x; })) {
           return fail(dk + ': copy.' + k[0] + ' needs ' + k[1] + ' lines');
@@ -514,6 +532,10 @@ function checkSchema() {
         if (per[it.list]) { per[it.list][it.bad ? 1 : 0]++; if (it.bad && it.tell === 'card') per[it.list][2]++; }
         if (it.bad && it.lvl === 1 && !twinsOf(it).some(function (t) { return pt[t]; })) { easyFakes++; if (it.tell === 'card') cardEasy++; }
       });
+      // The intro (2 Nov): intro.good is a correct entry of this deck; practice[0] is the wrong example.
+      if (!deck.intro || !(deck.items || []).some(function (it) { return it.id === deck.intro.good && !it.bad; })) {
+        fail(dk + ': intro.good must name a correct entry of this deck');
+      }
       if (easyFakes < 3) fail(dk + ': only ' + easyFakes + ' easy fakes can open a round (need ≥ 3)');
       if (cardEasy < 3) fail(dk + ': only ' + cardEasy + ' easy card-tell fakes can open a round (need ≥ 3)');
       for (lk in per) {
@@ -573,6 +595,7 @@ function runProblems(deck, run, practiceIds) {
     ids[it.id] = 1;
     twinsOf(it).forEach(function (t) { if (twins[t]) p.push('two of twin ' + t); twins[t] = 1; });
     if (practiceIds[it.id]) p.push('practice item ' + it.id);
+    if (deck.intro && it.id === deck.intro.good) p.push('the intro’s correct example ' + it.id);
     per[it.list] = per[it.list] || [0, 0];
     per[it.list][0]++;
     if (it.bad) { fakes++; per[it.list][1]++; rf++; rg = 0; } else { rg++; rf = 0; }
@@ -618,6 +641,15 @@ function checkDealing() {
       out.push('  ' + pad(deck.id, 11) + BUILDS + ' rounds, ' + bad + ' broken, ' +
         (Math.round(100 * repeats / (BUILDS - 1)) / 100) + ' entries repeated from the previous round on average');
     })(D[dk]);
+  }
+  // The intro’s two examples (2 Nov): copies of intro.good and practice[0], twins of each other.
+  for (dk in D) {
+    (function (ex) {
+      if (!ex || !ex.good || ex.good.bad || !ex.bad || !ex.bad.bad) return fail(dk + ': CurateRules.intro gives no correct and wrong example');
+      if (!twinsOf(ex.good).some(function (t) { return twinsOf(ex.bad).indexOf(t) > -1; })) fail(dk + ': the intro examples share no twin');
+      ex.good.why = 'changed';
+      if (D[dk].items.some(function (x) { return x.why === 'changed'; })) fail(dk + ': CurateRules.intro returns the deck’s own objects');
+    })(R.intro ? R.intro(dk) : null);
   }
   // A missing rand falls back to Math.random.
   if (R.buildRun('sights', []).items.length !== S.entries) fail('buildRun without rand failed');
@@ -677,17 +709,19 @@ var LINT = [
   [/\bArray\.from\b/, 'Array.from'], [/\bObject\.assign\b/, 'Object.assign']
 ];
 function checkLint() {
-  var files = fs.readdirSync(DIR).filter(function (f) { return /\.js$/.test(f); }).sort(), hits = 0;
+  // The game's own files, plus the staff desk and the booth web app (same house style, 2 Nov).
+  var files = fs.readdirSync(DIR).filter(function (f) { return /\.js$/.test(f); }).sort()
+    .map(function (f) { return 'site/curate/' + f; }).concat(['site/staff/desk.js', 'apps-script/staff-desk/Code.gs']), hits = 0;
   files.forEach(function (f) {
     var lines;
-    try { lines = codeOnly(fs.readFileSync(path.join(DIR, f), 'utf8')).split('\n'); } catch (e) { return; }
+    try { lines = codeOnly(fs.readFileSync(path.join(ROOT, f), 'utf8')).split('\n'); } catch (e) { return fail(f + ' could not be read'); }
     lines.forEach(function (line, i) {
       LINT.forEach(function (rule) {
-        if (rule[0].test(line)) { hits++; fail('site/curate/' + f + ':' + (i + 1) + ': ES5 only, found ' + rule[1]); }
+        if (rule[0].test(line)) { hits++; fail(f + ':' + (i + 1) + ': ES5 only, found ' + rule[1]); }
       });
     });
   });
-  console.log('ES5 lint\n  ' + files.length + ' file(s): ' + files.join(', ') + (hits ? '' : ', clean'));
+  console.log('ES5 lint\n  ' + files.length + ' file(s): ' + files.map(function (f) { return path.basename(f); }).join(', ') + (hits ? '' : ', clean'));
 }
 
 // ---- User copy ----
@@ -763,23 +797,39 @@ function checkCopy() {
     });
   }
   files.forEach(function (f) { js(fs.readFileSync(path.join(DIR, f), 'utf8'), 'site/curate/' + f, 1); });
-  (function () {
-    var src = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'), m, re, html, how;
+  // The staff desk (2 Nov): staff read it, so job and web3 words count; Curate’s jargon does not apply there.
+  js(fs.readFileSync(path.join(STAFF, 'desk.js'), 'utf8'), 'site/staff/desk.js', 1);
+  markup('site/curate/index.html', true);
+  markup('site/staff/index.html', false);
+  function markup(name, game) {
+    var src = fs.readFileSync(path.join(ROOT, name), 'utf8'), m, re, html, how;
     function lineAt(i) { return src.slice(0, i).split('\n').length; }
     // The How it works sheet may name Curate’s words; the rest of the markup should not.
     how = /<dialog\b[^>]*\bid="how"[\s\S]*?<\/dialog>/i.exec(src) || { index: -1, 0: '' };
-    function where(i) { return i >= how.index && i < how.index + how[0].length ? 0 : 2; }
+    function where(i) { return !game || (i >= how.index && i < how.index + how[0].length) ? 0 : 2; }
     function blank(x) { return x.replace(/[^\n]/g, ' '); }
     // Inline scripts are read as JS; comments, styles and scripts are then blanked so only markup is left.
     re = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
-    while ((m = re.exec(src))) js(m[1], 'site/curate/index.html', lineAt(m.index + m[0].indexOf(m[1])));
+    while ((m = re.exec(src))) if (m[1].trim()) js(m[1], name, lineAt(m.index + m[0].indexOf(m[1])));
     html = src.replace(/<!--[\s\S]*?-->|<style\b[\s\S]*?<\/style>|<script\b[\s\S]*?<\/script>/gi, blank);
     re = /\s(?:aria-label|aria-description|title|alt|placeholder|content|value|data-label)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
-    while ((m = re.exec(html))) test(m[1] !== undefined ? m[1] : m[2], 'site/curate/index.html:' + lineAt(m.index), false, false, where(m.index));
+    while ((m = re.exec(html))) test(m[1] !== undefined ? m[1] : m[2], name + ':' + lineAt(m.index), false, false, where(m.index));
     re = />([^<]+)</g;
-    while ((m = re.exec(html))) if (m[1].trim()) test(m[1], 'site/curate/index.html:' + lineAt(m.index), false, false, where(m.index));
-  })();
-  console.log('User copy\n  ' + n + ' strings and text runs in ' + (files.length + 1) + ' files' +
+    while ((m = re.exec(html))) if (m[1].trim()) test(m[1], name + ':' + lineAt(m.index), false, false, where(m.index));
+  }
+  // The user’s words for the title (2 Nov), the privacy notice the contact step links to, and no retired line.
+  (function (src) {
+    var h1 = /<h1\b[^>]*\bid="brief-title"[^>]*>([\s\S]*?)<\/h1>/.exec(src), lead = /\bid="brief-lead"[^>]*>([\s\S]*?)</.exec(src);
+    if (!h1 || h1[1].trim() !== 'Help an app, get rewarded.') fail('index.html: the title h1 must read Help an app, get rewarded.');
+    if (!lead || lead[1].trim() !== 'Each entry is right, or has one error. Spot the errors in 60 s.') {
+      fail('index.html: the title lead must read Each entry is right, or has one error. Spot the errors in 60 s.');
+    }
+    if (!/\bid="curate-privacy"/.test(src)) fail('index.html: #curate-privacy (the privacy notice) is missing');
+  })(fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'));
+  fs.readdirSync(DIR).filter(function (f) { return /\.(js|html)$/.test(f); }).forEach(function (f) {
+    if (/clean list/i.test(fs.readFileSync(path.join(DIR, f), 'utf8'))) fail('site/curate/' + f + ': the retired line “Clean list” is still there');
+  });
+  console.log('User copy\n  ' + n + ' strings and text runs in ' + (files.length + 3) + ' files' +
     (hits ? ': ' + hits + ' banned, web3 or jargon word(s)' : ': no job words, nothing web3') + ' (' + allowed +
     ' tokens-deck strings may name tokens; ' + play + ' play-screen strings free of Curate jargon)');
 }
@@ -814,15 +864,21 @@ function jpegHeight(buf) {
   }
   return 0;
 }
+// Badge tries (2 Nov): settings.js 4.8 KB (the server, badge, contact and lastDay keys); rules.js 9.2 KB (intro());
+// earn.js is now the contact step (6 KB / 2.5 KB gz); game.js 58 KB / 18.5 KB gz (intro, scanner sheet);
+// index.html 77 KB / 22 KB gz (intro, scanner, contact, privacy notice); badge.js is new (10 KB / 4 KB gz).
+// rewards.js 78 KB / 25 KB gz, above the spec’s 56 / 18.5: it holds both modes (v6 per phone and badge mode: tries,
+// saving with retries, switches, the locked ticket), measured 74.2 / 23.6. The total follows (eager files).
 var BUDGETS = {
   // settings.js +0.5 KB and earn.js: the Earn for real sign-up (30 Oct); +0.25 KB: separate desk and sign-up sheets (2 Nov).
-  'settings.js': [3.5 * KB, 0, true], 'earn.js': [6 * KB, 2.625 * KB], 'decks.js': [47.5 * KB, 13.75 * KB, true], 'rules.js': [8.9 * KB, 0, true],
+  'settings.js': [4.8 * KB, 0, true], 'earn.js': [6 * KB, 2.5 * KB], 'decks.js': [47.5 * KB, 13.75 * KB, true], 'rules.js': [9.2 * KB, 0, true],
   'credits.js': [12 * KB, 2.75 * KB, true],
-  'objects.js': [33.5 * KB, 12.5 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [50.5 * KB, 16.25 * KB],
+  // game.js +0.25 KB gz: a stale start reply is ignored and the scanner skips non-badge codes (2 Nov review).
+  'objects.js': [33.5 * KB, 12.5 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [58 * KB, 18.75 * KB],
   // rewards.js +0.5 KB gz in v6: the tries line, the early-end headline and the just-for-fun tier line.
-  'rewards.js': [45 * KB, 15.25 * KB], 'index.html': [66 * KB, 18.75 * KB]
+  'rewards.js': [78 * KB, 25 * KB], 'index.html': [77 * KB, 22 * KB], 'badge.js': [10 * KB, 4 * KB]
 };
-var TOTAL = [275 * KB, 87 * KB];   // eager files only: gl.js loads later, and only where WebGL runs
+var TOTAL = [330 * KB, 104 * KB];   // eager files only: gl.js loads later, and only where WebGL runs; jsQR only to scan
 function checkSizes() {
   var total = 0, totalGz = 0, imgs = [], imgTotal = 0, big = 0;
   console.log('Sizes (raw / gzip, budget)');
@@ -840,6 +896,13 @@ function checkSizes() {
   console.log('  ' + pad('total', 12) + lpad(total, 6) + ' / ' + lpad(totalGz, 5) + '   ≤ ' + (TOTAL[0] / KB) + ' KB / ' +
     (TOTAL[1] / KB) + ' KB gz, before gl.js and photos');
   if (total > TOTAL[0] || totalGz > TOTAL[1]) warn('site/curate is over the total budget (eager files)');
+  // jsQR loads only when a phone without a built-in QR reader scans a badge: reported apart, out of the total.
+  (function (p) {
+    var buf = fs.existsSync(p) ? fs.readFileSync(p) : null;
+    if (!buf) return fail('site/curate/vendor/jsQR.js is missing (the iPhone badge reader)');
+    console.log('  ' + pad('vendor/jsQR', 12) + lpad(buf.length, 6) + ' / ' + lpad(zlib.gzipSync(buf, { level: 9 }).length, 5) + '   lazy: only when a scan needs it');
+    if (!fs.existsSync(path.join(DIR, 'vendor', 'jsQR-LICENSE.txt'))) fail('site/curate/vendor/jsQR-LICENSE.txt is missing');
+  })(path.join(DIR, 'vendor', 'jsQR.js'));
   if (fs.existsSync(IMG)) imgs = fs.readdirSync(IMG).filter(function (f) { return /\.jpg$/.test(f); });
   imgs.forEach(function (f) {
     var buf = fs.readFileSync(path.join(IMG, f)), n = buf.length, h = jpegHeight(buf);
@@ -850,48 +913,382 @@ function checkSizes() {
   console.log('  ' + pad('img/*.jpg', 12) + lpad(imgTotal, 7) + '  in ' + imgs.length + ' photos, not eager, each ≤ 60 KB' + (big ? '   OVER' : ''));
 }
 
+// ---- Booth web app (Code.gs) ----
+// apps-script/staff-desk/Code.gs in a vm against stubs of exactly the Sheets API subset it may use (spec 1.3): an
+// in-memory bound sheet (the badge list) plus the contacts sheet by CONTACTS_SHEET_ID, CacheService with TTLs on
+// a fake clock, LockService, PropertiesService, Utilities.formatDate (Intl, booth time zone), ContentService and
+// Logger. Written values are coerced the way Sheets does: a bare yyyy-MM-dd becomes a Date (midnight IST), a numeric
+// string a number, and a leading ' is dropped (the rest stays text). H.writes keeps every value as sent.
+var GS_SRC = fs.existsSync(GS) ? fs.readFileSync(GS, 'utf8') : '';
+var GS_T0 = Date.parse('2026-11-03T05:00:00Z');   // 10:30 IST on the first booth day
+function gsHarness(opts) {
+  opts = opts || {};
+  var H = { clock: GS_T0, lockBusy: false, offline: false, logs: [], toasts: [], alerts: [], writes: [] }, cache = {}, props = {};
+  function coerce(v) {
+    H.writes.push(v);
+    if (typeof v !== 'string') return v;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00+05:30');
+    if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+    if (v.charAt(0) === '\'') return v.slice(1);
+    return v;
+  }
+  function Sheet(name) { this.name = name; this.rows = []; this.prot = []; this.frozen = 0; }
+  Sheet.prototype.getName = function () { return this.name; };
+  Sheet.prototype.getLastRow = function () {
+    for (var i = this.rows.length; i > 0; i--) if ((this.rows[i - 1] || []).some(function (c) { return c !== '' && c !== undefined; })) return i;
+    return 0;
+  };
+  Sheet.prototype.appendRow = function (a) {
+    var i, at = this.getLastRow();
+    this.rows[at] = a.map(coerce);
+    for (i = 0; i < this.rows.length; i++) if (!this.rows[i]) this.rows[i] = [];
+  };
+  Sheet.prototype.setFrozenRows = function (n) { this.frozen = n; };
+  Sheet.prototype.protect = function () {
+    var p = { calls: [], setDescription: function () { p.calls.push('desc'); }, getEditors: function () { return ['owner']; },
+      removeEditors: function () { p.calls.push('remove'); }, setWarningOnly: function () { p.calls.push('warn'); } };
+    this.prot.push(p);
+    return p;
+  };
+  Sheet.prototype.getRange = function (r, c, n, m) {
+    var sh = this;
+    if (typeof r !== 'number') throw new Error('getRange takes numbers only (spec 1.3)');
+    n = n || 1; m = m || 1;
+    function cell(i, j) { var row = sh.rows[r - 1 + i] || [], v = row[c - 1 + j]; return v === undefined ? '' : v; }
+    function put(i, j, v) { while (sh.rows.length < r + i) sh.rows.push([]); sh.rows[r - 1 + i][c - 1 + j] = coerce(v); }
+    return {
+      getSheet: function () { return sh; },
+      getValues: function () { var out = [], i, j; for (i = 0; i < n; i++) { out.push([]); for (j = 0; j < m; j++) out[i].push(cell(i, j)); } return out; },
+      setValues: function (a) { for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) put(i, j, a[i][j]); },
+      setValue: function (v) { put(0, 0, v); },
+      insertCheckboxes: function () { for (var i = 0; i < n; i++) for (var j = 0; j < m; j++) if (cell(i, j) === '') put(i, j, false); }
+    };
+  };
+  function Book() { this.sheets = {}; }
+  Book.prototype.getSheetByName = function (n) { return this.sheets[n] || null; };
+  Book.prototype.insertSheet = function (n) { return (this.sheets[n] = new Sheet(n)); };
+  Book.prototype.getEditors = function () { return opts.editors || ['owner']; };
+  Book.prototype.toast = function (m) { H.toasts.push(m); };
+  H.bound = new Book(); H.contacts = new Book();
+  H.contacts.insertSheet('Contacts');   // the real contacts sheet: one empty tab, no headers yet
+  function fmt(d, tz, f) {
+    var p = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
+      minute: '2-digit', hourCycle: 'h23', weekday: 'short' }).formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    if (f === 'yyyy-MM-dd') return p.year + '-' + p.month + '-' + p.day;
+    if (f === 'HH:mm') return p.hour + ':' + p.minute;
+    if (f === 'EEE d MMM') return p.weekday + ' ' + Number(p.day) + ' ' + new Intl.DateTimeFormat('en-GB', { timeZone: tz, month: 'short' }).format(d);
+    if (f === 'yyyyMMddHHmm') return p.year + p.month + p.day + p.hour + p.minute;
+    throw new Error('formatDate ' + f + ' is outside spec 1.3');
+  }
+  var ui = { createMenu: function () { return ui; }, addItem: function () { return ui; }, addSeparator: function () { return ui; },
+    addToUi: function () {}, alert: function (s) { H.alerts.push(String(s)); } };
+  var ctx = {
+    SpreadsheetApp: {
+      getActiveSpreadsheet: function () { return H.bound; },
+      openById: function (id) { if (id === ctx.CONTACTS_SHEET_ID && id) return H.contacts; throw new Error('no sheet ' + id); },
+      flush: function () {}, getUi: function () { return ui; }
+    },
+    LockService: { getScriptLock: function () { return { tryLock: function () { return !H.lockBusy; }, releaseLock: function () {} }; } },
+    CacheService: { getScriptCache: function () { return {
+      get: function (k) { var e = cache[k]; return e && e.t > H.clock ? e.v : null; },
+      put: function (k, v, s) { cache[k] = { v: String(v), t: H.clock + (s || 600) * 1000 }; },
+      remove: function (k) { delete cache[k]; } }; } },
+    PropertiesService: { getScriptProperties: function () { return {
+      getProperty: function (k) { return props[k] || null; }, setProperty: function (k, v) { props[k] = String(v); } }; } },
+    Utilities: { formatDate: fmt },
+    ContentService: { MimeType: { JSON: 'json' }, createTextOutput: function (s) { return { s: s, setMimeType: function () { return this; } }; } },
+    Logger: { log: function (s) { H.logs.push(String(s)); } }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(GS_SRC, ctx, { filename: 'Code.gs' });
+  ctx.now_ = function () { return new Date(H.clock); };
+  H.ctx = ctx; H.props = props; H.cache = cache;
+  H.call = function (b) { return JSON.parse(ctx.doPost({ postData: { contents: typeof b === 'string' ? b : JSON.stringify(b) } }).s); };
+  H.tab = function (n) { return H.bound.sheets[n]; };
+  H.rows = function (n) { var t = H.tab(n); return t ? t.getLastRow() : 0; };
+  H.snap = function () { return JSON.stringify([H.bound.sheets, H.contacts.sheets]); };
+  return H;
+}
+// The best possible round under settings.js, over every deck (spec 1.6): Code.gs MAX_SCORE must equal it.
+function maxScore() {
+  var P = S.points, best = 0;
+  Object.keys(D).forEach(function (dk) {
+    var e = 0, f = 0, k, sp = D[dk].split;
+    for (k in sp) { e += sp[k][0]; f += sp[k][1]; }
+    best = Math.max(best, f * (P.catch + P.evidence) + (e - f) * P.letThrough + Math.floor(e / P.streakEvery) * P.streakBonus +
+      P.perSecondLeft * S.seconds);
+  });
+  return best;
+}
+function checkServer() {
+  var n = 0, H, r, key, i, t1, t2, t3, t4, last, before, crow, sw, tmp, A = 'a'.repeat(64), B = 'b'.repeat(64),
+    C = 'c'.repeat(64), E = 'e'.repeat(64), F = 'f'.repeat(64), seq = 0, HOUR = 3600 * 1000;
+  function ok(cond, msg) { n++; if (!cond) fail('Code.gs: ' + msg); }
+  function tok() { seq++; return ('tok' + seq + 'qwertyuiopasdfghjk').slice(0, 20); }
+  function start(h, badge, t, more) {
+    var b = { action: 'start', badge: badge, token: t || tok(), app: 'sights' }, k;
+    for (k in more || {}) b[k] = more[k];
+    return h.call(b);
+  }
+  function claim(h, badge, tier, id, more) {
+    var b = { action: 'claim', key: h.props.STAFF_KEY, badge: badge, tier: tier, item: 'x', staff: 'Ana', id: id }, k;
+    for (k in more || {}) b[k] = more[k];
+    return h.call(b);
+  }
+  if (!GS_SRC) return fail('apps-script/staff-desk/Code.gs is missing');
+  // 2. In sync with settings.js and decks.js: the server derives the tier itself, from the same thresholds.
+  H = gsHarness();
+  ok(JSON.stringify(H.ctx.TIERS) === JSON.stringify(S.tiers), 'TIERS ' + JSON.stringify(H.ctx.TIERS) + ' differ from settings.js tiers ' + JSON.stringify(S.tiers));
+  ok(H.ctx.PER_DAY === S.countedPerDay, 'PER_DAY differs from settings.js countedPerDay');
+  ok(H.ctx.MAX_SCORE === maxScore() && H.ctx.MAX_SCORE >= S.tiers[3], 'MAX_SCORE ' + H.ctx.MAX_SCORE + ', the best round under settings.js is ' + maxScore());
+  ok(JSON.stringify(H.ctx.APPS) === JSON.stringify(Object.keys(D)), 'APPS differ from the deck ids');
+  ok(H.ctx.CONTACTS_SHEET_ID === '1LzRQ9IizuRMrqWAclFuY2v0bONkgxb2ezvXPbVsBtIc' && H.ctx.SHEET_ID === '', 'sheet ids');
+  // 1. Setup: every tab with its headers, protected, one staff key that a second run keeps.
+  H.ctx.staffSetup();
+  ok(H.tab('Badge claims') && H.tab('Badge claims').rows[0].join() === 'Time,Badge (hashed),Tier,Item,Ticket,Staff,Id,How', 'Badge claims headers');
+  ok(H.tab('Tries') && H.tab('Tries').rows[0].join() === H.ctx.TRY_HEAD.join() && H.ctx.TRY_HEAD.length === 11, 'Tries headers');
+  sw = H.tab('Switches') ? H.tab('Switches').rows : [];
+  ok(sw[1] && sw[1][0] === 'Merch open' && sw[1][1] === true && [2, 3, 4].every(function (k) { return sw[k] && sw[k][1] === false; }),
+    'Switches: Merch open ticked, the three sold-out boxes not ' + JSON.stringify(sw));
+  ok(H.contacts.sheets.Contacts.rows[0].join() === 'Day,Contact,Kind,Curator info,Event,Source,Id' && !H.bound.sheets.Contacts, 'Contacts headers, in the contacts sheet only');
+  ['Badge claims', 'Tries', 'Switches'].forEach(function (t) { ok(H.tab(t).prot.some(function (p) { return p.calls.indexOf('remove') > -1; }), t + ' is not protected'); });
+  ok(H.contacts.sheets.Contacts.prot.some(function (p) { return p.calls.indexOf('remove') > -1; }), 'Contacts is not protected');
+  key = H.props.STAFF_KEY;
+  ok(/^[A-Z2-9]{16}$/.test(key || '') && H.logs.some(function (l) { return l.indexOf(key) > -1; }), 'staffSetup logs a 16-character key');
+  H.ctx.staffSetup();
+  ok(H.props.STAFF_KEY === key && H.tab('Switches').getLastRow() <= 7, 'a second staffSetup changed the key or added switch rows');
+  H.ctx.newStaffKey();
+  ok(H.props.STAFF_KEY !== key, 'newStaffKey kept the old key');
+  r = gsHarness({ editors: ['owner', 'x'] }); r.ctx.staffSetup();
+  ok(r.logs.some(function (l) { return /^Warning: other people can edit/.test(l); }), 'no Warning line when others can edit');
+  r = gsHarness(); r.bound.insertSheet('Badge claims').appendRow(['Time', 'Badge (hashed)', 'Tier', 'Item', 'Ticket', 'Staff', 'Id']);
+  r.ctx.staffSetup();
+  ok(r.tab('Badge claims').rows[0][7] === 'How', 'an old 7-column Badge claims header did not get How');
+  // 10. Transport and keys.
+  ok(JSON.parse(H.ctx.doGet().s).service === 'kleros booth', 'doGet');
+  ok(H.call('not json').error === 'badrequest' && H.call({ action: 'nope' }).error === 'badrequest', 'badrequest');
+  ok(H.call({ action: 'check', badge: A }).error === 'wrongkey' && H.call({ action: 'stats', key: 'WRONG' }).error === 'wrongkey' &&
+    H.call({ action: 'claim', badge: A, tier: 'teal' }).error === 'wrongkey', 'staff actions without the key');
+  ok(H.call({ action: 'status' }).ok === true, 'status needs no key');
+  // 3. Two counted tries a day, a third refused; a retried token is the same try; a token is one badge's.
+  t1 = tok(); t2 = tok();
+  r = start(H, A, t1);
+  ok(r.ok && r.counted && r.tryNo === 1 && r.left === 1 && r.open === true && Array.isArray(r.soldOut), 'first start ' + JSON.stringify(r));
+  r = start(H, A, t2, { app: 'evil' });
+  ok(r.counted && r.tryNo === 2 && r.left === 0, 'second start ' + JSON.stringify(r));
+  ok(H.tab('Tries').rows[2][8] === '' && !(H.tab('Tries').rows[1][1] instanceof Date), 'an unknown app is stored, or Day is not text');
+  r = start(H, A);
+  ok(r.ok && r.counted === false && r.reason === 'limit' && H.rows('Tries') === 3, 'a third start the same day ' + JSON.stringify(r));
+  r = start(H, A, t1);
+  ok(r.counted && r.tryNo === 1 && H.rows('Tries') === 3, 'a retried token spent a try ' + JSON.stringify(r));
+  ok(start(H, B, t1).error === 'badtoken', 'a token reused with another badge');
+  ok(start(H, 'nothex').error === 'badbadge' && start(H, A, 'BAD').error === 'badtoken', 'bad badge or token');
+  // 4. Booth days are IST days: 23:59 and 00:01 IST are two days.
+  r = gsHarness(); r.clock = Date.parse('2026-11-03T18:29:00Z');
+  start(r, A); start(r, A);
+  ok(start(r, A).reason === 'limit', 'the day’s limit at 23:59 IST');
+  r.clock = Date.parse('2026-11-03T18:31:00Z');
+  tmp = start(r, A);
+  ok(tmp.counted && tmp.tryNo === 1, 'a start at 00:01 IST is still the old day ' + JSON.stringify(tmp));
+  // 5. finish: one score per token, inside the time window, never above the best possible round.
+  H.clock += 5000;
+  ok(H.call({ action: 'finish', token: t1, score: 500 }).error === 'early', 'a finish 5 s after its start');
+  H.clock += 3 * HOUR;
+  r = H.call({ action: 'finish', token: t1, score: 812, tier: 3, relaxed: false, endedBy: 'done' });
+  ok(r.ok && r.score === 812 && r.tier === 2 && r.best && r.best.score === 812, 'the tier comes from the score, not the body ' + JSON.stringify(r));
+  ok(r.best && /^C-[A-Z0-9]{6}$/.test(r.best.code) && r.best.code === 'C-' + t1.slice(0, 6).toUpperCase(), 'best.code ' + (r.best || {}).code);
+  H.clock += 7 * HOUR;
+  ok(H.call({ action: 'finish', token: t1, score: 812 }).ok === true, 'the same finish again (7 h later) is not ok');
+  ok(H.call({ action: 'finish', token: t1, score: 813 }).error === 'used', 'a second score for one token');
+  ok(H.call({ action: 'finish', token: t2, score: 400 }).error === 'late', 'a finish 10 h after its start');
+  ok(H.call({ action: 'finish', token: 'unknowntoken12345', score: 1 }).error === 'badtoken', 'an unknown token');
+  t3 = tok(); start(H, C, t3); H.clock += 60000;
+  ok(H.call({ action: 'finish', token: t3, score: maxScore() + 1 }).error === 'toohigh', 'a score above the best possible round');
+  ok(H.call({ action: 'finish', token: t3, score: -1 }).error === 'badscore' && H.call({ action: 'finish', token: t3, score: 3.5 }).error === 'badscore', 'badscore');
+  // 6. status: the best across days, with its game code and time.
+  r = H.call({ action: 'status', badge: A });
+  ok(r.ok && r.v && r.tiers.join() === S.tiers.join() && r.maxScore === maxScore() && r.badge && r.badge.best && r.badge.best.score === 812 &&
+    r.badge.best.at === '13:30' && r.badge.left === 0 && r.badge.contact === false && r.badge.collected === false, 'status ' + JSON.stringify(r));
+  ok(H.call({ action: 'status' }).badge === null, 'status without a badge');
+  // 7. contact: only for a badge with an earned round, one contacts row per badge, nothing of it in the badge sheet.
+  ok(H.call({ action: 'contact', badge: C, contact: 'ana@example.org', id: 'abcdefabcdef' }).error === 'notry', 'a contact for a badge with no earned round');
+  ok(H.call({ action: 'contact', badge: A, contact: 'bob', id: 'abcdefabcdef' }).error === 'badcontact', 'bob is not a contact');
+  t4 = tok(); start(H, B, t4); H.clock += 60000;
+  ok(H.call({ action: 'finish', token: t4, score: S.tiers[1] + 10 }).tier === 1, 'a Teal finish');
+  r = claim(H, B, 'teal', 'claimidb0001');
+  ok(r.error === 'notearned' && r.contact === false, 'a claim before the contact ' + JSON.stringify(r));
+  r = H.call({ action: 'contact', badge: A, contact: 'ana@example.org', id: 'abcdefabcdef', curator: true, event: '\t=1', kiosk: true });
+  ok(r.ok && r.contact === true && typeof r.open === 'boolean', 'contact ' + JSON.stringify(r));
+  H.call({ action: 'contact', badge: A, contact: 'ana@example.org', id: 'abcdefabcdef' });
+  H.call({ action: 'contact', badge: A, contact: 'ana@example.org', id: 'zzzzzzzzzzzz' });
+  ok(H.contacts.sheets.Contacts.getLastRow() === 2, 'a retried or second contact for one badge added a row');
+  ok(H.call({ action: 'contact', badge: B, contact: '@ana_k', id: 'qqqqqqqqqqqq' }).ok, 'a @Telegram contact on a second earned badge');
+  ok(H.contacts.sheets.Contacts.getLastRow() === 3, 'two badges, two contacts rows');
+  crow = H.contacts.sheets.Contacts.rows.slice(1, 3);
+  ok(crow.every(function (row) { return typeof row[0] === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row[0]) && row[5] === 'curate'; }) &&
+    crow[0][1] === 'ana@example.org' && crow[0][2] === 'email' && crow[0][3] === 'yes' && crow[1][2] === 'telegram',
+    'contacts rows: Day is a date only, Source curate, kind and curator tick ' + JSON.stringify(crow));
+  tmp = JSON.stringify(H.contacts.sheets);
+  ok(!/[0-9a-f]{64}/.test(tmp) && [t1, t2, t4].every(function (t) { return tmp.indexOf(t) < 0; }) && tmp.indexOf('812') < 0, 'the contacts sheet holds a badge, token or score');
+  tmp = JSON.stringify(H.bound.sheets);
+  ok(tmp.indexOf('@') < 0 && tmp.indexOf('ana@example.org') < 0 && tmp.indexOf('ana_k') < 0, 'the badge sheet holds a contact');
+  ok(H.writes.indexOf('\'\t=1') > -1, 'the event \\t=1 is not written as \'\\t=1');
+  r = H.call({ action: 'check', key: H.props.STAFF_KEY, badge: A });
+  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === 812, 'check after the contact ' + JSON.stringify(r));
+  // 9. claim: one item per badge, up to the earned tier; a check-in ticket (K-) allows any open tier, once.
+  ok(claim(H, A, 'gold', 'claimida0001').error === 'notearned', 'Gold claimed on a Purple badge');
+  r = claim(H, A, 'purple', 'claimida0002', { staff: '=1+1', how: 'typed' });
+  ok(r.ok, 'a Purple claim ' + JSON.stringify(r));
+  ok(claim(H, A, 'purple', 'claimida0002').ok && H.rows('Badge claims') === 2, 'the same claim id again is not green, or added a row');
+  ok(claim(H, A, 'teal', 'claimida0003').used === true, 'a second item for one badge');
+  ok(H.tab('Badge claims').rows[1][7] === 'typed' && H.writes.indexOf('\'=1+1') > -1, 'How typed in column 8, staff =1+1 written as \'=1+1');
+  r = claim(H, 'd'.repeat(64), 'gold', 'claimidd0001', { ticket: 'K-ABC123' });
+  ok(r.ok, 'a K- ticket on a badge with no game ' + JSON.stringify(r));
+  ok(claim(H, C, 'teal', 'claimidc0001', { ticket: 'K-ABC123' }).ticketUsed === true, 'a K- ticket used twice');
+  ok(start(H, A).reason === 'collected', 'a claimed badge can still start a counted try');
+  r = H.call({ action: 'stats', key: H.props.STAFF_KEY });
+  ok(r.ok && r.today && r.today.purple === 1 && r.today.gold === 1 && r.v === H.ctx.SCRIPT_V, 'stats ' + JSON.stringify(r));
+  // 8. Switches, read by label: pause, sold out, the menu and a hand edit.
+  H.tab('Switches').rows[1][1] = false; delete H.cache.switches;
+  i = H.rows('Tries');
+  r = start(H, E);
+  ok(r.ok && r.counted === false && r.reason === 'paused' && r.open === false && H.rows('Tries') === i, 'a start while paused ' + JSON.stringify(r));
+  ok(claim(H, A, 'teal', 'claimida0009').used === true, 'a collected badge while paused is not red');
+  ok(claim(H, F, 'teal', 'claimidf0009', { ticket: 'K-ZZZ999' }).error === 'paused', 'a claim while paused');
+  H.ctx.openMerch(); H.ctx.toggleGold();
+  ok(H.toasts.indexOf('Merch open.') > -1 && H.toasts.indexOf('Gold sold out. Stays on until you untick it.') > -1, 'menu toasts ' + JSON.stringify(H.toasts));
+  sw = H.tab('Switches').rows; tmp = sw[1]; sw[1] = sw[4]; sw[4] = tmp; delete H.cache.switches;
+  r = H.call({ action: 'status' });
+  ok(r.open === true && r.soldOut.join() === 'gold', 'switches moved rows are read by label ' + JSON.stringify(r));
+  ok(claim(H, F, 'gold', 'claimidf0010', { ticket: 'K-ZZZ999' }).error === 'soldout', 'a sold-out tier claimed');
+  H.cache.switches = { v: 'x', t: H.clock + 99999 };
+  H.ctx.onEdit({ range: H.tab('Switches').getRange(2, 2, 1, 1) });
+  ok(!H.cache.switches, 'a hand edit of Switches keeps the cached switches');
+  H.ctx.showStaffKey();
+  ok(H.alerts.some(function (a) { return a.indexOf(H.props.STAFF_KEY) > -1; }), 'showStaffKey');
+  // Day cells Sheets turned into Dates still compare as booth days.
+  r = gsHarness(); r.ctx.staffSetup();
+  start(r, A); start(r, A);
+  r.tab('Tries').rows[1][1] = new Date('2026-11-03T00:00:00+05:30'); r.tab('Tries').rows[2][1] = new Date('2026-11-03T00:00:00+05:30');
+  ok(start(r, A).reason === 'limit', 'a Day stored as a Date is not today’s');
+  // 11. Caps and the lock: busy, and nothing written.
+  r = gsHarness(); r.ctx.staffSetup();
+  for (i = 0; i < 61; i++) last = start(r, (i % 10 + '').repeat(64));
+  ok(last.error === 'busy', 'the 61st start in a minute ' + JSON.stringify(last));
+  r.clock += 60000;
+  ok(start(r, A).ok === true, 'the next minute still busy');
+  t1 = tok(); start(r, B, t1); r.clock += 60000; r.call({ action: 'finish', token: t1, score: S.tiers[1] });
+  r.lockBusy = true; before = r.snap();
+  ok(start(r, C).error === 'busy' && r.call({ action: 'finish', token: tok(), score: 1 }).error === 'busy' &&
+    r.call({ action: 'contact', badge: B, contact: '@ana_k', id: 'abcdefabcdef' }).error === 'busy' &&
+    claim(r, B, 'teal', 'claimid00001', { ticket: 'K-QQQ111' }).error === 'busy', 'busy under a held lock');
+  ok(r.snap() === before, 'a busy reply wrote to a sheet');
+  // 10. An internal throw answers server, never its message.
+  r.lockBusy = false;
+  r.ctx.SpreadsheetApp.getActiveSpreadsheet = function () { throw new Error('secret boom'); };
+  Object.keys(r.cache).forEach(function (k) { delete r.cache[k]; });
+  tmp = r.call({ action: 'status', badge: A });
+  ok(tmp.ok === false && tmp.error === 'server' && JSON.stringify(tmp).indexOf('boom') < 0, 'an internal throw ' + JSON.stringify(tmp));
+  // 12. Error codes are identifiers (lowercase letters only), so the clients and the copy lint can tell them apart.
+  (GS_SRC.match(/\berror: '[^']*'|\bfail_\('[^']*'\)/g) || []).forEach(function (m) { ok(/'[a-z]+'/.test(m), 'error code ' + m); });
+  console.log('Booth web app (Code.gs)\n  ' + n + ' cases (setup, sync with settings.js, tries, booth days, finish, status, contacts sheet, claims, switches, caps, lock)');
+}
+
 // ---- Rewards ----
-// rewards.js in vm "pages" that share one fake localStorage, like two tabs on one phone. No network, no real DOM:
-// every element is a stub that keeps textContent, hidden and attributes.
+// rewards.js and earn.js in vm "pages" that share one fake localStorage, like two tabs on one phone. No real DOM:
+// every element is a stub that keeps textContent, hidden, value and attributes. v6 pages have no network; a badge-
+// mode page (opts.server = a gsHarness) gets a CurateBadge stub whose post() calls Code.gs synchronously (or answers
+// offline while server.offline is set), and a clock and timers tied to the harness clock.
 function Store() { this.d = {}; }
 Store.prototype.getItem = function (k) { return Object.prototype.hasOwnProperty.call(this.d, k) ? this.d[k] : null; };
 Store.prototype.setItem = function (k, v) { this.d[k] = String(v); };
+Store.prototype.removeItem = function (k) { delete this.d[k]; };
 function stubEl() {
   var attrs = {}, cls = {}, on = {};
-  return { textContent: '', hidden: false, title: '', href: '', open: false, children: [], style: { setProperty: function () {} },
+  return { textContent: '', hidden: false, title: '', href: '', open: false, children: [], value: '', checked: false, disabled: false,
+    className: '', style: { setProperty: function () {} },
     setAttribute: function (k, v) { attrs[k] = String(v); }, getAttribute: function (k) { return k in attrs ? attrs[k] : null; },
     removeAttribute: function (k) { delete attrs[k]; }, hasAttribute: function (k) { return k in attrs; },
     classList: { add: function (c) { cls[c] = 1; }, remove: function (c) { delete cls[c]; },
       toggle: function (c) { if (cls[c]) delete cls[c]; else cls[c] = 1; }, contains: function (c) { return !!cls[c]; } },
     querySelector: function () { return null; }, querySelectorAll: function () { return []; }, contains: function () { return false; },
-    appendChild: function () {}, removeChild: function () {}, focus: function () {}, setPointerCapture: function () {},
+    appendChild: function () {}, removeChild: function () {}, insertBefore: function () {}, focus: function () {},
+    scrollIntoView: function () {}, setPointerCapture: function () {},
     addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); },
-    click: function () { (on.click || []).forEach(function (fn) { fn({ stopPropagation: function () {}, target: null }); }); } };
+    fire: function (t) {
+      var e = { preventDefault: function () {}, stopPropagation: function () {}, target: null };
+      (on[t] || []).forEach(function (fn) { fn(e); });
+    },
+    click: function () { this.fire('click'); } };
 }
-var RW_SRC = ['site/config.js', 'site/curate/settings.js', 'site/curate/decks.js', 'site/curate/rules.js', 'site/curate/rewards.js']
-  .map(function (f) { return [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]; });
+var RW_SRC = ['site/config.js', 'site/curate/settings.js', 'site/curate/decks.js', 'site/curate/rules.js', 'site/curate/rewards.js',
+  'site/curate/earn.js'].map(function (f) { return [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]; });
+// The real badge.js, in its own vm with a window stub: its id() and ok() also serve the pages' CurateBadge stub.
+var BADGE = (function () {
+  var ctx = { console: console, navigator: {}, CURATE_SETTINGS: S, setTimeout: setTimeout, clearTimeout: clearTimeout };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  try { vm.runInContext(fs.readFileSync(path.join(DIR, 'badge.js'), 'utf8'), ctx, { filename: 'badge.js' }); } catch (e) { fail('badge.js threw on load: ' + e.message); }
+  return ctx.CurateBadge || null;
+})();
+function badgeHash(id) { return crypto.createHash('sha256').update((BADGE ? BADGE.SALT : '') + id).digest('hex'); }
 function page(ls, opts) {
   opts = opts || {};
-  var els = {}, ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
-    document: { hidden: false, activeElement: null, getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
+  var els = {}, G = opts.server, timers = [], ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
+    document: { hidden: false, activeElement: null, readyState: 'complete', getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
       createElement: stubEl, addEventListener: function () {} },
     addEventListener: function () {}, setTimeout: function () { return 0; }, clearTimeout: function () {},
     setInterval: function () { return 1; }, clearInterval: function () {}, performance: { now: function () { return 0; } },
     requestAnimationFrame: function () { return 0; }, cancelAnimationFrame: function () {} };
   ctx.window = ctx;
+  if (G) {
+    ctx.setTimeout = function (fn, ms) { timers.push({ fn: fn, at: G.clock + (ms || 0) }); return timers.length; };
+    ctx.clearTimeout = function (i) { if (timers[i - 1]) timers[i - 1].fn = null; };
+    ctx.Date = function () { return arguments.length ? new (Function.prototype.bind.apply(Date, [null].concat([].slice.call(arguments))))() : new Date(G.clock); };
+    ctx.Date.now = function () { return G.clock; }; ctx.Date.parse = Date.parse; ctx.Date.UTC = Date.UTC;
+    ctx.Uint8Array = Uint8Array;
+    ctx.crypto = { getRandomValues: function (u) { return crypto.randomFillSync(u); } };
+    ctx.CurateBadge = {
+      SALT: BADGE.SALT, id: BADGE.id, ok: BADGE.ok, tail: BADGE.tail, endpoint: function () { return 'https://test/exec'; },
+      can: function () { return { hash: !opts.nocrypto, camera: true, detector: true }; },
+      read: function (raw, done) {
+        var id = BADGE.id(raw);
+        if (opts.nocrypto) return done('nocrypto');
+        if (!BADGE.ok(id, raw)) return done('notbadge', { id: id });
+        done(null, { id: id, tail: BADGE.tail(id), hash: badgeHash(id) });
+      },
+      // G.lose: the server acts but the reply is lost on the way back (a dropped connection).
+      post: function (body, done) {
+        var j;
+        if (G.offline) return done('offline');
+        j = G.call(JSON.parse(JSON.stringify(body)));
+        if (G.lose) { G.lose = false; return done('offline'); }
+        done(null, j);
+      },
+      loadJsQR: function (done) { done(true); }
+    };
+  }
   els['hdr-logo'] = stubEl(); els['hdr-logo'].setAttribute('href', '/');   // as in the shell
   vm.createContext(ctx);
   RW_SRC.forEach(function (f) {
     vm.runInContext(f[1], ctx, { filename: f[0] });
+    if (/settings/.test(f[0])) ctx.CURATE_SETTINGS.server.endpoint = G ? 'https://test/exec' : '';
     // The core cases below were written for "only Gold needs a check-in"; pin that rule so they keep testing
     // the ticket logic, and cover the live setting (checkinNeededFrom 1) in its own cases with opts.need.
     if (/rules/.test(f[0])) ctx.CURATE_SETTINGS.checkinNeededFrom = opts.need || 3;
     if (/rules/.test(f[0]) && opts.settings) opts.settings(ctx.CURATE_SETTINGS);
     if (/config/.test(f[0]) && opts.config) opts.config(ctx.KLEROS_BOOTH_CONFIG);
   });
-  ctx.CurateRewards.init({});
+  ctx.CurateRewards.init({ show: function (v) { ctx.view = v; }, say: function (s) { ctx.said = s; },
+    reset: function () { ctx.didReset = (ctx.didReset || 0) + 1; ctx.CurateRewards.refreshBrief(); } });
   ctx.text = function (id) { return els[id] ? els[id].textContent : ''; };
   ctx.el = function (id) { return ctx.document.getElementById(id); };
+  // Moves the shared clock on and runs the timers that are due (badge-mode pages only).
+  ctx.tick = function (ms) {
+    G.clock += ms;
+    timers.slice().forEach(function (t) { if (t.fn && t.at <= G.clock) { var fn = t.fn; t.fn = null; fn(); } });
+  };
   return ctx;
 }
 // One round through the public API, as game.js calls it: startShift when the clock starts, then finishShift.
@@ -979,9 +1376,15 @@ function checkRewards() {
     ok(c.text('ladder-fine').indexOf('Both tries used today. Play for fun.') === 0, 'tries line after two: ' + c.text('ladder-fine'));
     ls = new Store(); c = page(ls); playShift(c, TEAL); stamp(c); c.CurateRewards.refreshBrief();
     ok(c.text('ladder-fine').indexOf('left today') < 0, 'tries line after a stamp: ' + c.text('ladder-fine'));
-    // A round just for fun names only the tier its score reached, never a reward.
+    // A round just for fun says what its score reached and that it wins no merch, never a reward (2 Nov: the
+    // bare “Purple score” box said nothing), then why: here the merch was already collected.
     playShift(c, PURPLE);
-    ok(/^\S+ score$/.test(c.text('rep-tier-line')), 'just-for-fun tier line: ' + c.text('rep-tier-line'));
+    ok(c.text('rep-tier-line') === 'Your score reached Purple, but this round wins no merch.', 'just-for-fun tier line: ' + c.text('rep-tier-line'));
+    ok(c.text('rep-tries') !== '', 'just-for-fun after collecting says nothing about why');
+    // After both tries: the same tier line, and the why starts with the tries.
+    ls = new Store(); c = page(ls); playShift(c, LOW); playShift(c, LOW); playShift(c, PURPLE);
+    ok(c.text('rep-tier-line') === 'Your score reached Purple, but this round wins no merch.' &&
+      c.text('rep-tries').indexOf('Both tries used today.') === 0, 'just-for-fun after two tries: ' + c.text('rep-tier-line') + ' / ' + c.text('rep-tries'));
   }
   // The live rule (checkinNeededFrom 1, anti-replay): without a check-in a Teal score shows the Everyone ticket
   // plus a "check in to claim" strip; with a confirmed check-in it is a live K- ticket; a kiosk round gets stickers.
@@ -998,6 +1401,187 @@ function checkRewards() {
     ok(c.CurateRewards.model().t === 0, 'need 1, kiosk: a tablet round is above stickers without a check-in');
   }
   console.log('Rewards\n  ' + n + ' ticket and storage cases (two tabs, check-in, Everyone, retune, sold out, duplicate, kiosk, tries line, check-in for all merch)');
+}
+
+// ---- Badge mode ----
+// rewards.js and earn.js with server.endpoint set, against Code.gs in the harness above (spec 9.B): a scan spends
+// nothing, a try counts at Start, a ticket above stickers unlocks with a contact, the kiosk keeps nothing.
+function checkBadgeMode() {
+  var n = 0, G = gsHarness(), T = S.tiers, LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
+    PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3] + 50, ls, p, q, r, m, rows, k, kls, best;
+  function ok(cond, msg) { n++; if (!cond) fail('badge mode: ' + msg); }
+  function R(pg) { return pg.CurateRewards; }
+  function begin(pg, fun) { var out; R(pg).begin('sights', { fun: !!fun }, function (x) { out = x; }); return out; }
+  function setB(pg, raw) { var out; R(pg).setBadge(raw, function (x) { out = x; }); return out; }
+  // One round as game.js plays it: the clock starts (startShift), ms later the round ends (finishShift).
+  function play(pg, final, o) {
+    var i = R(pg).startShift('sights');
+    o = o || {};
+    G.clock += o.ms || 30000;
+    R(pg).finishShift({ deck: 'sights', final: final, raw: final, caught: 3, fakesSeen: 4, listed: 5, goodsSeen: 6, evidence: 1,
+      wrong: 0, leaks: o.leaks == null ? 1 : o.leaks, trust: 85, reviewed: 10, entries: 10, endedBy: 'done', counted: i.counted,
+      shiftNo: i.shiftNo, code: i.code, misses: [], reason: o.reason || '' });
+    return i;
+  }
+  function contact(pg, v) { pg.el('contact-input').value = v; pg.el('contact-form').fire('submit'); }
+  function clean(l) { return Object.keys(l.d).every(function (x) { return l.d[x].indexOf('@') < 0 && !/AB12CD34|ZZ99YY88/.test(l.d[x]); }); }
+  G.ctx.staffSetup();
+  // Scan, then two counted tries; the first Teal round is locked until a contact is left.
+  ls = new Store(); p = page(ls, { server: G });
+  ok(R(p).online === true, 'online is false with an endpoint');
+  ok(p.text('ladder-fine').indexOf('Your Devcon badge gives 2 tries a day for merch.') === 0, 'title fine line: ' + p.text('ladder-fine'));
+  R(p).renderIntro();
+  ok(p.text('intro-note') === 'Your Devcon badge gives 2 tries a day for merch.' && !p.el('intro-scan').hidden, 'intro before a scan: ' + p.text('intro-note'));
+  ok(setB(p, 'not a badge').error === 'notbadge', 'a non-badge scan');
+  r = setB(p, 'AB12CD34');
+  ok(r && r.ok && p.text('intro-badge') === 'Badge …CD34 · Try 1 of 2' && G.rows('Tries') === 1, 'a scan: ' + JSON.stringify(r) + ' ' + p.text('intro-badge') + ', Tries rows ' + G.rows('Tries'));
+  r = begin(p);
+  ok(r && r.ok && r.counted && r.shiftNo === 1 && G.rows('Tries') === 2, 'Start spends try 1 ' + JSON.stringify(r));
+  r = play(p, TEAL);
+  ok(/^C-[A-Z0-9]{6}$/.test(r.code || ''), 'game code ' + r.code);
+  m = R(p).model();
+  ok(m.state === 'locked' && m.t === 1 && m.pending === 0, 'a Teal round before a contact is not locked ' + JSON.stringify({ s: m.state, t: m.t, p: m.pending }));
+  ok(p.el('rep-gold').hidden !== false && p.el('t-gold').hidden !== false && p.text('to-ticket') === 'Unlock my merch ticket',
+    'Results: a check-in strip, or to-ticket ' + p.text('to-ticket'));
+  ok(p.text('rep-company') === '1 wrong entry got through.' && p.el('rep-save').hidden, 'company line or save line: ' + p.text('rep-company') + ' / ' + p.text('rep-save'));
+  R(p).showTicket();
+  ok(!p.el('contact').hidden && p.text('t-code') === '······', 'a locked ticket shows its code or hides the contact step');
+  contact(p, 'bob');
+  ok(p.text('contact-msg') === 'Enter an email or a @Telegram handle.' && G.contacts.sheets.Contacts.getLastRow() === 1, 'a bad contact: ' + p.text('contact-msg'));
+  p.el('contact-curator').checked = true;
+  contact(p, 'ana@example.org');
+  m = R(p).model();
+  ok(m.state === 'live' && /^C-[A-Z0-9]{6}$/.test(p.text('t-code')), 'the ticket after a contact: ' + m.state + ' ' + p.text('t-code'));
+  rows = G.contacts.sheets.Contacts.rows;
+  ok(G.contacts.sheets.Contacts.getLastRow() === 2 && rows[1][1] === 'ana@example.org' && rows[1][3] === 'yes', 'the contact row ' + JSON.stringify(rows[1]));
+  ok(clean(ls), 'localStorage holds a contact or a badge code: ' + JSON.stringify(ls.d));
+  r = begin(p);
+  ok(r && r.ok && r.shiftNo === 2, 'Start spends try 2 ' + JSON.stringify(r));
+  play(p, LOW);
+  r = begin(p);
+  ok(r && r.ok === false && r.error === 'limit', 'a third Start the same day ' + JSON.stringify(r));
+  r = begin(p, true);
+  ok(r && r.ok && r.counted === false && r.reason === 'limit', 'Play for fun after two tries ' + JSON.stringify(r));
+  play(p, PURPLE, { reason: r.reason });
+  ok(p.text('rep-tier-line') === 'Your score reached Purple, but this round wins no merch.' && p.text('rep-tries').indexOf('Both tries used today.') === 0,
+    'a fun round after two tries: ' + p.text('rep-tier-line') + ' / ' + p.text('rep-tries'));
+  ok(R(p).model().t === 1, 'a fun Purple round raised the ticket');
+  // Company line in plain words, both modes.
+  [page(new Store(), { server: G }), page(new Store())].forEach(function (pg, i) {
+    [[0, 'No wrong entry got through.'], [1, '1 wrong entry got through.'], [3, '3 wrong entries got through.']].forEach(function (c) {
+      if (i === 0) begin(pg, true);
+      play(pg, LOW, { leaks: c[0], reason: i === 0 ? 'nobadge' : '' });
+      ok(pg.text('rep-company') === c[1], (i ? 'v6' : 'badge mode') + ' company line for ' + c[0] + ': ' + pg.text('rep-company'));
+    });
+  });
+  // Late unlock from the intro, on another phone: no try spent.
+  q = page(new Store(), { server: G });
+  setB(q, 'ZZ99YY88'); begin(q); play(q, TEAL);
+  q = page(new Store(), { server: G });
+  rows = G.rows('Tries');
+  r = setB(q, 'ZZ99YY88');
+  ok(!q.el('intro-unlock').hidden && q.text('intro-unlock') === 'Unlock my Teal ticket', 'late unlock button: ' + q.text('intro-unlock'));
+  R(q).showTicket();
+  ok(R(q).model().state === 'locked', 'late unlock: the ticket is not locked');
+  contact(q, '@ana_k');
+  ok(R(q).model().state === 'live' && G.rows('Tries') === rows, 'late unlock: not live, or a try was spent');
+  // A start whose reply is lost: the next Start sends the same token, so the try is not spent twice.
+  q = page(new Store(), { server: G });
+  setB(q, 'LL11MM22');
+  G.offline = true; r = begin(q); G.offline = false;
+  ok(r && r.ok === false && r.error === 'offline' && q.text('intro-note') === 'Can’t reach the merch list. Try again, or play for fun.',
+    'an offline Start: ' + JSON.stringify(r) + ' ' + q.text('intro-note'));
+  rows = G.rows('Tries'); G.lose = true; begin(q);
+  ok(G.rows('Tries') === rows + 1, 'a start with a lost reply was not saved');
+  r = begin(q);
+  ok(r && r.ok && r.counted && r.shiftNo === 1 && G.rows('Tries') === rows + 1, 'the retried Start spent another try ' + JSON.stringify(r));
+  // A finish the server refuses (5 s round): the round wins nothing.
+  play(q, TEAL, { ms: 5000 });
+  ok(q.text('rep-save') === 'This round couldn’t be saved, so it wins no merch.', 'a refused finish: ' + q.text('rep-save'));
+  // An offline finish keeps trying, shows Try again, and saves once the list answers.
+  q = page(new Store(), { server: G });
+  setB(q, 'QQ11WW22'); begin(q);
+  G.offline = true; play(q, PURPLE);
+  ok(q.text('rep-save') === 'Not saved yet. Trying again…' && q.el('to-ticket').disabled, 'an unsaved finish: ' + q.text('rep-save'));
+  q.tick(3000); q.tick(6000);
+  ok(!q.el('rep-retry').hidden, 'no Try again while the finish is stuck: ' + q.text('rep-save'));
+  G.offline = false; q.el('rep-retry').click();
+  ok(q.el('rep-save').hidden && q.text('to-ticket') === 'Unlock my merch ticket', 'Try again did not save the finish: ' + q.text('rep-save'));
+  // A finish still unsent when the page closes goes out on the next load.
+  ls = new Store(); q = page(ls, { server: G });
+  setB(q, 'RR77TT88'); begin(q);
+  G.offline = true; play(q, GOLD); G.offline = false;
+  best = (JSON.parse(ls.getItem('kleros_devcon_curate_badge') || '{}').pending || {}).score;
+  ok(best === GOLD, 'an unsent finish is not kept on the phone');
+  q = page(ls, { server: G });
+  ok(!JSON.parse(ls.getItem('kleros_devcon_curate_badge') || '{}').pending && R(q).model().state === 'locked' && R(q).model().t === 3,
+    'an unsent finish was not sent on the next load');
+  // Paused (the Switches tab): Start refused, the title and intro say so.
+  G.tab('Switches').rows[1][1] = false; delete G.cache.switches;
+  q = page(new Store(), { server: G });
+  setB(q, 'PP33OO44');
+  ok(q.text('intro-note') === 'Merch is paused right now.', 'paused intro: ' + q.text('intro-note'));
+  r = begin(q);
+  ok(r && r.ok === false && r.error === 'paused', 'Start while paused ' + JSON.stringify(r));
+  R(q).refreshStatus(true); R(q).refreshBrief();
+  ok(q.text('ladder-fine').indexOf('Merch is paused right now. Play for fun.') === 0, 'paused title: ' + q.text('ladder-fine'));
+  G.tab('Switches').rows[1][1] = true; delete G.cache.switches;
+  // Kiosk: the badge is the identity (no cap); a locked ticket holds; idle resets and leaves nothing behind.
+  kls = new Store(); k = page(kls, { server: G, kiosk: true });
+  setB(k, 'KK55JJ66'); begin(k); play(k, GOLD);
+  ok(R(k).model().t === 3, 'a kiosk Gold round is capped: ' + R(k).model().t);
+  ok(!kls.getItem('kleros_devcon_curate_badge'), 'the kiosk stored a badge');
+  R(k).showTicket();
+  k.tick(25000);
+  ok(!k.el('contact').hidden && !k.didReset, 'a locked kiosk ticket did not hold 25 s');
+  k.tick(S.kioskIdleMs);
+  ok(k.didReset === 1 && Object.keys(kls.d).length === 0, 'the kiosk did not reset after kioskIdleMs, or kept ' + JSON.stringify(kls.d));
+  r = begin(k, true);
+  play(k, TEAL, { reason: r && r.reason });
+  ok(k.text('rep-tier-line') === 'Your score reached Teal, but this round wins no merch.' &&
+    k.text('rep-tries') === 'No badge scanned. Scan it next round to play for merch.', 'an unscanned kiosk round: ' + k.text('rep-tier-line') + ' / ' + k.text('rep-tries'));
+  // No crypto.subtle (http, old browsers): play for fun.
+  q = page(new Store(), { server: G, nocrypto: true }); R(q).renderIntro();
+  ok(q.text('intro-note') === 'This browser can’t read badges. Play for fun.', 'no crypto: ' + q.text('intro-note'));
+  // On the last booth day, a fun round never promises tomorrow (v6, per phone).
+  q = page(new Store(), { settings: function (s) { s.lastDay = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); } });
+  [0, 1, 2].forEach(function () { playShift(q, LOW); });
+  ok(q.text('rep-tries') === 'Both tries used today.', 'the last day promises new tries: ' + q.text('rep-tries'));
+  q = page(new Store(), { settings: function (s) { s.lastDay = '2099-12-31'; } });
+  [0, 1, 2].forEach(function () { playShift(q, LOW); });
+  ok(q.text('rep-tries') === 'Both tries used today. New tries tomorrow.', 'v6 fun round before the last day: ' + q.text('rep-tries'));
+  console.log('Badge mode\n  ' + n + ' cases (scan, tries, locked ticket and contact, late unlock, lost replies, refused and unsent finishes, paused, kiosk)');
+}
+
+// ---- badge.js ----
+// The shared badge module, loaded for real: ids stay the v6 desk's, Kleros's own links and ticket codes are not
+// badges; both pages load it (defer, before the scripts that use it) and neither loads jsQR up front.
+function checkBadgeJs() {
+  var n = 0, B = BADGE;
+  function ok(cond, msg) { n++; if (!cond) fail('badge.js: ' + msg); }
+  if (!B) return fail('badge.js: window.CurateBadge is missing');
+  ['endpoint', 'can', 'id', 'ok', 'tail', 'hash', 'read', 'post', 'scan', 'loadJsQR'].forEach(function (f) { ok(typeof B[f] === 'function', f + ' is missing'); });
+  ok(B.SALT === 'kleros-devcon-badge|', 'SALT changed: the desk and the game would hash apart from the v6 desk');
+  [['?id=AB12CD34', 'AB12CD34'], ['https://x/t/AB12CD34', 'AB12CD34'], ['AB12CD34', 'AB12CD34'], [' ab12-cd34 ', 'AB12CD34'],
+    ['https://x/ticket?ref=XYZ9', 'TICKETXYZ9'], ['https://x/u/abc12/badge', 'UABC12BADGE']].forEach(function (c) {
+    ok(B.id(c[0]) === c[1], 'id(' + c[0] + ') is ' + B.id(c[0]) + ', want ' + c[1]);
+  });
+  ['https://devcon.kleros.io/curate/', 'KABC123', 'BADGEONLY', '12345678', ''].forEach(function (raw) {
+    ok(!B.ok(B.id(raw), raw), raw + ' passes as a badge');
+  });
+  ok(B.ok('AB12CD34', 'AB12CD34') && B.tail('AB12CD34') === 'CD34', 'AB12CD34 is not a badge, or its tail');
+  ok(badgeHash('AB12CD34') === crypto.createHash('sha256').update('kleros-devcon-badge|AB12CD34').digest('hex'), 'hash');
+  [['site/curate/index.html', ['settings.js', 'badge.js', 'rewards.js', 'earn.js', 'game.js']],
+    ['site/staff/index.html', ['settings.js', 'badge.js', 'desk.js']]].forEach(function (pg) {
+    var src = fs.readFileSync(path.join(ROOT, pg[0]), 'utf8'), tags = src.match(/<script\b[^>]*\bsrc="[^"]*"[^>]*>/g) || [],
+      order = tags.map(function (t) { return /src="([^"]*)"/.exec(t)[1].split('/').pop(); });
+    ok(tags.every(function (t) { return /\sdefer\b/.test(t) && /src="\//.test(t); }), pg[0] + ': every script is defer and root-absolute');
+    ok(pg[1].every(function (f, i) { return order.indexOf(f) > -1 && (!i || order.indexOf(f) > order.indexOf(pg[1][i - 1])); }),
+      pg[0] + ': scripts out of order: ' + order.join(', '));
+    ok(order.indexOf('jsQR.js') < 0, pg[0] + ': jsQR loads up front');
+  });
+  ok(!fs.existsSync(path.join(STAFF, 'vendor')), 'site/staff/vendor is back (jsQR lives in /curate/vendor/)');
+  console.log('badge.js\n  ' + n + ' cases (ids, badge test, hash salt, script order in both pages)');
 }
 
 // ---- GL watchdog ----
@@ -1185,10 +1769,18 @@ checkSchema();
 checkDealing();
 checkLint();
 checkCopy();
+try { checkServer(); } catch (e) { fail('Code.gs: the server checks threw ' + e.message); }
 try { checkRewards(); } catch (e) { fail('rewards.js: the ticket checks threw ' + e.message); }
+try { checkBadgeMode(); } catch (e) { fail('badge mode: the checks threw ' + e.stack); }
+try { checkBadgeJs(); } catch (e) { fail('badge.js: the checks threw ' + e.message); }
 checkWatchdog();
 checkSizes();
 if (SIM) simulate();
+// Not automated (spec 9.G): check these by hand before the booth opens.
+console.log('Manual QA before opening\n' +
+  '  the intro, up to Start / Scan your badge, fits above the fold at 375×548\n' +
+  '  a badge scan on an iPhone (jsQR) and on an Android phone (BarcodeDetector)\n' +
+  '  a full kiosk cycle on the tablet: scan, round, locked ticket, unlock, reset, scan');
 warnings.forEach(function (w) { console.log('warn  ' + w); });
 if (errors.length) {
   errors.forEach(function (e) { console.log('FAIL  ' + e); });

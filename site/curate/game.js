@@ -1,6 +1,8 @@
-// Curate game engine: the app picker, practice, the round and the hand-off to the report. Internal names still
-// say "shift"; only the copy says round. One rAF loop drives the clock and drags. rules.js judges, objects.js
-// paints, rewards.js owns storage, report and ticket (never localStorage here). textContent only.
+// Curate game engine: the app picker, the intro (rule, two example entries, the badge scanner sheet), the round
+// and the hand-off to the report. Internal names still say "shift"; only the copy says round. One rAF loop
+// drives the clock and drags. rules.js judges, objects.js paints, rewards.js owns storage, the server, the
+// intro's start area, report and ticket (never localStorage or the network here; CurateBadge only to scan).
+// textContent only.
 (function () {
   var S = window.CURATE_SETTINGS, D = window.CURATE_DECKS, R = window.CurateRules;
   var KIOSK = /[?&]kiosk=1\b/.test(location.search);
@@ -23,9 +25,12 @@
   function signed(n) { return (n < 0 ? MINUS : '+') + fmt(n); }
   function Rw() { return window.CurateRewards; }
   function O() { return window.CurateObjects; }
-  // Calls into objects.js / rewards.js, which may be missing while packages are built apart.
+  // objects.js / rewards.js may be missing (or lag a function) while packages are built apart.
   function ob(fn, a, b, c) { var o = O(); return o && typeof o[fn] === 'function' ? o[fn](a, b, c) : null; }
-  function rw(fn, a, b) { var r = Rw(); return r ? r[fn](a, b) : null; }
+  function rw(fn, a, b, c) { var r = Rw(); return r && typeof r[fn] === 'function' ? r[fn](a, b, c) : null; }
+  function has(fn) { var r = Rw(); return !!(r && typeof r[fn] === 'function'); }
+  // Badge mode: rewards.js has a server endpoint (settings server.endpoint); else v6, per phone.
+  function online() { return !!(Rw() && Rw().online); }
   // Restarts a one-shot CSS animation class (none under reduced motion, so skip the forced reflow).
   function bump(el, cls) { if (!el || RM) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
   function focusEl(el) { if (!el) return; try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
@@ -52,7 +57,7 @@
 
   // ---- State ----
   var deckId = '', deck = null, relaxed = false;
-  var mode = 'brief';        // brief | practice | between | banner | shift | ended
+  var mode = 'brief';        // brief | intro | banner | shift | ended
   var run = [], idx = 0, cards = [], score = null, info = null, total = 0;
   var clockOn = false, elapsed = 0, lastT = 0, paused = false;
   var lastDecide = -1e9, landT = -1e9;
@@ -60,19 +65,20 @@
   var said30 = false, said10 = false;
   var raf = 0, drag = null, press = null, flying = null, keyboard = false;
   var picking = null, pickT = -1e9, pickText = '';   // picking: the top card while in pick mode
-  var pStep = 0, pT0 = 0, pHinted = false;
   var sayT = 0;
   var announcedTier = 0;     // highest tier shown this shift: re-crossing a threshold stays quiet
   var focusFirst = false;    // focus the next card that lands (after Start), so focus never sits on <body>
-  var practiceNext = false;  // Practice again: one practice card before the next app picked
+  // began: begin()'s answer { counted, shiftNo, perDay, reason }; beginning: one in flight.
+  var began = null, beginning = false, beginGen = 0;
 
   // ---- Views and announcements ----
-  var VIEWS = { brief: 'brief', play: 'play', report: 'report', ticket: 'ticketv' };
+  var VIEWS = { brief: 'brief', intro: 'intro', play: 'play', report: 'report', ticket: 'ticketv' };
   var curView = '';
   function showView(view) {
     var k, b = document.body;
-    // Any view change, timer-driven ones included, shuts a How it works sheet left open.
-    if (view !== curView) closeHow();
+    // Any view change, timer-driven ones too, shuts How it works and the scanner.
+    if (view !== curView) { closeHow(); closeScanner(); }
+    if (view !== 'intro') idleOff();
     curView = view;
     for (k in VIEWS) show($(VIEWS[k]), k === view);
     // Keep modifier classes, replace the v-* one.
@@ -101,10 +107,10 @@
     deckId = id && D.hasOwnProperty(id) ? id : firstDeck();
     deck = D[deckId];
   }
-  // rewards.js answers any practiced.* key with "practised any app on this phone" (never in kiosk).
-  function practised() { return !KIOSK && !!rw('getPref', 'practiced.any'); }
   function renderBrief() {
-    var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d, pa;
+    var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d;
+    // The lead promises the round length (longer with More time).
+    txt('brief-lead', 'Each entry is right, or has one error. Spot the errors in ' + secs + ' s.');
     if (rb) {
       rb.textContent = 'More time: ' + (relaxed ? 'On' : 'Off');
       rb.setAttribute('aria-pressed', relaxed ? 'true' : 'false');
@@ -117,9 +123,6 @@
       d = D[metas[i].getAttribute('data-deck')];
       if (d && slot(metas[i], 'meta')) slot(metas[i], 'meta').textContent = deckEntries(d) + ' entries · ' + secs + ' s';
     }
-    show('practice-again', practised());
-    pa = $('practice-again');
-    if (pa) pa.setAttribute('aria-pressed', practiceNext ? 'true' : 'false');
   }
   // ---- App picker ----
   // One card per deck, in CURATE_DECKS order, built at boot. The picture is decoration: a photo, a flag, or a
@@ -130,11 +133,13 @@
     o.shape = 'coin';
     return ob('create', o, { size: 'card' });
   }
-  function pickPic(d) {
-    var p = d.pick || {}, el = null, i, c;
+  // p: an app card's pick or an example's picture: img (+ pos), flag, coins or coin.
+  function picOf(p) {
+    var el = null, i, c;
     if (p.img) {
       el = document.createElement('img');
       el.src = p.img; el.alt = ''; el.decoding = 'async'; el.draggable = false;
+      if (p.pos) el.style.objectPosition = p.pos;
     } else if (p.flag) el = ob('_flag', p.flag, 240, 160);
     else if (p.coins) {
       el = document.createElement('span');
@@ -156,23 +161,21 @@
       if (slot(el, 'need')) slot(el, 'need').textContent = (d.pick && d.pick.need) || '';
       if (slot(el, 'sub')) slot(el, 'sub').hidden = true;   // v6: name, need and meta only
       ps = slot(el, 'pic');
-      pic = ps ? pickPic(d) : null;
+      pic = ps ? picOf(d.pick || {}) : null;
       if (pic) ps.appendChild(pic);
       box.appendChild(el);
-      // First visit (and kiosk): the practice photo loads while the title screen is read.
-      if (!practised() && d.practice && d.practice[0]) ob('preload', d.practice[0].obj);
+      // The intro's wrong example (practice[0]) loads while the title is read.
+      if (d.practice && d.practice[0]) ob('preload', d.practice[0].obj);
     }
   }
-  // A tap on an app card picks it and starts (practice first the first time, or when armed).
+  // A tap on an app card picks it and opens its intro (the rule, two examples, Start).
   function onPick(e) {
-    var b = e.target.closest ? e.target.closest('.pick[data-deck]') : null, p;
+    var b = e.target.closest ? e.target.closest('.pick[data-deck]') : null;
     if (!b || mode !== 'brief') return;
     keyboard = e.detail === 0;
     setDeck(b.getAttribute('data-deck'));
     rw('setPref', 'deck', deckId);
-    p = practiceNext;
-    practiceNext = false;
-    startFlow(p);
+    showIntro();
   }
   // ---- Photo credits ----
   // How it works credits every photo. https links only; plain text in kiosk (no docs link there).
@@ -208,6 +211,231 @@
     relaxed = !relaxed;
     rw('setPref', 'relaxed', relaxed);
     renderBrief();
+  }
+  // Focus the first visible, enabled control of a list.
+  function focusOn(ids) {
+    var i, el;
+    for (i = 0; i < ids.length; i++) { el = $(ids[i]); if (el && !el.hidden && !el.disabled) { focusEl(el); return; } }
+  }
+
+  // ---- Intro ----
+  // After an app card or Play again: the rule, one correct and one wrong example from that app (wrong part
+  // marked, one-line reason), then rewards.js's start area. No practice: pick mode asks for the wrong part.
+  // An example's picture, drawn like an app card's (decoration).
+  function exPic(o) {
+    return o ? picOf(o.shape === 'photo' ? { img: o.src, pos: o.pos } : o.shape === 'flag' ? { flag: o.flag } : { coin: o }) : null;
+  }
+  // The tag is tied to the swipe and coloured like the title hints.
+  function exCard(item, good) {
+    var el = clone('tpl-ex'), list = listOf(item), f = list.fields, rows = slot(el, 'rows'), pic = slot(el, 'pic');
+    var tag = slot(el, 'tag'), vals = [], i, key, li, p, arrow;
+    el.setAttribute('data-ok', good ? 'true' : 'false');
+    for (i = 0; i < f.length; i++) {
+      key = f[i][0];
+      vals.push(String(item.f[key]));
+      if (key === list.objField) continue;   // the picture's part has no text row
+      li = document.createElement('li');
+      li.setAttribute('data-f', key);
+      li.appendChild(document.createElement('span')).textContent = String(item.f[key]);   // the mark sits on the span, the · outside it
+      if (!good && item.bad === key) li.className = 'is-bad';
+      if (rows) rows.appendChild(li);
+    }
+    if (pic) {
+      p = exPic(item.obj);
+      if (p) pic.appendChild(p);
+      if (!good && item.bad === list.objField) pic.classList.add('is-bad');
+    }
+    if (tag) {
+      arrow = document.createElement('span');
+      arrow.setAttribute('aria-hidden', 'true');
+      arrow.textContent = good ? '→' : '←';
+      tag.className = 'ex-tag ' + (good ? 'g-r' : 'g-l');
+      if (good) { tag.appendChild(document.createTextNode('Correct ')); tag.appendChild(arrow); }
+      else { tag.appendChild(arrow); tag.appendChild(document.createTextNode(' Wrong')); }
+    }
+    fill(el, 'why', good ? (f.length === 4 ? 'All four match.' : 'All parts match.') : item.why || '');
+    el.setAttribute('aria-label', (good ? 'Correct example: ' : 'Wrong example: ') + vals.join(', ') +
+      (good ? '' : '. ' + (item.why || '')));
+    return el;
+  }
+  function renderExamples() {
+    var box = $('intro-ex'), ex = R && typeof R.intro === 'function' ? R.intro(deckId) : null;
+    if (!box) return;
+    box.textContent = '';
+    // A help, never a blocker: without examples the rule still shows.
+    try {
+      if (ex && ex.good && ex.bad && $('tpl-ex')) { box.appendChild(exCard(ex.good, true)); box.appendChild(exCard(ex.bad, false)); }
+    } catch (e) { box.textContent = ''; if (window.console) console.error(e); }
+    box.hidden = !box.firstChild;
+  }
+  function showIntro() {
+    var k, first = null;
+    freshPlay();
+    mode = 'intro'; began = null; beginning = false; beginGen++; score = null; info = null;
+    for (k in deck.lists) if (deck.lists.hasOwnProperty(k)) { first = deck.lists[k]; break; }
+    txt('intro-kicker', deck.client);
+    txt('intro-rule', first ? first.policy : '');
+    renderExamples();
+    showView('intro');
+    park('intro-title');
+    idleArm();
+    rw('renderIntro');
+  }
+
+  // ---- Kiosk idle on the intro ----
+  // A tablet left on the intro goes back to the title after kioskIdleMs: no visitor inherits a scanned badge.
+  var idleT = 0;
+  function idleOff() { if (idleT) clearTimeout(idleT); idleT = 0; }
+  function idleArm() {
+    idleOff();
+    if (!KIOSK || curView !== 'intro') return;
+    idleT = setTimeout(function () { idleT = 0; if (curView === 'intro') reset(); }, S.kioskIdleMs || 60000);
+  }
+  function idleNudge() { if (KIOSK && curView === 'intro') idleArm(); }
+
+  // ---- Starting a round ----
+  // rewards.js decides if it counts (badge mode: the server spends the try on Start, never on a scan; v6: at the
+  // clock start). Not ok: the intro stays, and rewards.js already says why.
+  function begin(fun) {
+    var gen;
+    if (mode !== 'intro' || beginning) return;
+    if (!has('begin')) { began = v6Began(); startFlow(); return; }
+    beginning = true;   // set first: the answer may come back synchronously
+    gen = ++beginGen;
+    rw('begin', deckId, { fun: !!fun }, function (r) {
+      if (gen !== beginGen) return;   // an intro since left: rewards.js keeps the try for the next Start
+      beginning = false;
+      if (mode !== 'intro' || curView !== 'intro') return;   // left meanwhile
+      if (r && r.ok) { began = r; startFlow(); }
+      else focusOn(['intro-unlock', 'intro-go', 'intro-scan', 'intro-fun']);
+    });
+  }
+  // rewards.js without begin(): canCount()'s answer, spending nothing.
+  function v6Began() {
+    var c = rw('canCount') || {};
+    return { ok: true, counted: !!c.counted, shiftNo: c.next || 0, perDay: c.perDay || S.countedPerDay || 2, reason: c.reason || '' };
+  }
+  // After a failed start #intro-scan reads Try again: it retries the start.
+  function onIntroScan(e) {
+    keyboard = e.detail === 0;
+    if (online() && /again/i.test(($('intro-scan') || {}).textContent || '')) begin(false); else openScanner();
+  }
+
+  // ---- Badge scanner sheet ----
+  // A code goes to rewards.js setBadge(), which answers after the badge's status, so the intro shows its state
+  // when the sheet closes. Never spends a try. CurateBadge is read at call time (the check harness swaps it).
+  var scanner = null, scanGen = 0;
+  var NOTBADGE = 'That’s not a Devcon badge code. Use the code on your lanyard badge.';
+  var CAM = { nocamera: 'No camera here.', blocked: 'Camera blocked.', noreader: 'Can’t load the scanner.' };
+  // badge.typed false: the printed code isn't the QR's id, so only scans count.
+  function typedOk() { return !(S.badge && S.badge.typed === false); }
+  // The camera and its framing hint come and go together.
+  function cam(on) { show('badge-cam', on); show('badge-hint', on); }
+  function scanOpen() { var b = $('badge'); return !!(b && !b.hidden); }
+  function stopScan() {
+    var s = scanner;
+    scanner = null; scanGen++;   // the old scan's late callbacks are ignored
+    if (s && typeof s.stop === 'function') { try { s.stop(); } catch (e) {} }
+  }
+  function startScan() {
+    var B = window.CurateBadge, gen, over = false, s;
+    stopScan();
+    gen = scanGen;
+    cam(true);
+    if (!B || typeof B.scan !== 'function') { scanFailed('noreader'); return; }
+    s = B.scan({ video: $('badge-video'), facing: KIOSK ? 'user' : 'environment',
+      onCode: function (raw) { over = true; if (gen === scanGen) { scanner = null; useCode(raw, false); } },
+      onError: function (kind) { over = true; if (gen === scanGen) { scanner = null; scanFailed(kind); } },
+      onReady: function () { if (gen === scanGen) idleArm(); },
+      // Not a badge (the poster's QR): say so, the camera keeps reading.
+      skip: function (raw) { var no = B.ok && !B.ok(B.id(raw), raw); if (no && gen === scanGen) txt('badge-msg', NOTBADGE); return no; } });
+    // Callbacks may run before scan() returns.
+    if (!over && gen === scanGen) scanner = s;
+  }
+  function openScanner() {
+    if (curView !== 'intro' || scanOpen()) return;
+    show('badge', true);
+    show('badge-form', false);
+    show('badge-type', typedOk());
+    show('badge-cancel', true);
+    txt('badge-msg', '');
+    if ($('badge-code')) $('badge-code').value = '';
+    busyScan(false);
+    startScan();
+    if (scanOpen()) focusEl($('badge-form') && !$('badge-form').hidden ? $('badge-code') : $('badge-cancel'));
+  }
+  // Any view change closes it too: no camera off screen, no code kept.
+  function closeScanner() {
+    stopScan();
+    show('badge', false);
+    if ($('badge-code')) $('badge-code').value = '';
+    txt('badge-msg', '');
+  }
+  function cancelScanner() {
+    closeScanner();
+    focusOn(['intro-scan', 'intro-go', 'intro-fun']);
+  }
+  // Typed codes (decision f): a made-up one only buys rounds the desk never pays out.
+  function showForm() {
+    stopScan();
+    cam(false);
+    show('badge-type', false);
+    show('badge-form', true);
+    focusEl($('badge-code'));
+  }
+  function scanFailed(kind) {
+    if (!scanOpen()) return;
+    if (kind === 'hidden') { closeScanner(); return; }
+    cam(false);
+    kind = CAM[kind] ? kind : 'noreader';
+    if (typedOk()) { txt('badge-msg', CAM[kind] + ' Type the code on your badge.'); showForm(); return; }
+    txt('badge-msg', kind === 'blocked' ? 'Camera blocked. Allow the camera, or play on the booth tablet.' : CAM[kind] + ' Play on the booth tablet.');
+    show('badge-form', false); show('badge-type', false);
+    focusEl($('badge-cancel'));
+  }
+  function busyScan(on) { var b = $('badge-use'); if (b) b.disabled = !!on; }
+  function useCode(raw, typed) {
+    if (!has('setBadge')) { closeScanner(); return; }
+    busyScan(true);
+    rw('setBadge', raw, function (r) {
+      var c = $('badge-code');
+      busyScan(false);
+      if (!scanOpen()) return;   // cancelled meanwhile
+      if (r && r.error === 'notbadge') {
+        txt('badge-msg', NOTBADGE);
+        if (!typed) startScan();   // scans skip non-badge codes already (skip below), so this never loops
+        else if (c) { focusEl(c); if (c.select) c.select(); }
+        return;
+      }
+      closeScanner();   // ok, nocrypto or else: the intro shows the state
+      focusOn(['intro-unlock', 'intro-go', 'intro-fun']);
+    });
+  }
+  function onBadgeForm(e) {
+    var c = $('badge-code'), b = $('badge-use');
+    e.preventDefault();
+    if (b && b.disabled) return;
+    useCode(c ? c.value : '', true);
+  }
+  // A modal sheet: Esc cancels, Tab stays on its visible controls.
+  function scanKey(e) {
+    var f = $('badge-form'), ids = ['badge-type', 'badge-cancel'], list = [], i, el;
+    if (e.key === 'Escape') { e.preventDefault(); cancelScanner(); return; }
+    if (e.key !== 'Tab') return;
+    if (f && !f.hidden) ids = ['badge-code', 'badge-use'].concat(ids);
+    for (i = 0; i < ids.length; i++) { el = $(ids[i]); if (el && !el.hidden) list.push(el); }
+    if (list.length) trapTab(e, list);
+  }
+
+  // ---- Privacy notice ----
+  // Links to #curate-privacy open the <details> in place (readable on the booth tablet too).
+  function onDocClick(e) {
+    var a = e.target && e.target.closest ? e.target.closest('a[href="#curate-privacy"]') : null, d = $('curate-privacy');
+    if (!a || !d) return;
+    e.preventDefault();
+    d.open = true;
+    try { d.scrollIntoView({ block: 'start', behavior: RM ? 'auto' : 'smooth' }); } catch (err) { d.scrollIntoView(); }
+    focusEl(d.querySelector('summary'));
   }
   // ---- Cards ----
   function listOf(item) { return deck.lists[item.list]; }
@@ -336,10 +564,6 @@
   function enterPick() {
     var top = cards[0], ps, i, names = [], b, a = document.activeElement;
     if (!top || picking || !canPlay() || now() - lastDecide < GUARD || now() - landT < GUARD) return false;
-    if (mode === 'practice') {
-      if (pStep !== 0) return false;
-      if (!top._item.bad) { coach(P_REAL); return false; }
-    }
     ps = parts(top);
     if (!ps.length) return false;
     picking = top; pickT = now();
@@ -361,7 +585,6 @@
     ob('state', top._obj, 'challenge');
     pickButtons(true);
     say('Pick the wrong part: ' + names.join(', ') + '. Escape cancels.');   // the banner says the question
-    if (mode === 'practice') { pT0 = now(); pHinted = false; coach('Now tap the wrong part.'); }
     // Focus never stays on a hidden button.
     if (keyboard) focusEl(ps[0]);
     else if (a === $('b-chal') || a === $('b-keep')) focusEl(top);
@@ -378,7 +601,6 @@
     for (i = 0; i < ps.length; i++) {
       ps[i].removeAttribute('data-n');
       ps[i].removeAttribute('aria-keyshortcuts');
-      ps[i].classList.remove('hint');
       if (ps[i].tagName === 'BUTTON') { ps[i].setAttribute('tabindex', '-1'); ps[i].setAttribute('aria-disabled', 'true'); }
       else { ps[i].setAttribute('role', 'img'); ps[i].removeAttribute('tabindex'); }   // inert again
     }
@@ -392,7 +614,6 @@
     if (!picking) return;
     exitPick(true);
     say('Cancelled.');
-    if (mode === 'practice') practiceCard();
   }
   // A tap or key on a part: Wrong, pointing at that part.
   function choosePart(key) {
@@ -509,7 +730,7 @@
   function decide(action, picked) {
     var top = cards[0], t = now(), item, o, res, f, extra = [], ti, a = document.activeElement, held;
     if (!top || paused || flashOn) return false;
-    if ((mode !== 'shift' && mode !== 'practice') || t - lastDecide < GUARD) return false;
+    if (mode !== 'shift' || t - lastDecide < GUARD) return false;
     if (action === 'challenge' ? picking !== top || !picked : !!picking) return false;
     lastDecide = t;
     // The departing card goes inert: focus in it (a tapped part), or on <body> after a pick (Safari never
@@ -517,7 +738,6 @@
     held = top.contains(a) || (action === 'challenge' && (!a || a === document.body));
     if (picking) exitPick(false);
     if (held) focusFirst = true;   // topLanded() focuses the next card
-    if (mode === 'practice') { f = practiceDecide(top, action, picked); if (f && held) park('play'); return f; }
     item = top._item;
     o = R.judge(item, action, picked);
     res = R.apply(score, item, o);
@@ -526,8 +746,8 @@
     if (res.streakBonus) extra.push(signed(res.streakBonus) + ' streak');
     if (res.tierTo > announcedTier) {
       ti = rw('tierInfo', res.tierTo);
-      // A just-for-fun round earns no merch, so it announces no unlock.
-      if (ti && info && info.counted && !(KIOSK && res.tierTo > S.kioskMaxTier)) extra.push(ti.name + ' unlocked');
+      // A just-for-fun round announces no unlock; only a v6 tablet caps at kioskMaxTier (decision j).
+      if (ti && info && info.counted && !(KIOSK && !online() && res.tierTo > S.kioskMaxTier)) extra.push(ti.name + ' unlocked');
       announcedTier = res.tierTo;
     }
     f.extra = extra.join(' · ');
@@ -568,72 +788,6 @@
     if (f.el.parentNode) f.el.parentNode.removeChild(f.el);
   }
 
-  // ---- Practice ----
-  // One untimed card that cannot be failed: a wrong move springs it back with a coach line. It is the deck's
-  // first practice item, a fake (a good one teaches Correct). pStep is 0 while it is live.
-  var P_REAL = 'This one is real. Tap ✓ Correct.';
-  // The ✓/✗ glyphs are hidden from screen readers, which read the word after them anyway.
-  function coach(s) {
-    var el = $('coach'), parts = String(s).split(/([\u2713\u2717])/), i, sp;
-    if (!el) return;
-    el.textContent = '';
-    for (i = 0; i < parts.length; i++) {
-      if (i % 2) { sp = document.createElement('span'); sp.setAttribute('aria-hidden', 'true'); sp.textContent = parts[i]; el.appendChild(sp); }
-      else if (parts[i]) el.appendChild(document.createTextNode(parts[i]));
-    }
-  }
-  function pItem() { return (deck.practice || [])[0] || {}; }
-  // The 4 s idle hint (v6 §6): the list's policy, else the item's own hint, the deck's coach.fact or its why.
-  function coachFact() {
-    var p = pItem(), l = p.list && deck.lists[p.list];
-    return (l && l.policy) || p.hint || (deck.coach || {}).fact || p.why || '';
-  }
-  function practiceCard() {
-    pT0 = now(); pHinted = false;
-    coach(pItem().bad ? 'Something here is wrong. Tap ✗ Wrong.' : P_REAL);
-  }
-  // After 4 s idle in pick mode the wrong part pulses and the coach gives the hint.
-  function practiceFrame(t) {
-    var top = cards[0], marks, i;
-    if (pStep !== 0 || pHinted || !top || picking !== top || !top._item.bad || t - pT0 < 4000) return;
-    pHinted = true;
-    marks = top.querySelectorAll('[data-f="' + top._item.bad + '"]');
-    for (i = 0; i < marks.length; i++) marks[i].classList.add('hint');
-    coach(coachFact());
-  }
-  function practiceDecide(top, action, picked) {
-    var item = top._item, o;
-    if (pStep !== 0) return false;
-    if (item.bad && action !== 'challenge') { coach('Look again. Something here is wrong.'); return false; }
-    if (!item.bad && action === 'challenge') { coach(P_REAL); return false; }
-    o = R.judge(item, action, picked);
-    flash(verdict(o, item, picked));
-    if (o.kind === 'catch') buzz(12);
-    fly(top, action === 'challenge' ? -1 : 1, o);
-    pStep = 1;
-    coach(o.evidence === 'wrong' ? 'Almost. That’s how it works.' : 'Nice. That’s how it works.');
-    cards.shift(); idx++;   // empty arena until the round
-    endPractice(true);
-    return true;
-  }
-  function startPractice() {
-    mode = 'practice';
-    run = (deck.practice || []).slice(0, 1); idx = 0; pStep = 0; score = null;
-    if (!run.length) { beginShift(); return; }
-    body('is-practice', true);
-    show('practice-bar', true); show('coach', true);
-    txt('prog', '');   // practice is not one of the 10
-    hudScore(0); hudClock(total * 1000);
-    fillStack(); topLanded(); practiceCard();
-    startLoop();
-  }
-  // Practice counts as done once on this phone, for every app; kiosk never stores it. After the flash the
-  // coach line stays a moment, then the round starts.
-  function endPractice(done) {
-    if (!KIOSK) rw('setPref', 'practiced.any', true);
-    mode = 'between';
-    if (done) afterFlash(function () { later(beginShift, 1200); }); else beginShift();
-  }
   // ---- Shift flow ----
   function banner(text, ms, then) {
     var b = $('banner');
@@ -645,31 +799,31 @@
     exitPick(false);   // a card left in pick mode goes with the stack; the action bar comes back
     clearStack();
     drag = null; paused = false; clockOn = false;
-    body('is-paused', false); body('is-practice', false);
+    body('is-paused', false);
     show('paused', false); show('banner', false);
     killFlash();
     if ($('toasts')) $('toasts').textContent = '';
     edges(0, 0);
   }
-  // App card → (practice) → round. Practice: first time on this phone, when armed, always in kiosk.
-  function startFlow(forcePractice) {
+  // Intro Start (begin() answered) → mission banner → Go → round.
+  function startFlow() {
     var k;
     freshPlay();
     total = relaxed ? S.relaxedSeconds : S.seconds;
     hudClock.s = -1;
     txt('client-name', deck.client);
-    // The HUD shows this app's list while practice or the banners run, not the last app's.
+    // The HUD shows this app's list while the banners run, not the last app's.
     for (k in deck.lists) if (deck.lists.hasOwnProperty(k)) { txt('list-name', deck.lists[k].name); txt('policy', deck.lists[k].policy); break; }
+    if (!began) began = v6Began();   // a start that skipped the intro (the hidden #start)
     showView('play');
-    focusFirst = true;   // Start is gone: the first card that lands takes focus
-    if (forcePractice || !practised()) startPractice(); else beginShift();
+    focusFirst = true;   // the first card that lands takes focus
+    beginShift();
   }
   function beginShift() {
     freshPlay();
     mode = 'banner';
     // The banner has no control: focus waits on #play, then moves to the first card when it lands.
     park('play'); focusFirst = true;
-    show('practice-bar', false); show('coach', false);
     run = R.buildRun(deckId, rw('lastIds', deckId) || []).items; idx = 0;
     rw('saveLastIds', deckId, run.map(function (x) { return x.id; }));
     score = R.newScore(); announcedTier = 0; info = null; elapsed = 0;
@@ -680,12 +834,12 @@
     // The app's mission for 900 ms, then Go.
     if (deck.copy && deck.copy.mission) { say(deck.copy.mission); banner(deck.copy.mission, 900, go); } else go();
   }
-  // v6 §4: the Go banner says which counted try this is (rewards.js counts; startShift spends it below).
+  // The Go banner names the counted try from begin()'s answer; a v6 booth tablet just says Go.
   function goText() {
-    var c = rw('canCount'), per = (c && c.perDay) || S.countedPerDay || 2;
-    if (!c || c.reason === 'kiosk') return 'Go!';
-    if (!c.counted) return 'Just for fun · Go!';
-    return 'Try ' + (c.next || per - c.left + 1) + ' of ' + per + ' · Go!';
+    var b = began, per = (b && b.perDay) || S.countedPerDay || 2;
+    if (!b || b.reason === 'kiosk') return 'Go!';
+    if (!b.counted) return 'Just for fun · Go!';
+    return 'Try ' + (b.shiftNo || 1) + ' of ' + per + ' · Go!';
   }
   function go() {
     var g;
@@ -733,7 +887,9 @@
                 endedBy: by, final: s.final, raw: s.raw, timeBonus: s.timeBonus || 0, reviewed: s.reviewed,
                 entries: run.length, caught: s.caught, fakesSeen: s.fakesSeen, listed: s.listed, goodsSeen: s.goodsSeen,
                 evidence: s.evidence, wrong: s.wrong, leaks: s.leaks, trust: s.trust, bestStreak: s.bestStreak,
-                misses: s.misses, at: Date.now() };
+                misses: s.misses, at: Date.now(),
+                // why a round was just for fun (rewards.js reads it only here)
+                reason: i.counted ? '' : (i.reason || (began && began.reason) || '') };
     freshPlay();
     mode = 'ended';
     say('Round over. ' + fmt(s.final) + ' points.');
@@ -742,9 +898,9 @@
   // Kiosk "next curator", and a clean slate: back to the brief with fresh state.
   function reset() {
     freshPlay();
-    mode = 'brief'; score = null; info = null; run = []; idx = 0; practiceNext = false;
+    mode = 'brief'; score = null; info = null; run = []; idx = 0; began = null; beginning = false; beginGen++;
     if (KIOSK) { relaxed = false; setDeck(firstDeck()); } else loadPrefs();
-    closeHow();
+    closeHow(); closeScanner(); idleOff();
     goBrief(true);
   }
   // A How it works sheet left open must not cover the next title screen.
@@ -765,14 +921,13 @@
   function tick(t) {
     var dt;
     raf = 0;
-    if (paused || document.hidden || !/^(practice|between|banner|shift)$/.test(mode)) return;
+    if (paused || document.hidden || !/^(banner|shift)$/.test(mode)) return;
     dt = lastT ? Math.min(t - lastT, 1000) : 0;
     lastT = t;
     if (drag && drag.dirty) dragFrame();
     // The clock also stops under the flash (v6 §2: fair play, and the sim's timing stays valid).
     if (mode === 'shift' && clockOn && !flashOn) { elapsed += dt; shiftFrame(); }
-    if (mode === 'practice') practiceFrame(t);
-    if (!raf && /^(practice|between|banner|shift)$/.test(mode)) raf = requestAnimationFrame(tick);
+    if (!raf && /^(banner|shift)$/.test(mode)) raf = requestAnimationFrame(tick);
   }
   // Only the round clock runs: no per-card window, no auto-listing, no rush toast.
   function shiftFrame() {
@@ -786,7 +941,7 @@
   // Pointer Events on #stack. Taps stay native clicks (rows are real buttons); a drag starts past 8 px of
   // mostly horizontal travel and captures the pointer. Moves are batched into the rAF loop. In pick mode a press
   // is only tracked, never dragged.
-  function canPlay() { return (mode === 'shift' || mode === 'practice') && !paused && !flashOn; }
+  function canPlay() { return mode === 'shift' && !paused && !flashOn; }
   function onDown(e) {
     var top = cards[0], t = now();
     keyboard = false;
@@ -888,9 +1043,10 @@
   function onKey(e) {
     var k = e.key, top = cards[0], a = document.activeElement, part;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (scanOpen()) { scanKey(e); return; }   // the badge scanner sheet (intro only) takes the keys first
     // Any key skips the flash and does nothing else (Tab still moves focus).
     if (flashOn) { if (k !== 'Tab') { e.preventDefault(); if (!e.repeat) skipFlash(); } return; }
-    if (!/^(practice|between|banner|shift)$/.test(mode)) return;
+    if (!/^(banner|shift)$/.test(mode)) return;
     if ($('err') && !$('err').hidden) return;
     // A held key acts once: no decision bursts, no pause/resume flicker, no evidence flicker.
     if (e.repeat && k !== 'Tab') {
@@ -931,12 +1087,20 @@
   function on(id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); }
   function wire() {
     var st = $('stack');
-    // The v4 shell keeps #start hidden; the app cards start the round.
-    on('start', function (e) { keyboard = e.detail === 0; startFlow(false); });
-    on('practice-again', function () { practiceNext = !practiceNext; renderBrief(); });
+    // The v4 shell keeps #start hidden; the app cards open the intro, whose Start begins the round.
+    on('start', function (e) { keyboard = e.detail === 0; if (mode === 'brief') showIntro(); });
     on('picker', onPick);
     on('relaxed', toggleRelaxed);
-    on('skip-practice', function (e) { keyboard = e.detail === 0; if (mode === 'practice' || mode === 'between') endPractice(false); });
+    // Intro: rewards.js shows, labels and disables these.
+    on('intro-go', function (e) { keyboard = e.detail === 0; begin(false); });
+    on('intro-fun', function (e) { keyboard = e.detail === 0; begin(true); });
+    on('intro-scan', onIntroScan);
+    on('intro-change', function () { rw('forgetBadge'); openScanner(); });   // Not your badge?
+    on('intro-unlock', function () { rw('showTicket'); });   // the locked ticket, its contact step
+    on('intro-back', function () { goBrief(true); });
+    on('badge-type', function () { txt('badge-msg', ''); showForm(); });
+    on('badge-cancel', cancelScanner);
+    if ($('badge-form')) $('badge-form').addEventListener('submit', onBadgeForm);
     on('b-chal', function (e) { if (barTap(e)) return; keyboard = e.detail === 0; enterPick(); });
     on('b-keep', function (e) { if (barTap(e)) return; keyboard = e.detail === 0; decide('letThrough'); });
     on('b-cancel', function (e) { if (barTap(e)) return; keyboard = e.detail === 0; cancelPick(); });
@@ -945,10 +1109,11 @@
     on('end-shift', endFromPause);
     on('flash', skipFlash);
     on('err-reload', function () { location.reload(); });
-    on('again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
+    // Play again: the same app's intro (badge, tries left); kiosk: Next curator.
+    on('again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else showIntro(); });
     on('rep-switch', function () { if (KIOSK) reset(); else goBrief(true); });
     on('t-switch', function () { goBrief(true); });
-    on('t-again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else startFlow(false); });
+    on('t-again', function (e) { keyboard = e.detail === 0; if (KIOSK) reset(); else showIntro(); });
     if (st) {
       st.addEventListener('pointerdown', onDown);
       st.addEventListener('pointermove', onMove);
@@ -960,12 +1125,16 @@
     }
     document.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('click', onDocClick);
+    document.addEventListener('pointerdown', idleNudge);
+    document.addEventListener('keydown', idleNudge);
+    document.addEventListener('input', idleNudge);
   }
   // ---- Pause ----
   // No clock pause in standard play except this overlay: the clock and animations freeze (pick mode stays).
   function pause() {
     var d = drag;
-    if (paused || (mode !== 'shift' && mode !== 'practice')) return;
+    if (paused || mode !== 'shift') return;
     endFlash();   // the next card waits under the pause overlay instead
     paused = true;
     stopLoop();
@@ -985,7 +1154,7 @@
     startLoop();   // resets lastT, so the paused time never counts
     if (cards[0]) cards[0].focus();
   }
-  // Ending from the pause overlay still uses a counted shift; during practice it returns to the brief.
+  // Ending from the pause overlay still uses a counted shift.
   function endFromPause() {
     if (!paused) return;
     paused = false;
@@ -996,7 +1165,7 @@
     else { freshPlay(); goBrief(true); }
   }
   function onVisibility() {
-    if (document.hidden) { if (mode === 'shift' || mode === 'practice') pause(); else stopLoop(); }
+    if (document.hidden) { if (mode === 'shift') pause(); else stopLoop(); }
     else startLoop();
   }
 
@@ -1020,7 +1189,7 @@
     body('rm', RM); body('lite', LITE); body('is-kiosk', KIOSK);
     if (!S || !D || !R || !$('tpl-card')) throw new Error('Curate: a module or template is missing');
     keyHelp();
-    window.CurateGame = { show: showView, reset: reset };
+    window.CurateGame = { show: showView, reset: reset, intro: showIntro };
     rw('init', ui);
     ob('init', { reduced: RM, lite: LITE });
     loadPrefs();

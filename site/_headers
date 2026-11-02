@@ -20,6 +20,8 @@
   Cache-Control: no-cache
 /curate/earn.js
   Cache-Control: no-cache
+/curate/badge.js
+  Cache-Control: no-cache
 /staff/desk.js
   Cache-Control: no-cache
 /staff
