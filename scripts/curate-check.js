@@ -41,7 +41,7 @@ var S = W.CURATE_SETTINGS, D = W.CURATE_DECKS, R = W.CurateRules;
 
 // ---- Settings ----
 function checkSettings() {
-  var keys = ['v', 'seconds', 'relaxedSeconds', 'entries', 'fakes', 'points', 'trust',
+  var keys = ['v', 'seconds', 'entries', 'fakes', 'points', 'trust',
     'tiers', 'checkinNeededFrom', 'countedPerDay', 'kioskMaxTier', 'kioskResetMs', 'kioskIdleMs', 'staffHoldMs',
     'undoMs', 'soldOut', 'substitutes', 'ranks', 'fallbackMerch', 'server', 'badge', 'contact', 'lastDay'], i, cfg, fm,
     tk = ['teal', 'purple', 'gold'];
@@ -60,10 +60,14 @@ function checkSettings() {
     if (typeof ct.monthly !== 'string' || !ct.monthly) fail('settings.js: contact.monthly is empty');
   })(S.server || {}, S.badge || {}, S.contact || {});
   if (!/^\d{4}-\d{2}-\d{2}$/.test(S.lastDay || '')) fail('settings.js: lastDay must be yyyy-MM-dd');
-  ['catch', 'evidence', 'letThrough', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus',
-    'perSecondLeft', 'bonusMaxMistakes', 'bonusMinEvidence'].forEach(function (k) {
+  ['catch', 'evidence', 'letThrough', 'wrongChallenge', 'leak', 'streakEvery', 'streakBonus'].forEach(function (k) {
     if (typeof S.points[k] !== 'number') fail('settings.js: points.' + k + ' is not a number');
   });
+  // 2 Nov: no time bonus (the score is the answers) and one 90 s round for everyone (no More time).
+  ['perSecondLeft', 'bonusMaxMistakes', 'bonusMinEvidence', 'relaxedBonus'].forEach(function (k) {
+    if (S.points[k] !== undefined) fail('settings.js: points.' + k + ' is gone (no time bonus)');
+  });
+  if (S.relaxedSeconds !== undefined) fail('settings.js: relaxedSeconds is gone (one round length for everyone)');
   ['leak', 'wrongChallenge'].forEach(function (k) {
     if (typeof S.trust[k] !== 'number') fail('settings.js: trust.' + k + ' is not a number');
   });
@@ -73,14 +77,11 @@ function checkSettings() {
   if (S.windows != null && !(Array.isArray(S.windows) && !S.windows.length)) fail('settings.js: windows must be [] or null (v5: no per-card countdown)');
   if (S.rushAt != null) fail('settings.js: rushAt is gone in v5 (no rush toast)');
   if (S.points.autoListed !== undefined) fail('settings.js: points.autoListed is gone in v5 (no auto-listing)');
-  if (!(S.relaxedSeconds > S.seconds)) fail('settings.js: relaxedSeconds must give more time than seconds');
-  // Gold stays reachable: a flawless round finished with 40 s left (4 s per card on average, pick included)
-  // must score Gold. Relaxed scores the same as standard (only more time), so this covers both.
-  if (S.points.relaxedBonus !== undefined) fail('settings.js: points.relaxedBonus is gone (relaxed only adds time)');
+  // Gold stays reachable: a flawless round (every call and every wrong part right) must score Gold, however slow.
   (function (P) {
     var flawless = S.fakes * (P.catch + P.evidence) + (S.entries - S.fakes) * P.letThrough +
-      Math.floor(S.entries / P.streakEvery) * P.streakBonus + P.perSecondLeft * 40;
-    if (flawless < S.tiers[3]) fail('settings.js: a flawless round with 40 s left scores ' + flawless + ', below Gold (' + S.tiers[3] + ')');
+      Math.floor(S.entries / P.streakEvery) * P.streakBonus;
+    if (flawless < S.tiers[3]) fail('settings.js: a flawless round scores ' + flawless + ', below Gold (' + S.tiers[3] + ')');
   })(S.points);
   if (S.ranks.length !== 4) fail('settings.js: ranks needs 4 names');
   // v6 §4: 2 tries a day count for merch, said on the title, the Go banner, Results and the ticket.
@@ -109,7 +110,7 @@ var MARKS = ['btc', 'eth', 'usdt', 'usdc', 'doge', 'sol', 'ada', 'link', 'uni', 
 var IMG = path.join(DIR, 'img'), IMG_URL = '/curate/img/';
 // Flag kinds: the number of colours, then the optional keys each kind takes (brief §3). v6 §5 adds only h4
 // (four equal stripes, Mauritius) and h5 (five stripes, the middle one twice as tall: Thailand; a ratio for the
-// thin white bands of The Gambia and Botswana).
+// thin white bands of Botswana).
 var FLAG_KINDS = { v3: [3], h3: [3, 'ratio'], h2: [2], nordic: [2, 'inner'], disc: [2, 'off'], cross: [2],
   h3wheel: [4], h4: [4], h5: [5, 'ratio'] };
 function hex(c) { return /^#[0-9a-f]{6}$/i.test(c || ''); }
@@ -228,8 +229,7 @@ var COUNTRY = {
   Mauritius: ['Port Louis', { kind: 'h4', c: ['#ea2839', '#1a206d', '#ffd500', '#00a551'] }, 'Red, blue, yellow, green', '.mu'],
   Thailand: ['Bangkok', { kind: 'h5', c: ['#a51931', '#f4f5f8', '#2d2a4a', '#f4f5f8', '#a51931'] }, 'Red, white, wide blue, white, red', '.th'],
   'Costa Rica': ['San José', { kind: 'h5', c: ['#002b7f', '#ffffff', '#ce1126', '#ffffff', '#002b7f'] }, 'Blue, white, wide red, white, blue', '.cr'],   // the civil flag, no arms
-  // The Gambia (6:1:4:1:6) and Botswana (9:1:4:1:9), 2:3 flags whose white bands are thin fimbriations.
-  'The Gambia': ['Banjul', { kind: 'h5', c: ['#ce1126', '#ffffff', '#0c1c8c', '#ffffff', '#3a7728'], ratio: [6, 1, 4, 1, 6] }, 'Red, blue, green, edged white', '.gm'],
+  // Botswana (9:1:4:1:9), a 2:3 flag whose white bands are thin fimbriations.
   Botswana: ['Gaborone', { kind: 'h5', c: ['#75aadb', '#ffffff', '#1a1a1a', '#ffffff', '#75aadb'], ratio: [9, 1, 4, 1, 9] }, 'Light blue, black band edged white', '.bw']
 };
 // Photo file: [name, city, country, words for the photo]. Each checked against the photo itself and its
@@ -390,10 +390,11 @@ var DECKS = { sights: ['sights', 'photo', 'img', 'photo'], countries: ['countrie
 var PARTS = 4;
 // [good, fake] in the pool (v6 brief §5). Countries stop at 42 good: with the flag kinds allowed (h4 and h5
 // added, nothing else) the plain flags of uncontroversial countries with settled capitals run out there (no
-// emblems, stars or crests; Bolivia and Indonesia left out for their capitals, Russia and Yemen too). POOL_MIN is
+// emblems, stars or crests; Bolivia and Indonesia left out for their capitals, Russia and Yemen too); 41 since
+// 2 Nov, when The Gambia left (players read its “The” as the error). POOL_MIN is
 // the hard floor, the count delivered; POOL_BRIEF is what the brief asks, printed (not failed) while a list is
 // below it, so the gap shows on every run instead of hiding behind “All checks passed”.
-var POOL_MIN = { sights: [30, 15], countries: [42, 20], tokens: [20, 12] };
+var POOL_MIN = { sights: [30, 15], countries: [41, 20], tokens: [20, 12] };   // 2 Nov: The Gambia left (its “The” read as an error)
 var POOL_BRIEF = { sights: [30, 15], countries: [45, 20], tokens: [20, 12] };
 // The policy is the practice coach’s idle hint (v6 §6): one short line.
 var POLICY_MAX = 52;
@@ -821,8 +822,8 @@ function checkCopy() {
   (function (src) {
     var h1 = /<h1\b[^>]*\bid="brief-title"[^>]*>([\s\S]*?)<\/h1>/.exec(src), lead = /\bid="brief-lead"[^>]*>([\s\S]*?)</.exec(src);
     if (!h1 || h1[1].trim() !== 'Help an app, get rewarded.') fail('index.html: the title h1 must read Help an app, get rewarded.');
-    if (!lead || lead[1].trim() !== 'Each entry is right, or has one error. Spot the errors in 60 s.') {
-      fail('index.html: the title lead must read Each entry is right, or has one error. Spot the errors in 60 s.');
+    if (!lead || lead[1].trim() !== 'Each entry is right, or has one error. Spot the errors in ' + S.seconds + ' s.') {
+      fail('index.html: the title lead must read Each entry is right, or has one error. Spot the errors in ' + S.seconds + ' s.');
     }
     if (!/\bid="curate-privacy"/.test(src)) fail('index.html: #curate-privacy (the privacy notice) is missing');
   })(fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'));
@@ -1016,8 +1017,7 @@ function maxScore() {
   Object.keys(D).forEach(function (dk) {
     var e = 0, f = 0, k, sp = D[dk].split;
     for (k in sp) { e += sp[k][0]; f += sp[k][1]; }
-    best = Math.max(best, f * (P.catch + P.evidence) + (e - f) * P.letThrough + Math.floor(e / P.streakEvery) * P.streakBonus +
-      P.perSecondLeft * S.seconds);
+    best = Math.max(best, f * (P.catch + P.evidence) + (e - f) * P.letThrough + Math.floor(e / P.streakEvery) * P.streakBonus);
   });
   return best;
 }
@@ -1095,12 +1095,12 @@ function checkServer() {
   H.clock += 5000;
   ok(H.call({ action: 'finish', token: t1, score: 500 }).error === 'early', 'a finish 5 s after its start');
   H.clock += 3 * HOUR;
-  r = H.call({ action: 'finish', token: t1, score: 812, tier: 3, relaxed: false, endedBy: 'done' });
-  ok(r.ok && r.score === 812 && r.tier === 2 && r.best && r.best.score === 812, 'the tier comes from the score, not the body ' + JSON.stringify(r));
+  r = H.call({ action: 'finish', token: t1, score: 615, tier: 3, relaxed: false, endedBy: 'done' });
+  ok(r.ok && r.score === 615 && r.tier === 2 && r.best && r.best.score === 615, 'the tier comes from the score, not the body ' + JSON.stringify(r));
   ok(r.best && /^C-[A-Z0-9]{6}$/.test(r.best.code) && r.best.code === 'C-' + t1.slice(0, 6).toUpperCase(), 'best.code ' + (r.best || {}).code);
   H.clock += 7 * HOUR;
-  ok(H.call({ action: 'finish', token: t1, score: 812 }).ok === true, 'the same finish again (7 h later) is not ok');
-  ok(H.call({ action: 'finish', token: t1, score: 813 }).error === 'used', 'a second score for one token');
+  ok(H.call({ action: 'finish', token: t1, score: 615 }).ok === true, 'the same finish again (7 h later) is not ok');
+  ok(H.call({ action: 'finish', token: t1, score: 616 }).error === 'used', 'a second score for one token');
   ok(H.call({ action: 'finish', token: t2, score: 400 }).error === 'late', 'a finish 10 h after its start');
   ok(H.call({ action: 'finish', token: 'unknowntoken12345', score: 1 }).error === 'badtoken', 'an unknown token');
   t3 = tok(); start(H, C, t3); H.clock += 60000;
@@ -1108,7 +1108,7 @@ function checkServer() {
   ok(H.call({ action: 'finish', token: t3, score: -1 }).error === 'badscore' && H.call({ action: 'finish', token: t3, score: 3.5 }).error === 'badscore', 'badscore');
   // 6. status: the best across days, with its game code and time.
   r = H.call({ action: 'status', badge: A });
-  ok(r.ok && r.v && r.tiers.join() === S.tiers.join() && r.maxScore === maxScore() && r.badge && r.badge.best && r.badge.best.score === 812 &&
+  ok(r.ok && r.v && r.tiers.join() === S.tiers.join() && r.maxScore === maxScore() && r.badge && r.badge.best && r.badge.best.score === 615 &&
     r.badge.best.at === '13:30' && r.badge.left === 0 && r.badge.contact === false && r.badge.collected === false, 'status ' + JSON.stringify(r));
   ok(H.call({ action: 'status' }).badge === null, 'status without a badge');
   // 7. contact: only for a badge with an earned round, one contacts row per badge, nothing of it in the badge sheet.
@@ -1130,12 +1130,12 @@ function checkServer() {
     crow[0][1] === 'ana@example.org' && crow[0][2] === 'email' && crow[0][3] === 'yes' && crow[1][2] === 'telegram',
     'contacts rows: Day is a date only, Source curate, kind and curator tick ' + JSON.stringify(crow));
   tmp = JSON.stringify(H.contacts.sheets);
-  ok(!/[0-9a-f]{64}/.test(tmp) && [t1, t2, t4].every(function (t) { return tmp.indexOf(t) < 0; }) && tmp.indexOf('812') < 0, 'the contacts sheet holds a badge, token or score');
+  ok(!/[0-9a-f]{64}/.test(tmp) && [t1, t2, t4].every(function (t) { return tmp.indexOf(t) < 0; }) && tmp.indexOf('615') < 0, 'the contacts sheet holds a badge, token or score');
   tmp = JSON.stringify(H.bound.sheets);
   ok(tmp.indexOf('@') < 0 && tmp.indexOf('ana@example.org') < 0 && tmp.indexOf('ana_k') < 0, 'the badge sheet holds a contact');
   ok(H.writes.indexOf('\'\t=1') > -1, 'the event \\t=1 is not written as \'\\t=1');
   r = H.call({ action: 'check', key: H.props.STAFF_KEY, badge: A });
-  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === 812, 'check after the contact ' + JSON.stringify(r));
+  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === 615, 'check after the contact ' + JSON.stringify(r));
   // 9. claim: one item per badge, up to the earned tier; a check-in ticket (K-) allows any open tier, once.
   ok(claim(H, A, 'gold', 'claimida0001').error === 'notearned', 'Gold claimed on a Purple badge');
   r = claim(H, A, 'purple', 'claimida0002', { staff: '=1+1', how: 'typed' });
@@ -1408,7 +1408,7 @@ function checkRewards() {
 // nothing, a try counts at Start, a ticket above stickers unlocks with a contact, the kiosk keeps nothing.
 function checkBadgeMode() {
   var n = 0, G = gsHarness(), T = S.tiers, LOW = Math.floor(T[1] / 4), TEAL = Math.floor((T[1] + T[2]) / 2),
-    PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3] + 50, ls, p, q, r, m, rows, k, kls, best;
+    PURPLE = Math.floor((T[2] + T[3]) / 2), GOLD = T[3], ls, p, q, r, m, rows, k, kls, best;   // Gold: the server caps scores at the best round
   function ok(cond, msg) { n++; if (!cond) fail('badge mode: ' + msg); }
   function R(pg) { return pg.CurateRewards; }
   function begin(pg, fun) { var out; R(pg).begin('sights', { fun: !!fun }, function (x) { out = x; }); return out; }
@@ -1621,7 +1621,7 @@ var PROFILES = [   // name, mix share, accuracy, mean decision s, pick accuracy
   ['Expert', 0.07, 0.95, 1.7, 0.95], ['Strong', 0.20, 0.90, 2.2, 0.9], ['Average', 0.38, 0.82, 2.8, 0.8],
   ['Casual', 0.25, 0.72, 3.5, 0.65], ['Novice', 0.10, 0.62, 4.3, 0.5]
 ];
-var TARGET = { standard: [27, 36, 30, 7], relaxed: [27, 36, 30, 7] }, TOLERANCE = 4;   // relaxed scores like standard, with more time
+var TARGET = { standard: [26, 36, 24, 14] }, TOLERANCE = 4;   // 2 Nov: one 90 s round, no time bonus; Gold = a perfect round (best of 2 tries)
 function gauss(rand) { return Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand()); }
 function lognormal(rand, mean) { return Math.exp(Math.log(mean) - SIGMA * SIGMA / 2 + SIGMA * gauss(rand)); }
 function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
@@ -1639,7 +1639,7 @@ function wrongPart(it, rand) {
 
 // One round with the real rules. `play(item, rand)` returns { action, pick, secs } (secs Infinity = idle).
 function playRound(deckId, relaxed, play, rand, last) {
-  var run = R.buildRun(deckId, last, rand), sc = R.newScore(), len = relaxed ? S.relaxedSeconds : S.seconds,
+  var run = R.buildRun(deckId, last, rand), sc = R.newScore(), len = S.seconds,
     t = 0, decided = 0, i, it, d, o;
   for (i = 0; i < run.items.length; i++) {
     it = run.items[i];
@@ -1651,7 +1651,7 @@ function playRound(deckId, relaxed, play, rand, last) {
     decided++;
     t += OVERHEAD_S;
   }
-  R.finish(sc, len - t, decided === run.items.length, relaxed);
+  R.finish(sc);
   return { score: sc, decided: decided, ids: run.items.map(function (x) { return x.id; }) };
 }
 // A player profile: the right call with probability acc. Every challenge picks a part (brief §4).
@@ -1694,7 +1694,7 @@ function simProfile(prof, relaxed, rand) {
 }
 function shares(c) { return c.map(function (x) { return Math.round(pct(x, RUNS)); }); }
 function simulate() {
-  var rand = mulberry32(2026), modes = ['standard', 'relaxed'];
+  var rand = mulberry32(2026), modes = ['standard'];
   // The sim never plays more tries than count in a day.
   if (PLAYS[PLAYS.length - 1][0] > S.countedPerDay) fail('the simulation plays ' + PLAYS[PLAYS.length - 1][0] + ' tries, settings count ' + S.countedPerDay);
   modes.forEach(function (mode) {
@@ -1750,15 +1750,15 @@ function simLazy(rand) {
       '   reaches Teal ' + pct(teal, RUNS) + '%');
     if (s[0] !== 'random' && teal) fail(s[1] + ' reached Teal in ' + teal + ' rounds');
   });
-  // Gold stays reachable, and relaxed is no easier: a flawless, quick round (every call and pick right, about
-  // 1.7 s per decision, like the Expert profile) reaches Gold most of the time in both modes.
-  [false, true].forEach(function (relaxed) {
+  // Gold stays reachable at any calm pace: speed doesn't score, so a flawless round (every call and pick right)
+  // reaches Gold whether it takes 1.7 s or 6 s per decision.
+  [1.7, 6].forEach(function (secs) {
     var gold = 0, r;
     for (r = 0; r < 300; r++) {
-      if (playRound(DECK_IDS[r % DECK_IDS.length], relaxed, player(1, 1.7, 1), rand, []).score.final >= S.tiers[3]) gold++;
+      if (playRound(DECK_IDS[r % DECK_IDS.length], false, player(1, secs, 1), rand, []).score.final >= S.tiers[3]) gold++;
     }
-    console.log('  ' + pad(relaxed ? 'Flawless relaxed, 1.7 s' : 'Flawless, 1.7 s each', 28) + 'reaches Gold ' + pct(gold, 300) + '%');
-    if (gold < 150) fail('a flawless quick ' + (relaxed ? 'relaxed ' : '') + 'round reaches Gold in only ' + pct(gold, 300) + '% of rounds');
+    console.log('  ' + pad('Flawless, ' + secs + ' s each', 28) + 'reaches Gold ' + pct(gold, 300) + '%');
+    if (gold < 285) fail('a flawless round at ' + secs + ' s a decision reaches Gold in only ' + pct(gold, 300) + '% of rounds');
   });
 }
 

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0620">
 <title>Kleros Curate · Help an app</title>
-<meta name="description" content="Help an app, get rewarded: spot the errors in its list in 60 seconds and win booth merch.">
+<meta name="description" content="Help an app, get rewarded: spot the errors in its list in 90 seconds and win booth merch.">
 <link rel="icon" href="/assets/kleros-symbol-white-flat.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@700&family=Inter:wght@400;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -144,10 +144,9 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 }
 #ladder-fine { margin:6px 0 0; font:600 13px/1.35 Inter,sans-serif; color:var(--text); }   /* the tries line: “2 tries a day count for merch.” */
 #ladder-fine:empty { display:none; }
-/* Small links row: relaxed timing, the check-in; on the intro: play for fun, not your badge, another app */
+/* Small links row: the check-in; on the intro: play for fun, not your badge, another app */
 .links { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:0 16px; margin-top:6px; }
 .links .ghost { margin:0; padding:8px 2px; font-size:12.5px; }
-#relaxed[aria-pressed=true] { color:var(--teal); }
 #hdr-link { padding:8px 2px; font:600 12.5px Inter,sans-serif; color:var(--teal); text-decoration:none; white-space:nowrap; }
 #brief .fine { margin:2px 6px 0; font-size:11px; color:#a99fd0; }
 /* ---- Intro: the rule, a correct and a wrong example entry (game.js), then the start area (rewards.js) ---- */
@@ -414,6 +413,18 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 #rep-retry { margin-top:8px; }
 #to-ticket:disabled { opacity:.6; cursor:default; }
 .rmeter { margin:14px 0 0; padding:14px 14px 12px; border-radius:18px; background:var(--field); border:1px solid var(--field-line); }
+/* How far the score got, from 0 to the maximum (Gold): three segments (to Teal, to Purple, to Gold), reached ones in their tier colour, a marker at the score */
+#rep-meter { position:relative; display:grid; grid-template-columns:repeat(3,1fr); gap:4px; height:8px; margin-bottom:2px; }
+#rep-meter i { border-radius:4px; background:rgba(255,255,255,.12); }
+#rep-meter [data-t="1"] { --tc:var(--tier-teal); } #rep-meter [data-t="2"] { --tc:var(--tier-purple); } #rep-meter [data-t="3"] { --tc:var(--tier-gold); }
+#rep-meter i[data-tier] { background:var(--tc); box-shadow:0 0 10px var(--tc); }
+#rep-meter i[data-tier=none] { background:rgba(255,255,255,.12); box-shadow:none; }
+#rep-meter i[data-locked] { background:repeating-linear-gradient(135deg,rgba(255,255,255,.12) 0 3px,transparent 3px 6px); box-shadow:none; }   /* above the v6 kiosk cap */
+#rep-marker { position:absolute; top:-5px; left:calc(var(--at,0) * 100%); width:3px; height:18px; margin-left:-1.5px; border-radius:2px; background:#fff; box-shadow:0 0 8px #fff; }
+#rep-meter-labels { position:relative; height:13px; margin:6px 0 10px; font:600 11px/13px Inter,sans-serif; color:var(--muted); font-variant-numeric:tabular-nums; }
+#rep-meter-labels span { position:absolute; top:0; transform:translateX(-50%); white-space:nowrap; }   /* each threshold under its point on the bar */
+#rep-meter-labels span:nth-child(1) { left:0; transform:none; } #rep-meter-labels span:nth-child(2) { left:33.333%; }
+#rep-meter-labels span:nth-child(3) { left:66.667%; } #rep-meter-labels span:nth-child(4) { left:100%; transform:translateX(-100%); }
 .tl-row { display:flex; align-items:center; gap:12px; margin-top:12px; }
 #rep-thumbs { --th:40px; --ring:rgba(255,255,255,.6); }
 #rep-tier-line { margin:0; font-size:14px; line-height:1.4; }
@@ -451,7 +462,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 .miss p { margin:4px 0 0; color:#ddd3ff; }
 #to-ticket { margin-top:18px; position:sticky; bottom:max(12px,env(safe-area-inset-bottom,0px)); z-index:2; }   /* the medal and the misses make Results tall: the ticket button stays in reach and settles into place at the end */
 /* Short screens: a smaller medal and tighter gaps keep the tier line and the tries line above the sticky ticket button on first view */
-@media (max-height:639px) { #rep-medal { height:96px; } #rep-title { margin-bottom:10px; } #rep-payoff { margin-top:8px; } .rmeter { margin-top:10px; } }
+@media (max-height:639px) { #rep-medal { height:72px; } #rep-title { margin-bottom:10px; } #rep-payoff { margin-top:8px; } .rmeter { margin-top:10px; padding:10px 12px; }
+  #rep-meter-labels { margin:4px 0 6px; } .tl-row { margin-top:8px; } }   /* the bar on Results: keep the tier and tries lines above the sticky ticket button */
 /* ---- Ticket ---- */
 /* The glow lives on the wrap so the notch masks on the faces never clip it */
 .ticket-wrap { position:relative; margin:6px 0 18px; border-radius:22px; perspective:1000px; cursor:pointer; outline:none; box-shadow:0 30px 70px -28px rgba(120,110,160,.5); --face:linear-gradient(150deg,rgba(52,46,78,.95),rgba(84,78,108,.8)); --line:rgba(255,255,255,.22); }
@@ -548,7 +560,7 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <div class="title">
     <h1 id="brief-title" tabindex="-1">Help an app, get rewarded.</h1>
   </div>
-  <p class="lead" id="brief-lead">Each entry is right, or has one error. Spot the errors in 60 s.</p>
+  <p class="lead" id="brief-lead">Each entry is right, or has one error. Spot the errors in 90 s.</p>
   <ul class="hints" aria-label="How to play">
     <li class="g-l"><span aria-hidden="true">←</span> Wrong</li>
     <li class="g-r">Correct <span aria-hidden="true">→</span></li>
@@ -566,8 +578,6 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
       <p id="ladder-fine">2 tries a day count for merch.</p>   <!-- the tries line; rewards.js may rewrite it -->
     </section>
     <div class="links">
-      <button type="button" class="ghost" id="relaxed" aria-pressed="false" aria-describedby="relaxed-note">More time: Off</button>
-      <span class="sr" id="relaxed-note">90 seconds instead of 60.</span>
       <a id="hdr-link" href="/">Booth check-in →</a>
       <button type="button" class="ghost" id="deck-switch" hidden></button>   <!-- v4: the app cards pick the deck; kept hidden for game.js -->
     </div>
@@ -609,6 +619,8 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   <p id="rep-quote-by" hidden></p>
   <p id="rep-payoff"></p>   <!-- the one company line -->
   <div class="rmeter">
+    <div id="rep-meter" aria-hidden="true"><i data-t="1"></i><i data-t="2"></i><i data-t="3"></i><span id="rep-marker"></span></div>
+    <div id="rep-meter-labels" aria-hidden="true"><span>0</span><span></span><span></span><span></span></div>   <!-- rewards.js fills these from settings tiers -->
     <div class="tl-row"><div class="thumbs" id="rep-thumbs"></div><p id="rep-tier-line"></p></div>
   </div>
   <p id="rep-tries"></p>   <!-- the tries line, from rewards.js -->

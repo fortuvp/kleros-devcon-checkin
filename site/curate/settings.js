@@ -3,15 +3,13 @@
 // After changing points, seconds or tiers, run `node scripts/curate-check.js --sim` to see the new tier shares.
 window.CURATE_SETTINGS = {
   v: 1,
-  seconds: 60, relaxedSeconds: 90, entries: 10, fakes: 4,   // v5: one calm 60 s round, relaxed only adds time
+  seconds: 90, entries: 10, fakes: 4,       // 2 Nov: one calm 90 s round for everyone (no More time option)
   windows: [],                               // v5: no per-card countdown and no auto-listing
   points: { catch: 75, evidence: 50, letThrough: 25, wrongChallenge: -75, leak: -75,
-            streakEvery: 5, streakBonus: 50, perSecondLeft: 5, bonusMaxMistakes: 2, bonusMinEvidence: 1 },
-  // Relaxed only adds time: its time bonus counts seconds left as if the round were `seconds` long, so it is never an easier road to Gold.
-  // evidence: the fake part picked in pick mode. bonusMinEvidence: the time bonus also needs this many
-  // fakes spotted (blind swiping rarely earns it)
+            streakEvery: 5, streakBonus: 50 },
+  // evidence: the fake part picked in pick mode. 2 Nov: no time bonus: the score comes from the answers only.
   trust: { leak: -15, wrongChallenge: -5 },
-  tiers: [0, 350, 675, 920],                 // Everyone, Teal, Purple, Gold (v6: refitted by --fit for 2 tries a day; Code.gs TIERS matches: curate-check.js fails if not)
+  tiers: [0, 300, 550, 750],                 // Everyone, Teal, Purple, Gold (2 Nov: refitted by --fit for answers-only scoring; Gold = a perfect round; Code.gs TIERS matches: curate-check.js fails if not)
   checkinNeededFrom: 1,                      // v6 mode only (no server): every tier above Everyone needs a confirmed check-in on this phone (anti-replay: the check-in dedupes by email/Telegram); 3 = Gold only
   countedPerDay: 2,                          // counted tries a day: per phone in v6 mode, per badge in badge mode (Code.gs PER_DAY matches)
   kioskMaxTier: 1,                           // v6 mode only: a booth tablet caps at this tier (badge mode: the badge is the identity, no cap)

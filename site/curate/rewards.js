@@ -439,6 +439,27 @@
     el.textContent = '0';
     cuRaf = requestAnimationFrame(step);
   }
+  // The bar on Results runs from 0 to Gold, the maximum: a third each for 0 to Teal, Teal to Purple and Purple to Gold.
+  function markerAt(p) {
+    var t = [0, tierMin(1), tierMin(2), tierMin(3)], i = 0;
+    while (i < 3 && p >= t[i + 1]) i++;
+    if (i === 3) return 1;
+    return (i + Math.max(0, p - t[i]) / Math.max(1, t[i + 1] - t[i])) / 3;
+  }
+  function renderMeter(final, g) {
+    var meter = $('rep-meter'), labs = $('rep-meter-labels'), mk = $('rep-marker'), segs, t, i;
+    if (meter) {
+      segs = meter.querySelectorAll('i[data-t]');
+      for (i = 0; i < segs.length; i++) {
+        t = +segs[i].getAttribute('data-t');
+        segs[i].setAttribute('data-tier', t <= g ? NAMES[t] : 'none');   // reached segments take their tier colour
+        // v6 only: tiers above a booth tablet's cap are hatched.
+        if (KIOSK && !ONLINE && t > kioskCap()) segs[i].setAttribute('data-locked', ''); else segs[i].removeAttribute('data-locked');
+      }
+    }
+    if (mk) mk.style.setProperty('--at', markerAt(final).toFixed(4));
+    if (labs) for (i = 0; i < labs.children.length && i < 4; i++) labs.children[i].textContent = fmt(tierMin(i));
+  }
   function renderMisses(misses) {
     var n = misses.length, det = vis('rep-missed', n > 0), list = $('rep-misses'), tpl = $('tpl-miss');
     if (!det) return;
@@ -546,6 +567,7 @@
     // v6: the strip shows only when this counted round earned a gated tier that a check-in would unlock.
     pending = !ONLINE && sum.counted && !KIOSK && g >= NEED && !(ci && (ci.ok || ci.claimed)) && !st.collected && !isSoldOut(g) ? g : 0;
     renderGold('rep-gold', 'rep-gold-go', pending, ci);
+    renderMeter(final, g0);   // how far the score got, even when the round wins no merch
     renderMisses([].concat(misses || sum.misses || []));
     renderLines();
     txt('again', againText(c));

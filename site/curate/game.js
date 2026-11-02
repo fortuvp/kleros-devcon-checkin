@@ -56,7 +56,7 @@
   }
 
   // ---- State ----
-  var deckId = '', deck = null, relaxed = false;
+  var deckId = '', deck = null;
   var mode = 'brief';        // brief | intro | banner | shift | ended
   var run = [], idx = 0, cards = [], score = null, info = null, total = 0;
   var clockOn = false, elapsed = 0, lastT = 0, paused = false;
@@ -108,16 +108,9 @@
     deck = D[deckId];
   }
   function renderBrief() {
-    var rb = $('relaxed'), secs = String(relaxed ? S.relaxedSeconds : S.seconds), metas, i, d;
-    // The lead promises the round length (longer with More time).
+    var secs = String(S.seconds), metas, i, d;
+    // The lead and every app card promise the round length.
     txt('brief-lead', 'Each entry is right, or has one error. Spot the errors in ' + secs + ' s.');
-    if (rb) {
-      rb.textContent = 'More time: ' + (relaxed ? 'On' : 'Off');
-      rb.setAttribute('aria-pressed', relaxed ? 'true' : 'false');
-    }
-    // Every app card promises the round length (longer with More time).
-    // The More time button's description follows settings (index.html keeps a static copy for no-script).
-    txt('relaxed-note', S.relaxedSeconds + ' seconds instead of ' + S.seconds + '.');
     metas = document.querySelectorAll('#picker .pick');
     for (i = 0; i < metas.length; i++) {
       d = D[metas[i].getAttribute('data-deck')];
@@ -206,11 +199,6 @@
     rw('refreshBrief');
     showView('brief');
     if (focus) park('brief-title');
-  }
-  function toggleRelaxed() {
-    relaxed = !relaxed;
-    rw('setPref', 'relaxed', relaxed);
-    renderBrief();
   }
   // Focus the first visible, enabled control of a list.
   function focusOn(ids) {
@@ -809,7 +797,7 @@
   function startFlow() {
     var k;
     freshPlay();
-    total = relaxed ? S.relaxedSeconds : S.seconds;
+    total = S.seconds;
     hudClock.s = -1;
     txt('client-name', deck.client);
     // The HUD shows this app's list while the banners run, not the last app's.
@@ -857,7 +845,7 @@
   }
   // by: time | done | quit. The card on screen at time-out is discarded: not reviewed, not a leak.
   function endShift(by) {
-    var left, fb, d = drag, pc = picking;
+    var left, d = drag, pc = picking;
     if (mode !== 'shift') return;
     left = Math.max(0, total * 1000 - elapsed);
     // The discarded card drops its drag pose and pick mode.
@@ -865,16 +853,13 @@
     exitPick(false);
     if (pc) contest(pc, false);
     mode = 'ended'; clockOn = false;
-    fb = R.finish(score, left / 1000, idx >= run.length, relaxed);
+    R.finish(score);   // no time bonus: the score is the answers
     hudScore(score.raw);
     if (by === 'done') {
-      // After the last card's flash. Same conditions as R.finish(): few mistakes and enough wrong parts spotted.
+      // After the last card's flash.
       afterFlash(function () {
-        var tooMany = score.mistakes > S.points.bonusMaxMistakes, noEv = score.evidence < (S.points.bonusMinEvidence || 0);
-        if (!tooMany && !noEv) toast({ tone: 'good', ms: 1300, title: 'All done · ' + signed(fb.timeBonus) + ' time bonus' });
-        else toast({ tone: 'info', ms: 2200, title: 'All done', line: 'Time bonus needs ' +
-          (tooMany ? S.points.bonusMaxMistakes + ' mistakes or fewer.' : 'one wrong part spotted.') });
-        later(function () { handOff(by); }, 1300);
+        toast({ tone: 'good', ms: 1000, title: 'All done' });
+        later(function () { handOff(by); }, 1000);
       });
     } else if (by === 'time') {
       if (cards[0]) cards[0].setAttribute('inert', '');
@@ -883,7 +868,7 @@
   }
   function handOff(by) {
     var s = score, i = info || {};
-    var sum = { deck: deckId, counted: !!i.counted, shiftNo: i.shiftNo || 0, code: i.code || null, relaxed: relaxed,
+    var sum = { deck: deckId, counted: !!i.counted, shiftNo: i.shiftNo || 0, code: i.code || null, relaxed: false,
                 endedBy: by, final: s.final, raw: s.raw, timeBonus: s.timeBonus || 0, reviewed: s.reviewed,
                 entries: run.length, caught: s.caught, fakesSeen: s.fakesSeen, listed: s.listed, goodsSeen: s.goodsSeen,
                 evidence: s.evidence, wrong: s.wrong, leaks: s.leaks, trust: s.trust, bestStreak: s.bestStreak,
@@ -899,7 +884,7 @@
   function reset() {
     freshPlay();
     mode = 'brief'; score = null; info = null; run = []; idx = 0; began = null; beginning = false; beginGen++;
-    if (KIOSK) { relaxed = false; setDeck(firstDeck()); } else loadPrefs();
+    if (KIOSK) setDeck(firstDeck()); else loadPrefs();
     closeHow(); closeScanner(); idleOff();
     goBrief(true);
   }
@@ -1090,7 +1075,6 @@
     // The v4 shell keeps #start hidden; the app cards open the intro, whose Start begins the round.
     on('start', function (e) { keyboard = e.detail === 0; if (mode === 'brief') showIntro(); });
     on('picker', onPick);
-    on('relaxed', toggleRelaxed);
     // Intro: rewards.js shows, labels and disables these.
     on('intro-go', function (e) { keyboard = e.detail === 0; begin(false); });
     on('intro-fun', function (e) { keyboard = e.detail === 0; begin(true); });
@@ -1172,7 +1156,6 @@
   // ---- Boot ----
   function loadPrefs() {
     setDeck(rw('getPref', 'deck'));
-    relaxed = !!rw('getPref', 'relaxed');
   }
   function showErr() {
     var el = $('err');

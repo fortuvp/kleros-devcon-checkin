@@ -4,7 +4,7 @@
 // Public actions (no key): status, start, finish, contact. Staff actions (staff key): check, claim, stats.
 // Badge data never goes to the contacts Sheet and contacts never go to the badge Sheet: the badge Sheet holds only
 // a yes/no "contact given" flag per badge. Setup (paste, run staffSetup, deploy): apps-script/staff-desk/README.md.
-var SCRIPT_V = '2026-11-02a';   // shown by doGet and status: tells the owner which pasted copy is live
+var SCRIPT_V = '2026-11-02b';   // shown by doGet and status: tells the owner which pasted copy is live
 var SHEET_ID = '';   // empty: the Sheet this script is bound to (the badge list); else that Sheet's id
 var CONTACTS_SHEET_ID = '1LzRQ9IizuRMrqWAclFuY2v0bONkgxb2ezvXPbVsBtIc';   // the newsletter contacts, a separate Sheet
 var CLAIMS = 'Badge claims', TRIES = 'Tries', SWITCHES = 'Switches', CONTACTS = 'Contacts';   // tab names
@@ -13,12 +13,12 @@ var TRY_HEAD = ['Token', 'Day', 'Badge (hashed)', 'Try', 'Started', 'Finished', 
 var CONTACT_HEAD = ['Day', 'Contact', 'Kind', 'Curator info', 'Event', 'Source', 'Id'];   // no badge, score or token, ever
 var SWITCH_ROWS = ['Merch open', 'Teal sold out', 'Purple sold out', 'Gold sold out'];   // labels in Switches!A, read by label
 var SWITCH_DEFAULTS = [true, false, false, false];   // a missing label takes its default
-var TIERS = [0, 350, 675, 920];   // = settings.js tiers (scripts/curate-check.js fails if they differ)
+var TIERS = [0, 300, 550, 750];   // = settings.js tiers (scripts/curate-check.js fails if they differ)
 var TIER_KEYS = ['teal', 'purple', 'gold'];   // tier 1..3
 var APPS = ['sights', 'countries', 'tokens'];   // deck ids (checked against decks.js)
 var ENDED = ['done', 'time', 'quit'];   // how a round ended (accepted for the record; not stored)
 var PER_DAY = 2;                  // = settings.js countedPerDay (checked)
-var MAX_SCORE = 1050;             // the best possible round under settings.js (checked; see the README)
+var MAX_SCORE = 750;              // the best possible round under settings.js: answers only, no time bonus (checked)
 var MIN_ROUND_MS = 8000;          // start → finish at least: banners plus 10 fast decisions
 var MAX_SEND_MS = 6 * 60 * 60 * 1000;   // start → finish received at most: pauses and dead Wi-Fi fit in 6 h
 var LOCK_MS = 6000;               // tryLock wait: the server answers 'busy' well before the client gives up (20 s)

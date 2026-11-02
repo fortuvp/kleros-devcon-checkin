@@ -146,16 +146,12 @@
     score.tier = tierFor(score.raw);
     return { streakBonus: bonus, tierFrom: from, tierTo: score.tier };
   }
-  // The time bonus (relaxed: seconds left beyond its extra time) is added to raw. It needs all entries decided, few mistakes
-  // and enough fakes spotted, so blind fast swiping rarely earns it.
-  function finish(score, secondsLeft, allDecided, relaxed) {
-    var P = S().points, bonus = !allDecided || score.mistakes > P.bonusMaxMistakes || score.evidence < (P.bonusMinEvidence || 0) ? 0 :
-      P.perSecondLeft * Math.floor(Math.max(0, secondsLeft - (relaxed ? S().relaxedSeconds - S().seconds : 0)));
-    score.timeBonus = bonus;
-    score.raw += bonus;
+  // 2 Nov: no time bonus, so the score comes from the answers only. The arguments stay for older callers.
+  function finish(score) {
+    score.timeBonus = 0;
     score.final = Math.max(0, score.raw);
     score.tier = tierFor(score.final);
-    return { timeBonus: bonus };
+    return { timeBonus: 0 };
   }
   function tierFor(points) {
     var t = S().tiers, i;

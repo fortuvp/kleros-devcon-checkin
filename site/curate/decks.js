@@ -8,8 +8,8 @@
   // [spec for CurateObjects._flag, words for the alt text and the fix line]. Kinds: v3 (hoist to fly), h3 (top
   // to bottom, optional ratio), h2, nordic (field, cross, optional inner), disc (field, disc, optional off:
   // fraction of the width, negative towards the hoist), cross (Swiss), h3wheel (India), h4 (four equal stripes,
-  // Mauritius) and h5 (five stripes, the middle one twice as tall: Thailand, Costa Rica; or a ratio: The Gambia,
-  // Botswana, whose thin white bands separate the colours). Colours follow each
+  // Mauritius) and h5 (five stripes, the middle one twice as tall: Thailand, Costa Rica; or a ratio: Botswana,
+  // whose thin white bands separate the colours). Colours follow each
   // country’s official specification as #rrggbb; black is lifted to #1a1a1a so it still reads on the dark stage.
   // Chad and Romania look alike, so their entries share a twin key and never meet in one round.
   var FLAGS = {
@@ -43,7 +43,6 @@
     mu: [{ kind: 'h4', c: ['#ea2839', '#1a206d', '#ffd500', '#00a551'] }, 'Red, blue, yellow, green'],
     th: [{ kind: 'h5', c: ['#a51931', '#f4f5f8', '#2d2a4a', '#f4f5f8', '#a51931'] }, 'Red, white, wide blue, white, red'],
     cr: [{ kind: 'h5', c: ['#002b7f', '#ffffff', '#ce1126', '#ffffff', '#002b7f'] }, 'Blue, white, wide red, white, blue'],
-    gm: [{ kind: 'h5', c: ['#ce1126', '#ffffff', '#0c1c8c', '#ffffff', '#3a7728'], ratio: [6, 1, 4, 1, 6] }, 'Red, blue, green, edged white'],
     bw: [{ kind: 'h5', c: ['#75aadb', '#ffffff', '#1a1a1a', '#ffffff', '#75aadb'], ratio: [9, 1, 4, 1, 9] }, 'Light blue, black band edged white'],
     se: [{ kind: 'nordic', c: ['#006aa7', '#fecc02'] }, 'Blue, yellow cross'],
     fi: [{ kind: 'nordic', c: ['#ffffff', '#002f6c'] }, 'White, blue cross'],
@@ -314,7 +313,7 @@
       'White petals in Delhi: the Lotus Temple.', 'name', 'card', 'Lotus Temple']
   ]);
 
-  // ---- Countries (flat flag; 42 good, 26 fake) ----
+  // ---- Countries (flat flag; 41 good, 26 fake; The Gambia left on 2 Nov: players read its “The” as the error) ----
   // Web domains are country-code top-level domains. Left out on purpose: capitals in dispute or transition
   // (Bolivia, Indonesia), politically sensitive entries, and flags the painter cannot draw plainly (emblems,
   // stars, crests). Twins: the country, plus the country whose flag a fake shows.
@@ -357,7 +356,6 @@
     ['c-ch', 'ch', 1, 'ch', 'Switzerland', 'Bern', '.ch', '.ch is for Confoederatio Helvetica.'],
     ['c-in', 'in', 1, 'in', 'India', 'New Delhi', '.in', 'India’s tricolour, New Delhi and .in.'],
     ['c-mu', 'mu', 2, 'mu', 'Mauritius', 'Port Louis', '.mu', 'Mauritius’s four stripes and Port Louis.'],
-    ['c-gm', 'gm', 2, 'gm', 'The Gambia', 'Banjul', '.gm', 'The Gambia’s capital is Banjul.'],
     ['c-bw', 'bw', 2, 'bw', 'Botswana', 'Gaborone', '.bw', 'Botswana’s capital is Gaborone.'],
     ['c-th', 'th', 1, 'th', 'Thailand', 'Bangkok', '.th', 'Thailand’s red, white, blue and Bangkok.'],
     ['c-cr', 'cr', 2, 'cr', 'Costa Rica', 'San José', '.cr', 'Costa Rica’s capital is San José.'],
