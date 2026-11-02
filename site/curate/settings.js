@@ -19,12 +19,13 @@ window.CURATE_SETTINGS = {
   soldOut: [],                               // e.g. ['gold'] for the rest of the day
   substitutes: { teal: null, purple: null, gold: null },   // { reward, short, img: [paths] }; short reads in a sentence
   ranks: ['Rookie spotter', 'Sharp eye', 'Eagle eye', 'Master curator'],   // by tier, when no check-in name
-  // sheetApp: the /exec URL of the game owner's own sheet script (apps-script/curate-sheet/). It takes the
-  // Earn for real sign-ups (earn.js) and the staff badge desk (/curate/desk/). Empty hides the sign-up form.
-  // badgePattern: a regex the desk's normalised badge id must match (set it from /curate/desk/?test=1 on a real
-  // badge before opening; empty accepts any 6+ letters and digits). badgeFormats: 2D codes the Android reader looks for.
-  sheetApp: { endpoint: '', badgePattern: '', badgeFormats: ['qr_code', 'aztec', 'data_matrix', 'pdf417'] },
-  earn: { monthly: '$5,000+' },   // the payout line on Results: keep it true
+  // staffDesk: the staff-only badge desk at /staff/. endpoint: the /exec URL of its own sheet script
+  // (apps-script/staff-desk/). badgePattern: a regex the desk's normalised badge id must match (set it from
+  // /staff/?test=1 on a real badge before opening; empty accepts any 6+ letters and digits). badgeFormats: 2D codes the Android reader looks for.
+  staffDesk: { endpoint: '', badgePattern: '', badgeFormats: ['qr_code', 'aztec', 'data_matrix', 'pdf417'] },
+  // earn: the Earn for real sign-ups on Results (earn.js), a separate sheet script (apps-script/earn-signups/).
+  // An empty endpoint hides the form. monthly: the payout line on Results: keep it true.
+  earn: { endpoint: '', monthly: '$5,000+' },
   // Used only when config.js has no merch block with 3 tiers. An exact copy of config.js merch today.
   fallbackMerch: {
     free: { reward: 'Stickers and metallic tattoos', how: 'Free for everyone at the booth',

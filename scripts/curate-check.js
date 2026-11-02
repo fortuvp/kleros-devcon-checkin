@@ -815,8 +815,8 @@ function jpegHeight(buf) {
   return 0;
 }
 var BUDGETS = {
-  // settings.js +0.5 KB and earn.js: the Earn for real sign-up (30 Oct).
-  'settings.js': [3.25 * KB, 0, true], 'earn.js': [6 * KB, 2.5 * KB], 'decks.js': [47.5 * KB, 13.75 * KB, true], 'rules.js': [8.9 * KB, 0, true],
+  // settings.js +0.5 KB and earn.js: the Earn for real sign-up (30 Oct); +0.25 KB: separate desk and sign-up sheets (2 Nov).
+  'settings.js': [3.5 * KB, 0, true], 'earn.js': [6 * KB, 2.625 * KB], 'decks.js': [47.5 * KB, 13.75 * KB, true], 'rules.js': [8.9 * KB, 0, true],
   'credits.js': [12 * KB, 2.75 * KB, true],
   'objects.js': [33.5 * KB, 12.5 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [50.5 * KB, 16.25 * KB],
   // rewards.js +0.5 KB gz in v6: the tries line, the early-end headline and the just-for-fun tier line.

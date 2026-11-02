@@ -52,6 +52,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
 #result .ghost { color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.5); }
 #result input { background:rgba(0,0,0,.22); border-color:rgba(255,255,255,.4); }
 #r-msg { margin-top:10px; font-weight:600; }
+#result #r-free { color:rgba(255,255,255,.85); }
 </style>
 </head>
 <body>
@@ -60,8 +61,8 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
 
   <!-- Key: asked once per phone, kept on this phone only -->
   <section id="setup" hidden>
-    <h1>Staff key</h1>
-    <p class="muted">Ask the booth lead for the key. It stays on this phone.</p>
+    <h1 id="setup-title">Staff key</h1>
+    <p class="muted" id="setup-hint">Ask the booth lead for the key. It stays on this phone.</p>
     <form id="setup-form">
       <label for="k-key">Key</label><input id="k-key" type="password" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <label for="k-name">Your name</label><input id="k-name" autocomplete="name" maxlength="40">
@@ -108,6 +109,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
       <div id="r-buttons"></div>
     </div>
     <p id="r-msg"></p>
+    <p id="r-free" class="muted" hidden>Not handing anything over? Tap Next badge: nothing is saved.</p>
     <button type="button" id="r-retry" hidden>Try again</button>
     <button type="button" class="ghost" id="r-next">Next badge</button>
   </div>
@@ -115,7 +117,7 @@ label { display:block; margin-top:14px; font-weight:600; font-size:14px; color:v
 
 <script defer src="/config.js"></script>
 <script defer src="/curate/settings.js"></script>
-<script defer src="/curate/desk/vendor/jsQR.js"></script>
-<script defer src="/curate/desk/desk.js"></script>
+<script defer src="/staff/vendor/jsQR.js"></script>
+<script defer src="/staff/desk.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 // Curate game: the "earn for real" mini form on Results. One field, Telegram or email.
-// It posts to the game owner's own sheet script (settings.js sheetApp.endpoint, an Apps Script web app: see
-// apps-script/curate-sheet/), never to the check-in backend. While no endpoint is set the form stays hidden,
+// It posts to the game owner's own sign-up sheet script (settings.js earn.endpoint, an Apps Script web app: see
+// apps-script/earn-signups/), never to the check-in backend or the staff badge desk. While no endpoint is set the form stays hidden,
 // so no sign-up is silently lost; ?earnpreview=1 shows it anyway for a look. A sign-up that can't be sent
 // waits on the phone (kleros_devcon_curate_earn) and goes out on the next load. User text reaches the DOM
 // through textContent only.
@@ -8,7 +8,7 @@
   'use strict';
 
   // ---- Setup ----
-  var S = window.CURATE_SETTINGS || {}, E = { endpoint: (S.sheetApp || {}).endpoint || '', monthly: (S.earn || {}).monthly }, CFG = window.KLEROS_BOOTH_CONFIG || {};
+  var S = window.CURATE_SETTINGS || {}, E = { endpoint: (S.earn || {}).endpoint || '', monthly: (S.earn || {}).monthly }, CFG = window.KLEROS_BOOTH_CONFIG || {};
   var KIOSK = /[?&]kiosk=1\b/.test(location.search), PREVIEW = /[?&]earnpreview=1\b/.test(location.search);
   var KEY = 'kleros_devcon_curate_earn';
   var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, TG = /^@?[A-Za-z][A-Za-z0-9_]{4,31}$/;

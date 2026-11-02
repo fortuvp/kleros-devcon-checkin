@@ -20,9 +20,11 @@
   Cache-Control: no-cache
 /curate/earn.js
   Cache-Control: no-cache
-/curate/desk/desk.js
+/staff/desk.js
   Cache-Control: no-cache
-/curate/desk/*
+/staff
+  X-Robots-Tag: noindex
+/staff/*
   X-Robots-Tag: noindex
 /curate/game.js
   Cache-Control: no-cache

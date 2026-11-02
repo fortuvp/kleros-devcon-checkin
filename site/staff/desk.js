@@ -1,14 +1,15 @@
 // Merch desk (staff only): one merch item per Devcon badge, whatever email or phone the visitor used.
 // Staff scan the badge, the sheet script says whether it already got merch, and staff record what they hand
-// over. Only a SHA-256 of the badge's normalised id leaves this phone. Talks to settings.js sheetApp.endpoint
-// (apps-script/curate-sheet/), never to the check-in backend. User text reaches the DOM through textContent only.
-// /curate/desk/?test=1 shows what a badge decodes to (raw and normalised) without saving anything: use it once
-// on a real badge to set sheetApp.badgePattern before opening.
+// over. Only a SHA-256 of the badge's normalised id leaves this phone. Talks to settings.js staffDesk.endpoint
+// (apps-script/staff-desk/), never to the check-in backend or the game's sign-up sheet. Staff never open the
+// Sheet: checking a badge saves nothing, and only tapping an item adds a row. User text reaches the DOM through textContent only.
+// /staff/?test=1 shows what a badge decodes to (raw and normalised) without saving anything: use it once
+// on a real badge to set staffDesk.badgePattern before opening.
 (function () {
   'use strict';
 
   // ---- Setup ----
-  var S = window.CURATE_SETTINGS || {}, CFG = window.KLEROS_BOOTH_CONFIG || {}, A = S.sheetApp || {};
+  var S = window.CURATE_SETTINGS || {}, CFG = window.KLEROS_BOOTH_CONFIG || {}, A = S.staffDesk || {};
   var URL_ = A.endpoint || '';
   var PATTERN = null;
   try { PATTERN = A.badgePattern ? new RegExp(A.badgePattern) : null; } catch (e) { PATTERN = null; }
@@ -77,9 +78,14 @@
   function home() {
     stopCam();
     gen++; busy = false; current = null;
-    if (!URL_ && !TEST) { show('setup'); $('setup-form').hidden = true; txt('setup-msg', 'The sheet isn’t set up yet: put its URL in settings.js (sheetApp.endpoint).'); return; }
+    if (!URL_ && !TEST) {
+      show('setup'); $('setup-form').hidden = true; $('setup-hint').hidden = true;
+      txt('setup-title', 'Not connected yet');
+      txt('setup-msg', 'This desk has no badge list yet, so it can’t check anyone. Don’t hand out merch from it. Booth lead: see apps-script/staff-desk/README.md.');
+      return;
+    }
     if (!me.key && !TEST) {
-      show('setup'); $('setup-form').hidden = false; $('k-name').value = me.staff || '';
+      show('setup'); $('setup-form').hidden = false; $('setup-hint').hidden = false; txt('setup-title', 'Staff key'); $('k-name').value = me.staff || '';
       txt('setup-msg', me.keyBad ? 'That key didn’t work. Ask the booth lead for the current one.' : '');
       return;
     }
@@ -176,10 +182,10 @@
     var r = $('result');
     r.hidden = false; r.setAttribute('data-tone', tone);
     txt('r-icon', icon); txt('r-word', word); txt('r-line', line); txt('r-msg', '');
-    $('r-items').hidden = true; $('r-retry').hidden = true;
+    $('r-items').hidden = true; $('r-retry').hidden = true; $('r-free').hidden = true;
     r.scrollTop = 0;
   }
-  function usedLine(last) { return last ? cap(last.tier) + ' · ' + (last.item || 'merch') + ' at ' + last.at + '.' : ''; }
+  function usedLine(last) { return last ? cap(last.tier) + ' · ' + (last.item || 'merch') + ', ' + (last.day ? last.day + ' ' : '') + last.at + '.' : ''; }
   function check(raw) {
     var id = badgeId(raw), g;
     if (busy) return;
@@ -227,7 +233,7 @@
       });
     });
     if (current && current.ticket) $('r-ticket').value = current.ticket;
-    $('r-items').hidden = false;
+    $('r-items').hidden = false; $('r-free').hidden = false;
   }
   // The same claim id on every retry, so a claim that saved but lost its reply is recognised, not refused.
   function give(t, item) {
