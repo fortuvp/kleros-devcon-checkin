@@ -4,8 +4,8 @@
 // and the ticket live on this phone. With the server, how players verify follows its Switches tab (3 Nov; settings
 // verify until it answers): telegram (the bot saw them: the server gives the id), badge (a scanned Devcon badge)
 // or none (a random id made on this phone). The only reader of kleros_devcon_self (v6 only, never written here)
-// and the only writer of kleros_devcon_curate, kleros_devcon_curate_badge and kleros_devcon_curate_tg. User data
-// reaches the DOM through textContent only.
+// and the only writer of kleros_devcon_curate, kleros_devcon_curate_badge, kleros_devcon_curate_tg and
+// kleros_devcon_curate_consent. User data reaches the DOM through textContent only.
 (function () {
   'use strict';
 
@@ -39,10 +39,10 @@
   // resets them at midnight.
   var SV = S.server || {}, TGS = S.telegram || {};
   var ONLINE = !!SV.endpoint;
-  var BKEY = 'kleros_devcon_curate_badge', TGKEY = 'kleros_devcon_curate_tg';
+  var BKEY = 'kleros_devcon_curate_badge', TGKEY = 'kleros_devcon_curate_tg', CKEY = 'kleros_devcon_curate_consent';
   var MAX_SEND = 6 * 60 * 60 * 1000;   // = Code.gs MAX_SEND_MS: an older finish is refused anyway
   var MODES = ['telegram', 'badge', 'none'], KIND = { telegram: 'tg', badge: 'badge', none: 'device' };
-  var HEX = /^[0-9a-f]{64}$/, HEX32 = /^[0-9a-f]{32}$/;
+  var HEX = /^[0-9a-f]{64}$/, HEX32 = /^[0-9a-f]{32}$/, NONCE = /^[A-Za-z0-9]{16,40}$/;   // NONCE: Code.gs tgcheck's
   var bd = null;                       // { hash, tail, kind: tg | badge | device, sig (tg only) }: never the badge code
   // mode: the Switches tab's Verify with (any reply; kept with the id); tg: false while the bot isn't set up.
   var srv = { open: true, soldOut: [], tiers: null, badge: null, asked: 0, mode: '', tg: null };
@@ -998,15 +998,15 @@
     dropVisitor();
     UI.reset();
   }
-  // Badge mode, booth tablet: the next visitor. Forget the id, the try, the Telegram wait and the contact form; a
-  // finish not saved yet keeps retrying from memory (token and score only, never the id).
+  // Badge mode, booth tablet: the next visitor. Forget the id, the try, the Telegram wait and its consent tick, and
+  // the contact form; a finish not saved yet keeps retrying from memory (token and score only, never the id).
   function dropVisitor() {
     var C = window.CurateContact;
     if (!ONLINE) return;
     if (pend && !pend.done) toBackground(pend);
     pend = null; bd = null; srv.badge = null; tok = null; spare = ''; begun = null;
     flow = { busy: 0, offline: false };
-    tgForget(); tg.late = false; tg.err = ''; devFail = false;
+    tgForget(); tg.late = false; tg.err = ''; tg.ok = tg.need = false; devFail = false;
     rs = { sum: null };
     if (C) C.hide();
   }
@@ -1377,8 +1377,8 @@
 
   // ---- Intro: the start area ----
   // First match wins (spec 3.3). 'locked': the id has a tier above stickers and no contact yet. Telegram mode before
-  // the bot has seen the player: tgverify (the link), tgwait (after the tap), tgoff (no answer), notelegram.
-  // None mode: device while this phone's id is made.
+  // the bot has seen the player: tgverify (the consent tick and the link), tgwait (after the tap), tgoff (no
+  // answer), notelegram. None mode: device while this phone's id is made.
   var jsqrAsked = false;
   var INTRO = ['intro-unlock', 'intro-go', 'intro-scan', 'intro-tg', 'intro-fun', 'intro-change', 'intro-cancel'];
   function introState() {
@@ -1406,7 +1406,7 @@
     el.className = cls || 'ghost';
   }
   function renderIntro() {
-    var sec = $('intro'), s, b, md = mode(), line, note = '', B = Bdg(), more, name, c, tryN, change, link = '', qr = '', a;
+    var sec = $('intro'), s, b, md = mode(), line, note = '', B = Bdg(), more, name, c, tryN, change, link = '', qr = '', a, ck;
     if (!sec || sec.hidden) return;
     if (introState() === 'device') device();   // none mode: this phone's id, made on first need
     s = introState(); b = bs(); line = who();
@@ -1420,13 +1420,15 @@
       if (c.reason === 'limit') note = allUsed() + '. This round is for fun.';
       btn('intro-go', 'Start', 'primary');
     } else if (s === 'tgverify' || s === 'tgwait') {
-      // A booth tablet can't open the visitor's Telegram: the same link as a QR, asked about at once. After waitMs
-      // it shows no new QR (the idle reset takes it back to the title) until someone taps Try again.
-      if (KIOSK && !tg.tap && !tg.late) { tgLink(); tg.tap = Date.now(); s = 'tgwait'; tgPoll(false); }
-      link = KIOSK && tg.late ? '' : tgLink();   // the nonce is made when this state first shows
-      note = tg.late ? 'No answer from Telegram yet. Try again.' : s === 'tgwait' && !KIOSK ?
-        'Tap Start in the Kleros Booth bot, then come back here.' : 'Verify with Telegram to play: ' + fmt(COUNTED) + ' tries for merch.';
-      if (KIOSK) { qr = link; if (!link) btn('intro-go', 'Try again', 'primary'); }
+      // A booth tablet can't open the visitor's Telegram: the same link as a QR once the visitor ticks the box, asked
+      // about at once. After waitMs it shows no new QR (the idle reset takes it back to the title) until someone taps
+      // Try again.
+      if (KIOSK && tg.ok && !tg.tap && !tg.late) { tgLink(); tg.tap = Date.now(); s = 'tgwait'; tgPoll(false); }
+      link = KIOSK && (tg.late || !tg.ok) ? '' : tgLink();   // the nonce is made when this state first shows
+      note = tg.need && !tg.ok ? 'Tick the box first.' : tg.late ? 'No answer from Telegram yet. Try again.' :
+        s === 'tgwait' && !KIOSK ? 'Tap Start in the Kleros Booth bot, then come back here.' :
+        'Verify with Telegram to play: ' + fmt(COUNTED) + ' tries for merch.';
+      if (KIOSK) { qr = link; if (tg.late) btn('intro-go', 'Try again', 'primary'); }
       else {
         btn('intro-tg', s === 'tgwait' ? 'Open Telegram again' : 'Verify with Telegram', s === 'tgwait' ? 'second' : 'primary');
         if (s === 'tgwait') btn('intro-cancel', 'Cancel');
@@ -1480,17 +1482,29 @@
       note = md === 'badge' ? 'Checking your badge…' : 'Checking your tries…';
       INTRO.forEach(function (id) { var el = $(id); if (el) el.disabled = true; });
     }
-    // The link's href is set before the tap (iOS opens the Telegram app only for a real link tap, never from script).
+    // The link's href is set before the tap (iOS opens the Telegram app only for a real link tap, never from script),
+    // and only once the box is ticked (a wait means it was): until then it has no href, so a tap goes nowhere
+    // (tgTapped says why), and it reads as a dimmed link.
     a = $('intro-tg');
-    if (a && link && a.href !== link) a.href = link;
+    if (a && link && (tg.ok || s === 'tgwait')) {
+      if (a.href !== link) a.href = link;
+      a.removeAttribute('aria-disabled'); a.removeAttribute('role');
+    } else if (a && link) {
+      a.removeAttribute('href');
+      a.setAttribute('aria-disabled', 'true'); a.setAttribute('role', 'link');
+    }
     // Pick another app waits too: leaving mid-start would spend a try on a round that never plays.
     c = $('intro-back');
     if (c) c.disabled = flow.busy > 0 && s !== 'v6';
     txt('intro-badge', line);
     vis('intro-badge', !!line);
     txt('intro-note', note);
-    txt('intro-priv-text', 'Verifying adds your Telegram ID to Kleros news. Leave any time: send /stop to the bot.');
-    vis('intro-priv', s === 'tgverify' || s === 'tgwait');
+    // The consent tick (required, 3 Nov): before the link or the tablet's QR, never while waiting (it was ticked).
+    txt('intro-priv-text', 'I want to play this game and learn how Kleros Curate works, fully decentralised. I agree to get ' +
+      'Telegram messages on how to take part in real contests across Kleros apps. Leave any time: send /stop to the bot.');
+    ck = $('intro-consent');
+    if (ck) ck.checked = tg.ok;
+    vis('intro-priv', s === 'tgverify');
     txt('intro-qr-cap', 'Scan with your phone camera, tap Start in Telegram.');
     showQR('intro-qr-img', qr, 'intro-qr');
   }
@@ -1500,11 +1514,15 @@
   // sheet script, and tgcheck turns the nonce into the player's id and its sig (the raw Telegram number never comes
   // here). The nonce and the tap's time stay on the phone (kleros_devcon_curate_tg; a tablet keeps them in memory),
   // so a reload or the way back from Telegram picks the wait up. tgcheck runs every pollMs while the page shows, at
-  // once when it shows again, and stops waitMs after the tap (one last ask, then a new nonce).
-  var tg = { n: '', at: 0, tap: 0, late: false, off: false, err: '', fails: 0, timer: 0, busy: '' };
+  // once when it shows again, and stops waitMs after the tap (one last ask, then a new nonce). Each ask names the
+  // page to come back to and the app, for the bot's Back to the game button (tgLand reads it on the way back), and
+  // the tick (agree: the contacts row's Curator info yes).
+  // ok: the consent tick (kleros_devcon_curate_consent; a tablet: this visitor only); need: a tap came before it.
+  var tg = { n: '', at: 0, tap: 0, late: false, off: false, err: '', fails: 0, timer: 0, busy: '', ok: false, need: false };
   function tgLoad() {
-    var d = KIOSK || !ONLINE ? null : store(TGKEY);
-    if (d && /^[A-Za-z0-9]{24}$/.test(d.n || '')) { tg.n = d.n; tg.at = +d.at || 0; tg.tap = +d.tap || 0; }
+    var d = KIOSK || !ONLINE ? null : store(TGKEY), c = KIOSK || !ONLINE ? null : store(CKEY);
+    if (d && NONCE.test(d.n || '')) { tg.n = d.n; tg.at = +d.at || 0; tg.tap = +d.tap || 0; }
+    tg.ok = !!(c && c.v === 1);
   }
   function tgSave() {
     if (KIOSK || !ONLINE) return;
@@ -1527,13 +1545,50 @@
   function tgOn() { return ONLINE && mode() === 'telegram' && !bd && !!tg.n && !!tg.tap && !tg.off && !tg.err && srv.tg !== false; }
   // The kiosk's idle reset waits while a visitor verifies on their phone (until the first waitMs runs out).
   function tgWaiting() { return tgOn() && !tg.late; }
-  // The tap: the link opens Telegram by itself; this only starts the wait.
-  function tgTapped() {
-    if (KIOSK || !tg.n) return;
+  // The tap: the link opens Telegram by itself; this starts the wait and asks at once (tgWatch). Before the box is
+  // ticked the link has no href: the tap goes nowhere, and the note says why.
+  function tgTapped(e) {
+    var ck = $('intro-consent');
+    if (KIOSK) return;
+    if (!tg.ok && !tg.tap) {
+      if (e && e.preventDefault) e.preventDefault();
+      tg.need = true;
+      renderIntro();
+      if (ck && !isHidden('intro-priv')) { try { ck.focus({ preventScroll: true }); } catch (x) { ck.focus(); } }
+      return;
+    }
+    if (!tg.n) return;
     tg.tap = Date.now(); tg.late = tg.off = false; tg.fails = 0;
     tgSave();
     renderIntro();
+    tgWatch();
     tgPoll(false);
+  }
+  // The tap's ask. The page is about to hide behind Telegram and ask nothing, so the server reads the bot for it by
+  // long poll for half a minute (watch): the bot answers Start, button and all, at once. Not waited for (keepalive:
+  // it outlives the page), never a missed answer; the usual asks go on while the page shows.
+  function tgWatch() {
+    var b = tgBody(tg.n);
+    b.watch = 1;
+    post(b, function () {}, { keepalive: true, timeoutMs: 120000 });
+  }
+  function tgBody(n) { return { action: 'tgcheck', nonce: n, back: tgBack(), app: getPref('deck') || '', agree: tg.ok ? 1 : 0 }; }
+  // The consent tick: kept on this browser (a tablet: until the next visitor), unticking forgets it.
+  function tgAgree(on) {
+    tg.ok = !!on; tg.need = false;
+    if (KIOSK || !ONLINE) return;
+    if (tg.ok) store(CKEY, { v: 1, at: Date.now() });
+    else { try { localStorage.removeItem(CKEY); } catch (e) { /* blocked: nothing kept */ } }
+  }
+  // The tablet: the tick starts the wait and hides the focused box; the QR takes focus (its label names the bot), or
+  // the note while the QR is drawn.
+  function tgConsent() {
+    var ck = $('intro-consent'), el;
+    tgAgree(!!(ck && ck.checked));
+    renderIntro();
+    if (!KIOSK || !tg.ok || !isHidden('intro-priv')) return;
+    el = $(isHidden('intro-qr') ? 'intro-note' : 'intro-qr-img');
+    if (el) { try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
   }
   function tgRetry() {
     if (!tg.n) return;
@@ -1545,6 +1600,7 @@
     var a = $('intro-tg');
     tgForget(); tg.late = false;
     renderIntro();
+    if (a && a.getAttribute('aria-disabled') === 'true') a = isHidden('intro-priv') ? null : $('intro-consent');   // not ticked on this browser
     if (a && !a.hidden) { try { a.focus({ preventScroll: true }); } catch (e) { a.focus(); } }
   }
   // now: ask at once (a tap, the page shown again); else in pollMs. Two answers missed in a row: tgoff.
@@ -1555,7 +1611,7 @@
     last = Date.now() - tg.tap >= (TGS.waitMs || 300000);
     if (!now && !last) { tg.timer = setTimeout(function () { tg.timer = 0; tgPoll(true); }, TGS.pollMs || 2500); return; }
     tg.busy = n;
-    post({ action: 'tgcheck', nonce: n }, function (err, j) {
+    post(tgBody(n), function (err, j) {
       if (tg.busy === n) tg.busy = '';
       if (f !== flow || n !== tg.n || !tgOn()) { if (tgOn() && !tg.timer) tgPoll(false); return; }   // cancelled, verified or a new visitor
       if (noAnswer(err, j)) {
@@ -1595,6 +1651,32 @@
       }
     });
   }
+  // Where Back to the game should open: this site's game. The server keeps only its own hosts (so not localhost).
+  function tgBack() { return location.origin && location.origin !== 'null' ? location.origin + '/curate/' : ''; }
+  // Back from the bot: its Back to the game button opens /curate/?tg=<nonce>&app=<deck> in whichever browser
+  // Telegram picks. A valid nonce becomes this browser's wait from now, with the box ticked (the link that made it
+  // needed the tick); init then asks at once, and game.js opens that app's intro (landed). An id already verified
+  // here wins: its nonce is ignored. tg and app leave the address bar either way (kiosk and the rest stay); the nonce
+  // goes nowhere else. A booth tablet keeps to its own visitor.
+  var land = '';
+  function tgLand() {
+    var q = String(location.search || '').replace(/^\?/, ''), keep = [], n = '', app = '', H = window.history;
+    if (!/(^|&)tg=/.test(q)) return;
+    q.split('&').forEach(function (p) {
+      var k = p.split('=')[0];
+      if (k === 'tg') n = p.slice(3); else if (k === 'app') app = p.slice(4); else if (p) keep.push(p);
+    });
+    try { H.replaceState(H.state, '', (location.pathname || '') + (keep.length ? '?' + keep.join('&') : '') + (location.hash || '')); }
+    catch (e) { /* no history API: the address bar keeps them */ }
+    if (KIOSK || !ONLINE || mode() !== 'telegram' || !NONCE.test(n)) return;
+    if ((window.CURATE_DECKS || {}).hasOwnProperty(app)) { land = app; setPref('deck', app); }   // the first ask names it too
+    if (tgId()) return;
+    tg.n = n; tg.at = tg.tap = Date.now(); tg.late = tg.off = false; tg.fails = 0;
+    tgSave();
+    tgAgree(true);
+  }
+  // The app the bot's link named, once: game.js opens its intro after the title.
+  function landed() { var a = land; land = ''; return a; }
 
   // ---- Badge mode: saving the score ----
   // Retries after 3, 6, 12, 24, 48 s, then every 60 s while the page is open (kiosk ones left behind: every 30 s).
@@ -1664,7 +1746,8 @@
     on('undo-btn', 'click', undoCollect);
     on('rep-retry', 'click', retryAll);
     window.addEventListener('online', retryAll);
-    // Telegram mode: the verify link (its own tap opens Telegram) and Cancel, which forgets the nonce.
+    // Telegram mode: the consent tick, the verify link (its own tap opens Telegram) and Cancel, which forgets the nonce.
+    on('intro-consent', 'change', tgConsent);
     on('intro-tg', 'click', tgTapped);
     on('intro-cancel', 'click', tgCancel);
     // Any way out of Results releases the medal: #report getting hidden, or game.js’s two buttons.
@@ -1713,10 +1796,11 @@
     load();
     bLoad();
     tgLoad();
+    tgLand();                     // ?tg=<nonce>&app=<deck>: back from the bot's Back to the game button
     wire();
     refreshBrief();
     if (pend) sendFinish(pend);   // a round saved on an earlier visit but never sent (under 6 h old)
-    tgPoll(true);                 // a Telegram wait from before a reload
+    tgPoll(true);                 // a Telegram wait from before a reload, or the bot's nonce just landed
   }
 
   window.CurateRewards = {
@@ -1729,7 +1813,8 @@
     // Badge mode (spec 4.1): online is false in v6 mode, where begin() only reads canCount().
     online: ONLINE, renderIntro: renderIntro, setBadge: setBadge, forgetBadge: forgetBadge, begin: begin,
     refreshStatus: refreshStatus,
-    // How players verify (telegram | badge | none); the kiosk's idle reset waits on tgWaiting; qrText: the ticket's QR.
-    mode: mode, tgWaiting: tgWaiting, qrText: qrText
+    // How players verify (telegram | badge | none); the kiosk's idle reset waits on tgWaiting; qrText: the ticket's QR;
+    // landed: the app named by the bot's Back to the game link (once), whose intro game.js opens at boot.
+    mode: mode, tgWaiting: tgWaiting, qrText: qrText, landed: landed
   };
 })();

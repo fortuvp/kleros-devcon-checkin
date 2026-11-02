@@ -4,14 +4,15 @@
 // Public actions (no key): status, start, finish, contact, tgcheck. Staff actions (staff key): check, claim, stats,
 // setmode.
 // Players verify as the Switches "Verify with" cell says: Telegram (the default: the bot @KlerosBoothBot, read by
-// tgcheck and the 5-minute tgTick trigger polling getUpdates, no webhook), badge (a scanned Devcon badge) or none (a
-// random id made on the phone).
+// tgcheck, the tap's own one by long poll for half a minute, and the 1-minute tgTick trigger, polling getUpdates, no
+// webhook), badge (a scanned Devcon badge) or none (a random id made on the phone). The bot's "verified" answer has one button, Back to the game: the page the phone verified
+// from (or the live game) with ?tg=NONCE, which verifies that page at once in whatever browser Telegram opens.
 // Whatever the mode, the "badge" field is the player id, 64 hex characters, so tries, claims and stats never change.
 // Player data never goes to the contacts Sheet and contacts never go to the badge Sheet: the badge Sheet holds only
 // a yes/no "contact given" flag per player. A Telegram ID sits in the contacts Sheet only (the player id is an HMAC
 // of it). Setup (paste, run staffSetup, add TG_TOKEN, run telegramTest, deploy): apps-script/staff-desk/README.md.
 // staffSetup also installs tgTick, so /stop is read even when no phone is verifying (and after the web app is archived).
-var SCRIPT_V = '2026-11-03a';   // shown by doGet and status: tells the owner which pasted copy is live
+var SCRIPT_V = '2026-11-03b';   // shown by doGet and status: tells the owner which pasted copy is live
 var SHEET_ID = '';   // empty: the Sheet this script is bound to (the badge list); else that Sheet's id
 var CONTACTS_SHEET_ID = '1LzRQ9IizuRMrqWAclFuY2v0bONkgxb2ezvXPbVsBtIc';   // the newsletter contacts, a separate Sheet
 var CLAIMS = 'Badge claims', TRIES = 'Tries', SWITCHES = 'Switches', CONTACTS = 'Contacts';   // tab names
@@ -39,11 +40,19 @@ var TG_API = 'https://api.telegram.org/bot';   // + token + '/' + method; the to
 var TG_POLL_S = 2;                // getUpdates runs at most every 2 s for all phones together
 var TG_LOCK_MS = 4000;            // tryLock wait for the poll; a phone that doesn't get it just asks again
 var TG_NONCE_S = 21600;           // a nonce's Telegram ID stays cached 6 h (the cache's maximum)
-var TG_TICK_MIN = 5;              // tgTick reads the bot every 5 min when no phone does: /stop needs no verifying phone
+var TG_TICK_MIN = 1;              // tgTick reads the bot every minute when no phone does: /stop needs no verifying phone
+var TG_WATCH_S = 30;              // the tap's tgcheck (watch) reads the bot by long poll until 30 s after the latest tap,
+var TG_WATCH_MAX_S = 90;          // for 90 s at most in one run, however many taps extend it
+var TG_LONG_S = 20;               // one long poll's wait: Telegram answers at once when a message comes
 var NONCE_RE = /^[A-Za-z0-9]{16,40}$/;   // the phone makes 24 such characters per verify link
+var GAME_URL = 'https://devcon.kleros.io/curate/';   // Back to the game, when the phone didn't say where it verified from
+// The pages Back to the game may open: the game's /curate/ on the live site, the Netlify site or a deploy preview. https,
+// no query, no hash: anything else a phone sends is ignored (the button then opens GAME_URL).
+var BACK_RE = /^https:\/\/(devcon\.kleros\.io|kleros-devcon\.netlify\.app|deploy-preview-\d{1,5}--kleros-devcon\.netlify\.app)\/curate\/$/;
 // The bot's answers: plain text, no web3 words. Sent in the Telegram app, not shown by the game.
 var TG_SAY = {
-  verified: '✅ You’re verified for the Kleros Curate game. Go back to the game to play.\n\nYou’ll also get Kleros news here. We keep your Telegram ID only. Send /stop any time to leave, and we delete it.',
+  verified: '✅ You’re verified. Tap below to go back to the game.',
+  back: '▶️ Back to the game',   // the verified answer's one button (the other answers have none)
   help: 'This bot verifies players for the Kleros Curate game at the Kleros booth. Open devcon.kleros.io/curate and tap Verify with Telegram.',
   stopped: 'Done: you’re off Kleros news and your Telegram ID is deleted. Your game tries still count.',
   stopRetry: 'Sorry, that didn’t go through. Please send /stop again in a minute.'   // the delete failed: STOPPED only once it's gone
@@ -352,6 +361,9 @@ function contact_(d) {
 // may poll Telegram (tgPollOnce_: at most once every TG_POLL_S for all phones and tgTick together). A phone that
 // doesn't get the poll's lock hears "not yet" and asks again; so does one whose poll failed, so phones keep asking.
 // A nonce is a bearer secret for 6 h: whoever holds the link verifies as whoever tapped Start (accepted: README).
+// back and app (optional, on every call while waiting) say where the bot's Back to the game button goes. agree: 1
+// (the same) says the player ticked the consent box, so the contacts row gets Curator info yes. watch: 1 (the tap's
+// own call, which the phone doesn't wait for) reads the bot by long poll for a while: tgWatch_.
 function tgcheck_(d) {
   var nonce = String(d.nonce || ''), cache, tg, id;
   if (!NONCE_RE.test(nonce)) throw fail_('badrequest');
@@ -359,20 +371,33 @@ function tgcheck_(d) {
   cap_('tgcheck', CAP_TGCHECKS);
   cache = CacheService.getScriptCache();
   tg = cache.get('tgn:' + nonce);
-  if (!tg && !cache.get('tg:polled')) {
-    try { tgPollOnce_(); } catch (x) { Logger.log('tgcheck: the poll failed'); }   // never its message (Telegram IDs, text)
+  if (!tg) {
+    // Before the poll: the poll this call runs may answer this very nonce.
+    tgBack_(cache, nonce, d);
+    if (d.agree === 1) { try { cache.put('tga:' + nonce, '1', TG_NONCE_S); } catch (x) { /* no tick on record: Curator info stays empty */ } }
+    try {
+      if (d.watch === 1) tgWatch_(cache, nonce); else if (!cache.get('tg:polled')) tgPollOnce_();
+    } catch (x) { Logger.log('tgcheck: the poll failed'); }   // never its message (Telegram IDs, text)
     tg = cache.get('tgn:' + nonce);
   }
   if (!tg) return { ok: true, verified: false };
   id = tgId_(tg);
   return { ok: true, verified: true, badge: id, sig: sig_(id) };
 }
+// Remembers the page a phone is verifying from (back: the game's /curate/ URL, BACK_RE) and its app (a deck id, or ''),
+// for the nonce's Back to the game button; a later call overwrites it. Anything else is ignored, not an error.
+function tgBack_(cache, nonce, d) {
+  var back = typeof d.back === 'string' ? d.back : '', app = d.app == null ? '' : d.app;
+  if (!BACK_RE.test(back) || (app !== '' && APPS.indexOf(app) < 0)) return;
+  try { cache.put('tgb:' + nonce, JSON.stringify({ back: back, app: app }), TG_NONCE_S); } catch (x) { /* the button opens GAME_URL */ }
+}
 
 // ---- Telegram ----
 // Telegram mode: the phone makes a nonce and opens t.me/KlerosBoothBot?start=NONCE; the player taps Start and the
 // bot gets "/start NONCE" from their Telegram user ID. No webhook: tgcheck and the tgTick trigger poll getUpdates. The
 // player id is an HMAC of that ID under TG_SECRET (Script properties), so the raw ID never reaches the badge Sheet or
-// the game; only the contacts Sheet holds it, for Kleros news, until the player sends /stop.
+// the game; only the contacts Sheet holds it, for the bot's messages (on real contests across Kleros apps, when the
+// player ticked the box), until the player sends /stop.
 // The bot token, nonces, Telegram IDs and message text are never logged.
 function tgToken_() { return String(PropertiesService.getScriptProperties().getProperty('TG_TOKEN') || '').trim(); }
 // The HMAC key: made by staffSetup, or here on first use. Changing it gives every Telegram player new ids, and so
@@ -421,41 +446,74 @@ function tgCall_(token, method, query) {
 // One read of the bot's messages, for tgcheck and the tgTick trigger alike: at most once every TG_POLL_S for all of
 // them, under the document lock (never the script lock, so starts, finishes and claims never wait on Telegram). Both
 // take this same lock, so two runs never read one TG_OFFSET at once. Not had within TG_LOCK_MS: no read this time.
+// While a tap's watch reads the bot (tgWatch_, 'tg:watch'), no read and no wait for the lock: the cache has the news.
 function tgPollOnce_() {
-  // A web app may get no document lock (null outside a document's context): the user lock is then the same kind
-  // of separate lock (every run executes as the owner).
-  var cache = CacheService.getScriptCache(), lock = LockService.getDocumentLock() || LockService.getUserLock();
+  var cache = CacheService.getScriptCache(), lock;
+  if (cache.get('tg:watch')) return;
+  lock = tgLock_();
   if (!lock.tryLock(TG_LOCK_MS)) return;
   try {
-    if (!cache.get('tg:polled')) { try { tgPoll_(); } finally { cache.put('tg:polled', '1', TG_POLL_S); } }
+    if (!cache.get('tg:polled')) { try { tgPoll_(0); } finally { cache.put('tg:polled', '1', TG_POLL_S); } }
   } finally { lock.releaseLock(); }
 }
+// The poll's lock. A web app may get no document lock (null outside a document's context): the user lock is then
+// the same kind of separate lock (every run executes as the owner).
+function tgLock_() { return LockService.getDocumentLock() || LockService.getUserLock(); }
+// The tap's tgcheck (watch: 1). The player is off to tap Start in the bot, and their page, hidden by then, asks
+// nothing (a phone runs no script in a hidden tab), so this call reads the bot for them: long polls, which Telegram
+// answers the moment a message comes, so the bot answers Start, Back to the game button and all, within a second.
+// It reads until TG_WATCH_S after the latest tap ('tg:until': a tap during a watch moves it on, and that tap's own
+// call then finds the lock held and ends) or TG_WATCH_MAX_S, and stops early once its nonce is in and no later tap
+// came. Meanwhile ('tg:watch') other tgchecks and tgTick only read the cache. A read that fails ends it (phones and
+// tgTick go on as before); so does a cap on reads, should Telegram ever answer a long poll at once.
+function tgWatch_(cache, nonce) {
+  var t0 = now_().getTime(), mine = String(t0 + TG_WATCH_S * 1000), lock = tgLock_(), i, left;
+  cache.put('tg:until', mine, TG_WATCH_S + 5);
+  if (!lock.tryLock(TG_LOCK_MS)) return;
+  try {
+    for (i = 0; i < TG_WATCH_MAX_S; i++) {
+      left = Math.min(Number(cache.get('tg:until')) || 0, t0 + TG_WATCH_MAX_S * 1000) - now_().getTime();
+      if (left < 1000 || (cache.get('tgn:' + nonce) && cache.get('tg:until') === mine)) break;
+      cache.put('tg:watch', '1', TG_LONG_S + 10);   // lapses on its own should this run die mid-read
+      if (!tgPoll_(Math.min(TG_LONG_S, Math.floor(left / 1000)))) break;
+    }
+  } finally {
+    cache.remove('tg:watch');
+    cache.put('tg:polled', '1', TG_POLL_S);
+    lock.releaseLock();
+  }
+}
 // Time-driven, every TG_TICK_MIN (installed by staffSetup): reads the bot when no phone does (badge or none mode, a
-// quiet spell, after Devcon), so /stop always deletes the ID within minutes. Telegram keeps unread messages 24 h only.
+// quiet spell, a player slower than the tap's watch, after Devcon), so /stop always deletes the ID within a minute
+// and a Start is answered within one. Telegram keeps unread messages 24 h only.
 function tgTick() {
   if (!tgToken_()) return;
   try { tgPollOnce_(); } catch (x) { Logger.log('tgTick: the poll failed'); }   // never its message
 }
-// Installs tgTick once (a second staffSetup finds it and adds none).
+// Installs tgTick, exactly once, every TG_TICK_MIN: an older one goes first (a trigger can't say its interval, and
+// before 2026-11-03b it ran every 5 minutes), so staffSetup can run again any time.
 function tgTrigger_() {
   var t = ScriptApp.getProjectTriggers(), i;
-  for (i = 0; i < t.length; i++) if (t[i].getHandlerFunction() === 'tgTick') return;
+  for (i = 0; i < t.length; i++) if (t[i].getHandlerFunction() === 'tgTick') ScriptApp.deleteTrigger(t[i]);
   ScriptApp.newTrigger('tgTick').timeBased().everyMinutes(TG_TICK_MIN).create();
 }
 // Reads the bot's new private messages once and answers them: "/start NONCE" caches the nonce's Telegram ID for
-// tgcheck and adds the ID to the contacts Sheet; "/stop" deletes it; anything else gets the help text. TG_OFFSET
-// (Script properties) marks what was read. Telegram down or refusing: nothing changes, the next poll tries again.
-// The contacts Sheet only feeds Kleros news, so a write to it that fails never stops verifying or the offset: a
-// failed add waits in the cache ('tgq', 6 h, like the nonces) for the next poll, and a failed /stop asks the player
+// tgcheck and adds the ID to the contacts Sheet (its answer's button leads back to the game: tgBackUrl_); "/stop"
+// deletes it; anything else gets the help text. TG_OFFSET (Script properties) marks what was read. Telegram down or
+// refusing: nothing changes, the next poll tries again. wait: seconds Telegram may hold the read open for a first
+// message (a long poll, tgWatch_), else 0. Says whether Telegram answered.
+// The contacts Sheet only feeds the bot's messages, so a write to it that fails never stops verifying or the offset:
+// a failed add waits in the cache ('tgq', 6 h, like the nonces) for the next poll, and a failed /stop asks the player
 // to send it again (STOPPED only once the rows are gone; a /stop also drops a waiting add, so it never comes back).
-function tgPoll_() {
+function tgPoll_(wait) {
   var props = PropertiesService.getScriptProperties(), token = tgToken_(), offset = Number(props.getProperty('TG_OFFSET')) || 0;
   var cache = CacheService.getScriptCache(), next = offset, out = [], bot = '@' + TG_BOT.toLowerCase(), book = {};
-  var q = tgQueue_(), queued = q.length, left = [], res, i, u, m, w, cmd, id;
-  for (i = 0; i < q.length; i++) { try { addTgContact_(q[i], book); } catch (x) { left.push(q[i]); } }   // last poll's failed adds
+  var q = tgQueue_(), queued = q.length, left = [], res, read, i, u, m, w, cmd, id, say, yes;
+  for (i = 0; i < q.length; i++) { try { addTgContact_(q[i][0], book, q[i][1]); } catch (x) { left.push(q[i]); } }   // last poll's failed adds
   q = left;
-  res = tgCall_(token, 'getUpdates', 'offset=' + offset + '&timeout=0&limit=100&allowed_updates=' + encodeURIComponent('["message"]'));
-  if (res.ok && Array.isArray(res.result)) {
+  res = tgCall_(token, 'getUpdates', 'offset=' + offset + '&timeout=' + (wait || 0) + '&limit=100&allowed_updates=' + encodeURIComponent('["message"]'));
+  read = !!res.ok && Array.isArray(res.result);
+  if (read) {
     for (i = 0; i < res.result.length; i++) {
       u = res.result[i] || {};
       if (typeof u.update_id === 'number' && u.update_id >= next) next = u.update_id + 1;
@@ -467,36 +525,55 @@ function tgPoll_() {
       if (cmd.slice(-bot.length) === bot) cmd = cmd.slice(0, -bot.length);   // /start@KlerosBoothBot
       if (cmd === '/start' && w.length === 2 && NONCE_RE.test(w[1])) {
         cache.put('tgn:' + w[1], id, TG_NONCE_S);
-        try { addTgContact_(id, book); } catch (x) { if (q.indexOf(id) < 0) q.push(id); }
-        out.push([m.chat.id, TG_SAY.verified]);
+        yes = !!cache.get('tga:' + w[1]);   // the game said this nonce's player ticked the box
+        try { addTgContact_(id, book, yes); } catch (x) { tgEnqueue_(q, id, yes); }
+        out.push({ chat: m.chat.id, text: TG_SAY.verified, url: tgBackUrl_(cache, w[1]) });
       } else if (cmd === '/stop') {
-        q = q.filter(function (x) { return x !== id; });
-        try { removeTgContact_(id, book); out.push([m.chat.id, TG_SAY.stopped]); } catch (x) { out.push([m.chat.id, TG_SAY.stopRetry]); }
+        q = q.filter(function (x) { return x[0] !== id; });
+        try { removeTgContact_(id, book); say = TG_SAY.stopped; } catch (x) { say = TG_SAY.stopRetry; }
+        out.push({ chat: m.chat.id, text: say });
       } else {
-        out.push([m.chat.id, TG_SAY.help]);   // also /start without a valid nonce: no contact saved
+        out.push({ chat: m.chat.id, text: TG_SAY.help });   // also /start without a valid nonce: no contact saved
       }
     }
     if (next !== offset) props.setProperty('TG_OFFSET', String(next));
   }
   if (q.length || queued) tgQueueSave_(q);
   tgSend_(token, out);
+  return read;
 }
-// Telegram IDs whose contacts row failed to save, for the next poll (cache only: 6 h, the most a nonce lasts too).
+// Telegram IDs whose contacts row failed to save, for the next poll (cache only: 6 h, the most a nonce lasts too),
+// each as [ID, ticked]. A bare ID (queued by 2026-11-03a) has no tick on record.
 function tgQueue_() {
   var q;
   try { q = JSON.parse(CacheService.getScriptCache().get('tgq') || '[]'); } catch (x) { q = []; }
-  return Array.isArray(q) ? q.map(String) : [];
+  return Array.isArray(q) ? q.map(function (x) { return Array.isArray(x) ? [String(x[0]), x[1] === true] : [String(x), false]; }) : [];
+}
+// A failed add waits once per Telegram ID; a tick on any of its verifies counts.
+function tgEnqueue_(q, id, yes) {
+  for (var i = 0; i < q.length; i++) if (q[i][0] === id) { q[i][1] = q[i][1] || yes; return; }
+  q.push([id, yes]);
 }
 function tgQueueSave_(q) {
   var cache = CacheService.getScriptCache();
   if (q.length) cache.put('tgq', JSON.stringify(q.slice(-500)), TG_NONCE_S); else cache.remove('tgq');
 }
-// The bot's answers, sent together. A lost answer is not retried: the game shows the result anyway.
+// The verified answer's button: the page the phone verified from (tgBack_, else GAME_URL) with the nonce, so that
+// page verifies at once in whatever browser Telegram opens, and the app the player picked, so it opens that app.
+function tgBackUrl_(cache, nonce) {
+  var b;
+  try { b = JSON.parse(cache.get('tgb:' + nonce)) || {}; } catch (x) { b = {}; }
+  return (b.back || GAME_URL) + '?tg=' + nonce + (b.app ? '&app=' + b.app : '');
+}
+// The bot's answers ({ chat, text, url? }), sent together; one with a url gets the Back to the game button. A lost
+// answer is not retried: the game shows the result anyway.
 function tgSend_(token, out) {
-  var reqs = [], i;
+  var reqs = [], i, body;
   for (i = 0; i < out.length; i++) {
+    body = { chat_id: out[i].chat, text: out[i].text, disable_web_page_preview: true };
+    if (out[i].url) body.reply_markup = { inline_keyboard: [[{ text: TG_SAY.back, url: out[i].url }]] };
     reqs.push({ url: TG_API + token + '/sendMessage', method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-      payload: JSON.stringify({ chat_id: out[i][0], text: out[i][1], disable_web_page_preview: true }) });
+      payload: JSON.stringify(body) });
   }
   if (!reqs.length) return;
   try { UrlFetchApp.fetchAll(reqs); } catch (x) { /* never rethrown or logged: its message can carry the token */ }
@@ -511,16 +588,24 @@ function tgBook_(book) {
   return book.sh;
 }
 // A verified Telegram ID in the contacts Sheet, once (Kind 'telegram id'; no player id, score or token, as ever).
-function addTgContact_(tgId, book) {
-  var id = String(tgId), cache = CacheService.getScriptCache(), sh, rows, i;
-  if (cache.get('tgc:' + id)) return;
+// Curator info is yes only when the game said the player ticked the consent box (messages on taking part in real
+// contests): agree on the nonce's tgcheck ('tga:', yes here). A page opened before the tick existed says nothing, so
+// its player's row has it empty; a later verify with the tick sets it on the row already there. The cache ('tgc:')
+// remembers the row and whether it says yes.
+function addTgContact_(tgId, book, yes) {
+  var id = String(tgId), cache = CacheService.getScriptCache(), had = cache.get('tgc:' + id), sh, rows, i;
+  if (had === 'yes' || (had && !yes)) return;
   sh = tgBook_(book || {});
-  rows = rows_(sh, 3);
+  rows = rows_(sh, 4);
   for (i = 0; i < rows.length; i++) {
-    if (String(rows[i][1]).replace(/^'/, '') === id && String(rows[i][2]) === 'telegram id') { cache.put('tgc:' + id, '1', 21600); return; }
+    if (String(rows[i][1]).replace(/^'/, '') === id && String(rows[i][2]) === 'telegram id') {
+      if (yes && rows[i][3] !== 'yes') sh.getRange(i + 2, 4, 1, 1).setValue('yes');
+      cache.put('tgc:' + id, yes || rows[i][3] === 'yes' ? 'yes' : '1', 21600);
+      return;
+    }
   }
-  sh.appendRow(["'" + dayKey_(now_()), text_(id), 'telegram id', '', 'Devcon VIII Mumbai', 'curate bot', '']);
-  cache.put('tgc:' + id, '1', 21600);
+  sh.appendRow(["'" + dayKey_(now_()), text_(id), 'telegram id', yes ? 'yes' : '', 'Devcon VIII Mumbai', 'curate bot', '']);
+  cache.put('tgc:' + id, yes ? 'yes' : '1', 21600);
 }
 // /stop: every contacts row of this Telegram ID goes (bottom up, so the row numbers ahead stay right).
 function removeTgContact_(tgId, book) {
@@ -666,7 +751,8 @@ function staffSetup() {
   Logger.log('Ready (' + SCRIPT_V + '): Badge claims, Tries, Switches (with Verify with); Contacts in the contacts sheet.');
   Logger.log(tgToken_() ? 'Telegram: ready' :
     'Telegram: add TG_TOKEN in Project Settings › Script properties, then run telegramTest');
-  Logger.log('Telegram: the bot is read every ' + TG_TICK_MIN + ' minutes (trigger tgTick), so /stop works without a verifying phone.');
+  Logger.log('Telegram: the bot is read every ' + (TG_TICK_MIN === 1 ? 'minute' : TG_TICK_MIN + ' minutes') +
+    ' (trigger tgTick), so /stop works without a verifying phone.');
 }
 // Run after pasting the bot token into Script properties (TG_TOKEN): checks it with getMe, then removes any webhook
 // (getUpdates fails while one is set). Logs the bot's username or Telegram's error, never the token.

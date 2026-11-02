@@ -165,9 +165,16 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
   font:700 16.5px Inter,sans-serif; color:#fff; text-decoration:none;
   background:linear-gradient(95deg,var(--kleros-deep) 0%,var(--kleros) 45%,var(--pink) 100%) padding-box,conic-gradient(from var(--edge-angle,210deg),#c084ff,#27cdfe 25%,#6cc5ff 50%,rgba(192,132,255,.35) 75%,#c084ff) border-box; }
 .intro-start button:disabled { opacity:.55; cursor:default; }
-/* Telegram mode: Verify with Telegram is a real link (iOS opens the app only for a link tap), styled as the buttons */
+/* Telegram mode: Verify with Telegram is a real link (iOS opens the app only for a link tap), styled as the buttons.
+   Until the consent box above it is ticked it has no href: dimmed, like a disabled button */
 a.primary { display:flex; align-items:center; justify-content:center; text-decoration:none; }
-#intro-priv { margin:8px 6px 0; }
+a.primary[aria-disabled=true] { opacity:.55; cursor:default; }
+a.primary[aria-disabled=true]:active { transform:none; }
+/* The consent tick: a real checkbox and its label, the Privacy link after the text (outside the label) */
+#intro-priv { display:flex; gap:10px; align-items:flex-start; margin:0 2px 10px; text-align:left; }
+#intro-consent { width:22px; height:22px; flex:none; margin:0; accent-color:var(--teal); cursor:pointer; }
+#intro-priv p { margin:0; font-size:12.5px; line-height:1.4; color:#d0c8ee; }
+#intro-priv label { cursor:pointer; }
 /* QR codes (badge.js draws an <svg>, dark on white with its quiet zone): the ticket's for the desk, the tablet's Telegram link */
 .qr { width:200px; height:200px; margin:0 auto; border-radius:8px; overflow:hidden; background:#fff; }
 .qr svg { display:block; width:100%; height:100%; }
@@ -198,6 +205,8 @@ a.primary { display:flex; align-items:center; justify-content:center; text-decor
   .ex-rows li + li::before { content:' · '; color:var(--muted); }
   .ex-rows li.is-bad > span { padding:0 4px; }
   .ex-why { font-size:12.5px; }
+  #intro-priv { margin-bottom:8px; }
+  #intro-priv p { font-size:12px; line-height:1.35; }
 }
 /* How it works: a bottom sheet (a modal <dialog>; the open attribute alone where showModal is missing) */
 #how { position:fixed; inset:auto 0 0; z-index:40; width:100%; max-width:480px; max-height:86vh; max-height:86svh; margin:0 auto; padding:0; border:0; background:transparent; color:var(--text); overflow:auto; }
@@ -603,14 +612,15 @@ a.primary { display:flex; align-items:center; justify-content:center; text-decor
   <div id="intro-ex"></div>
   <div class="intro-start">
     <p id="intro-badge" hidden></p>
-    <p id="intro-note" role="status"></p>
+    <p id="intro-note" role="status" tabindex="-1"></p>
     <button type="button" class="primary" id="intro-unlock" hidden>Unlock my ticket</button>
     <button type="button" class="primary" id="intro-go">Start</button>
     <button type="button" class="primary" id="intro-scan" hidden>Scan your badge</button>
-    <!-- Telegram mode: rewards.js sets the link's nonce and label; a booth tablet shows it as a QR instead -->
-    <a class="primary" id="intro-tg" hidden href="https://t.me/KlerosBoothBot">Open Telegram</a>
-    <div id="intro-qr" hidden><div class="qr" id="intro-qr-img" role="img" aria-label="QR code that opens the Kleros Booth bot in Telegram"></div><p id="intro-qr-cap"></p></div>
-    <p class="fine" id="intro-priv" hidden><span id="intro-priv-text"></span> <a class="link" href="#curate-privacy">Privacy</a></p>
+    <!-- Telegram mode: the consent tick first (rewards.js keeps it and writes its label), then the link: rewards.js sets
+         its nonce and label, and gives it an href only once the box is ticked. A booth tablet shows a QR instead -->
+    <div id="intro-priv" hidden><input type="checkbox" id="intro-consent"><p><label for="intro-consent" id="intro-priv-text"></label> <a class="link" href="#curate-privacy">Privacy</a></p></div>
+    <a class="primary" id="intro-tg" hidden>Open Telegram</a>
+    <div id="intro-qr" hidden><div class="qr" id="intro-qr-img" role="img" tabindex="-1" aria-label="QR code that opens the Kleros Booth bot in Telegram"></div><p id="intro-qr-cap"></p></div>
     <div class="links">
       <button type="button" class="ghost" id="intro-fun" hidden>Play for fun</button>
       <button type="button" class="ghost" id="intro-change" hidden>Not your badge?</button>
@@ -702,7 +712,8 @@ a.primary { display:flex; align-items:center; justify-content:center; text-decor
 <details id="curate-privacy">
   <summary>Privacy</summary>
   <p id="cp-tg">If you play with Telegram, Cooperative Kleros keeps your Telegram user ID (a number: never your name or
-  username) in a private list, to send you Kleros news through the Kleros Booth bot. We keep it until you send /stop
+  username) in a private list, to send you Telegram messages through the Kleros Booth bot on how to take part in real
+  contests across Kleros apps. We keep it until you send /stop
   to the bot, which deletes it, or ask us to delete it: <span id="cp-mail-tg">ask at the booth</span>. Your game tries
   are stored under a scrambled code, in a separate list, never next to your Telegram ID.</p>
   <p id="cp-contact" hidden>If you leave an email or @Telegram to unlock merch, Cooperative Kleros keeps it in a private list for the

@@ -3,7 +3,8 @@
 // outside the Crypto exchange app, and Curate’s jargon on the play screen) and file sizes; with --sim, the §2.8
 // tier simulation (v5 pick model; 2 Nov: 2 counted tries per badge for the whole event). Badge tries (2 Nov): the booth web app
 // (apps-script/staff-desk/Code.gs) runs here against an in-memory Sheets stub, and rewards.js, earn.js and badge.js
-// run against it in fake pages. Verify modes (3 Nov): the same in telegram mode (a fake Telegram Bot API) and none mode.
+// run against it in fake pages. Verify modes (3 Nov): the same in telegram mode (a fake Telegram Bot API) and none mode;
+// 3 Nov b: the consent tick, the bot's Back to the game button and the game's landing from it.
 // Node 22, no dependencies. It runs the very settings.js, decks.js and rules.js the phones load.
 //   node scripts/curate-check.js          checks only
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
@@ -923,6 +924,11 @@ function jpegHeight(buf) {
 // rewards.js 92 KB / 29.25 KB gz holds the Telegram verify flow, its tgcheck polling, the kiosk QR, mode-aware copy,
 // the ticket QR text and the QR retry, measured 91.4 / 29.1; badge.js 11.5 KB / 4.75 KB gz adds loadQR and qr() (the
 // SVG drawing; the generator itself is lazy), measured 11.4 / 4.7. The total follows: 338 KB / 108.5 KB gz.
+// 3 Nov b (spec 2): rewards.js 97 KB / 31 KB gz holds the consent tick (its key, the dimmed link, Tick the box first),
+// back and app on every tgcheck and the way back from the bot's Back to the game button (tgLand, landed), measured
+// 96.0 / 30.6. The total follows: 344 KB / 110.25 KB gz.
+// 3 Nov c (review): badge.js 11.75 KB / 4.875 KB gz, as post() passes keepalive (the Telegram tap's ask outlives the
+// page), measured 11.55 / 4.79. rewards.js (the watch, agree, the tablet's focus) and the total stay within theirs.
 var BUDGETS = {
   // settings.js +0.5 KB and earn.js: the Earn for real sign-up (30 Oct); +0.25 KB: separate desk and sign-up sheets (2 Nov).
   'settings.js': [4.8 * KB, 0, true], 'earn.js': [6 * KB, 2.5 * KB], 'decks.js': [47.5 * KB, 13.75 * KB, true], 'rules.js': [9.2 * KB, 0, true],
@@ -930,9 +936,9 @@ var BUDGETS = {
   // game.js +0.25 KB gz: a stale start reply is ignored and the scanner skips non-badge codes (2 Nov review).
   'objects.js': [33.5 * KB, 12.5 * KB], 'gl.js': [21 * KB, 8.25 * KB], 'game.js': [58 * KB, 18.75 * KB],
   // rewards.js +0.5 KB gz in v6: the tries line, the early-end headline and the just-for-fun tier line.
-  'rewards.js': [92 * KB, 29.25 * KB], 'index.html': [77 * KB, 22 * KB], 'badge.js': [11.5 * KB, 4.75 * KB]
+  'rewards.js': [97 * KB, 31 * KB], 'index.html': [77 * KB, 22 * KB], 'badge.js': [11.75 * KB, 4.875 * KB]
 };
-var TOTAL = [338 * KB, 108.5 * KB];   // eager files only: gl.js loads later, and only where WebGL runs; jsQR only to scan
+var TOTAL = [344 * KB, 110.25 * KB];   // eager files only: gl.js loads later, and only where WebGL runs; jsQR only to scan
 function checkSizes() {
   var total = 0, totalGz = 0, imgs = [], imgTotal = 0, big = 0;
   console.log('Sizes (raw / gzip, budget)');
@@ -978,8 +984,12 @@ function checkSizes() {
 // locks (H.docBusy; opts.nodoclock: getDocumentLock() answers null, as Apps Script documents for a web app),
 // Utilities.computeHmacSha256Signature (signed bytes, as Apps Script returns them) and getUuid, and UrlFetchApp
 // against a fake Bot API (H.tg): getUpdates serves H.tg.updates from the offset sent, sendMessage (fetchAll) lands in
-// H.tg.sent, H.tg.down makes every fetch throw with the URL (and so the token) in its message, as Apps Script does.
+// H.tg.sent ({ chat, text, preview, markup }: markup is reply_markup, 3 Nov b), H.tg.down makes every fetch throw with
+// the URL (and so the token) in its message, as Apps Script does.
 // ScriptApp (3 Nov review): the project's triggers in H.triggers ({ fn, minutes }), so staffSetup's tgTick shows.
+// 3 Nov c (review): a long poll (getUpdates timeout up to 25 s, each in H.tg.waits) with nothing to read waits: the
+// clock moves on by the timeout, or H.tg.wait(seconds) runs instead (it may queue a message and move the clock
+// itself); H.tg.instant answers at once without moving it. Each sent message keeps the clock (at). deleteTrigger.
 // opts.mode: Verify with set to that mode (writeMode_) before any case; opts.token: TG_TOKEN set.
 var GS_SRC = fs.existsSync(GS) ? fs.readFileSync(GS, 'utf8') : '';
 var GS_T0 = Date.parse('2026-11-03T05:00:00Z');   // 10:30 IST on the first booth day
@@ -988,7 +998,7 @@ function gsHarness(opts) {
   opts = opts || {};
   var H = { clock: GS_T0, lockBusy: false, docBusy: false, offline: false, logs: [], toasts: [], alerts: [], writes: [], menu: [],
     locks: [], triggers: [] }, cache = {}, props = {};
-  H.tg = { updates: [], sent: [], calls: [], gets: 0, offsets: [], down: false, seq: 500000, username: 'KlerosBoothBot' };
+  H.tg = { updates: [], sent: [], calls: [], gets: 0, offsets: [], waits: [], down: false, instant: false, wait: null, seq: 500000, username: 'KlerosBoothBot' };
   function coerce(v) {
     H.writes.push(v);
     if (typeof v !== 'string') return v;
@@ -1074,17 +1084,23 @@ function gsHarness(opts) {
     if (m[2] === 'deleteWebhook') return reply(200, { ok: true, result: true });
     if (m[2] === 'getUpdates') {
       H.tg.gets++;
-      if (q.allowed_updates !== '["message"]' || q.timeout !== '0' || !(Number(q.limit) >= 1)) throw new Error('getUpdates query ' + m[3]);
+      if (q.allowed_updates !== '["message"]' || !/^(0|[1-9]\d?)$/.test(q.timeout || '') || Number(q.timeout) > 25 || !(Number(q.limit) >= 1)) {
+        throw new Error('getUpdates query ' + m[3]);
+      }
       off = Number(q.offset) || 0;
-      H.tg.offsets.push(off);
+      H.tg.offsets.push(off); H.tg.waits.push(Number(q.timeout));
       // Telegram forgets every update below the offset it is sent (they count as read).
       H.tg.updates = H.tg.updates.filter(function (u) { return u.update_id >= off; });
+      // A long poll with nothing to read waits for a message or the timeout.
+      if (!H.tg.updates.length && Number(q.timeout) > 0 && !H.tg.instant) {
+        if (H.tg.wait) H.tg.wait(Number(q.timeout)); else H.clock += Number(q.timeout) * 1000;
+      }
       return reply(200, { ok: true, result: H.tg.updates.slice(0, Number(q.limit)) });
     }
     if (m[2] === 'sendMessage') {
       if (!o || String(o.method).toLowerCase() !== 'post' || o.contentType !== 'application/json') throw new Error('sendMessage is a JSON POST');
       body = JSON.parse(o.payload);
-      H.tg.sent.push({ chat: body.chat_id, text: body.text, preview: body.disable_web_page_preview });
+      H.tg.sent.push({ chat: body.chat_id, text: body.text, preview: body.disable_web_page_preview, markup: body.reply_markup, at: H.clock });
       return reply(200, { ok: true, result: { message_id: H.tg.sent.length } });
     }
     return reply(404, { ok: false, error_code: 404, description: 'Not Found' });
@@ -1129,7 +1145,12 @@ function gsHarness(opts) {
     UrlFetchApp: { fetch: botApi, fetchAll: function (reqs) { return reqs.map(function (r) { return botApi(r.url, r); }); } },
     // Time-driven triggers only, at the intervals Apps Script allows.
     ScriptApp: {
-      getProjectTriggers: function () { return H.triggers.map(function (t) { return { getHandlerFunction: function () { return t.fn; } }; }); },
+      getProjectTriggers: function () { return H.triggers.map(function (t) { return { t: t, getHandlerFunction: function () { return t.fn; } }; }); },
+      deleteTrigger: function (x) {
+        var i = x ? H.triggers.indexOf(x.t) : -1;
+        if (i < 0) throw new Error('deleteTrigger takes one of getProjectTriggers()');
+        H.triggers.splice(i, 1);
+      },
       newTrigger: function (fn) {
         return { timeBased: function () { return { everyMinutes: function (n) {
           if ([1, 5, 10, 15, 30].indexOf(n) < 0) throw new Error('everyMinutes ' + n + ' is not an Apps Script interval');
@@ -1375,15 +1396,20 @@ function checkServer() {
 // ---- Booth web app: how players verify (3 Nov) ----
 // The Switches "Verify with" row (Telegram by default), setmode, start's signature check, tgcheck against the fake
 // Bot API (gsHarness), the bot's answers and its contacts rows, and the desk's check by ticket QR or typed C- code.
+// 3 Nov b (spec 2): a short verified answer with one Back to the game button (the page and app the phone sent with
+// tgcheck, else the live game), and Curator info yes on the bot's contacts rows (the game's consent tick).
 var TG_SAY = {   // the spec's bot copy, word for word
-  verified: '✅ You’re verified for the Kleros Curate game. Go back to the game to play.\n\nYou’ll also get Kleros news here. We keep your Telegram ID only. Send /stop any time to leave, and we delete it.',
+  verified: '✅ You’re verified. Tap below to go back to the game.',
+  back: '▶️ Back to the game',   // the verified answer's one button
   help: 'This bot verifies players for the Kleros Curate game at the Kleros booth. Open devcon.kleros.io/curate and tap Verify with Telegram.',
   stopped: 'Done: you’re off Kleros news and your Telegram ID is deleted. Your game tries still count.',
   stopRetry: 'Sorry, that didn’t go through. Please send /stop again in a minute.'   // 3 Nov review: a /stop whose delete failed
 };
 function checkVerify() {
   var n = 0, H, r, q, i, t, tmp, cell, sw, before, gets, nc = [], id1, id2, sig1, code, row, A = 'a'.repeat(64), seq = 0,
-    TG1 = 5550001234, TG2 = 5550009876, TG3 = 5550005555, NOTE = 'Telegram: add TG_TOKEN in Project Settings › Script properties, then run telegramTest';
+    TG1 = 5550001234, TG2 = 5550009876, TG3 = 5550005555, NOTE = 'Telegram: add TG_TOKEN in Project Settings › Script properties, then run telegramTest',
+    GAME = 'https://devcon.kleros.io/curate/', NETLIFY = 'https://kleros-devcon.netlify.app/curate/',
+    PREVIEW = 'https://deploy-preview-12--kleros-devcon.netlify.app/curate/', u, t0, t1, t2, wa, wb, k;
   function ok(cond, msg) { n++; if (!cond) fail('Code.gs verify: ' + msg); }
   function tok(p) { seq++; return ((p || 'vt') + seq + 'qwertyuiopasdfghjkzx').slice(0, 20); }
   // A nonce as the phone makes it: 24 letters and digits.
@@ -1395,13 +1421,22 @@ function checkVerify() {
   }
   function staff(h, b) { b.key = h.props.STAFF_KEY; return h.call(b); }
   // A phone's tgcheck, past the 2 s poll throttle (the phone asks every 2.5 s).
-  function tgcheck(h, nn) { h.clock += 2100; return h.call({ action: 'tgcheck', nonce: nn }); }
+  // more: back and app, as the phone sends them (3 Nov b).
+  function tgcheck(h, nn, more) {
+    var b = { action: 'tgcheck', nonce: nn }, k;
+    for (k in more || {}) b[k] = more[k];
+    h.clock += 2100; return h.call(b);
+  }
+  // The verified answer's keyboard: one Back to the game button to url (3 Nov b).
+  function backKb(url) { return JSON.stringify({ inline_keyboard: [[{ text: TG_SAY.back, url: url }]] }); }
   function contactRows(h) { return h.contacts.sheets.Contacts.rows.slice(1).filter(function (x) { return x && x.length; }); }
   function tgRows(h, id) { return contactRows(h).filter(function (x) { return String(x[1]) === String(id) && x[2] === 'telegram id'; }); }
+  // The cache's waiting adds ('tgq') as Code.gs keeps them (3 Nov c): [Telegram ID, ticked], no tick unless said.
+  function waiting(ids, ticked) { return JSON.stringify(ids.map(function (x) { return [String(x), (ticked || []).indexOf(x) > -1]; })); }
   if (!GS_SRC) return;
   // Version, the default mode and the Verify with row: a text cell with its dropdown, never a checkbox.
   H = gsHarness();
-  ok(H.ctx.SCRIPT_V === '2026-11-03a', 'SCRIPT_V is ' + H.ctx.SCRIPT_V);
+  ok(H.ctx.SCRIPT_V === '2026-11-03b', 'SCRIPT_V is ' + H.ctx.SCRIPT_V);
   r = H.call({ action: 'status' });
   ok(r.ok && r.mode === 'telegram' && r.tg === false, 'a sheet with no Switches tab: mode ' + r.mode + ', tg ' + r.tg);
   H.ctx.staffSetup();
@@ -1416,8 +1451,13 @@ function checkVerify() {
   H.props.TG_TOKEN = '  ' + TG_TOKEN + '\n'; H.ctx.staffSetup();
   ok(H.props.TG_SECRET === t && H.verifyCell().row === 6 && H.tab('Switches').getLastRow() === 7 && H.logs.indexOf('Telegram: ready') > -1,
     'a second staffSetup changed TG_SECRET, added a row or did not say ready');
-  // staffSetup installs the tgTick trigger (every 5 minutes) once, so /stop is read with no phone verifying.
-  ok(JSON.stringify(H.triggers) === '[{"fn":"tgTick","minutes":5}]' && typeof H.ctx.tgTick === 'function', 'the tgTick trigger ' + JSON.stringify(H.triggers));
+  // staffSetup installs the tgTick trigger once, so /stop is read (and a slow Start answered) with no phone verifying:
+  // every minute since 3 Nov c (review). It replaces the 5-minute one an earlier copy installed, and only that one.
+  ok(JSON.stringify(H.triggers) === '[{"fn":"tgTick","minutes":1}]' && typeof H.ctx.tgTick === 'function', 'the tgTick trigger ' + JSON.stringify(H.triggers));
+  ok(H.logs.indexOf('Telegram: the bot is read every minute (trigger tgTick), so /stop works without a verifying phone.') > -1, 'staffSetup on tgTick: ' + H.logs.slice(-1));
+  q = gsHarness(); q.triggers.push({ fn: 'other', minutes: 10 }, { fn: 'tgTick', minutes: 5 });
+  q.ctx.staffSetup();
+  ok(JSON.stringify(q.triggers) === '[{"fn":"other","minutes":10},{"fn":"tgTick","minutes":1}]', 'staffSetup over a 5-minute tgTick ' + JSON.stringify(q.triggers));
   ok(H.call({ action: 'status' }).tg === true, 'status tg with a token pasted with spaces');
   // The live sheet (2 Nov): four switch rows and the note in row 7; Verify with goes into row 6, the rest stays.
   q = gsHarness(); tmp = q.bound.insertSheet('Switches');
@@ -1486,8 +1526,10 @@ function checkVerify() {
   id1 = H.tgId(TG1); sig1 = H.sig(id1);
   ok(r.ok && r.verified === true && r.badge === id1 && r.sig === sig1 && /^[0-9a-f]{64}$/.test(r.badge) && /^[0-9a-f]{32}$/.test(r.sig),
     'tgcheck after /start: ' + JSON.stringify(r) + ' want ' + id1 + ' / ' + sig1);
-  ok(H.tg.sent.length === 1 && H.tg.sent[0].chat === TG1 && H.tg.sent[0].text === TG_SAY.verified && H.tg.sent[0].preview === true,
-    'the verified answer ' + JSON.stringify(H.tg.sent));
+  // Its one button: the live game with the nonce (this phone sent no back), so that page verifies at once.
+  ok(H.tg.sent.length === 1 && H.tg.sent[0].chat === TG1 && H.tg.sent[0].text === TG_SAY.verified && H.tg.sent[0].preview === true &&
+    JSON.stringify(H.tg.sent[0].markup) === backKb(GAME + '?tg=' + t), 'the verified answer ' + JSON.stringify(H.tg.sent));
+  // Curator info: empty here, since no tgcheck said the box was ticked (agree; its own cases below, 3 Nov c).
   row = tgRows(H, TG1);
   ok(row.length === 1 && row[0][0] === dayOf(H) && row[0][3] === '' && row[0][4] === 'Devcon VIII Mumbai' && row[0][5] === 'curate bot' &&
     row[0][6] === '' && typeof row[0][1] === 'string' && H.writes.indexOf('\'' + TG1) > -1, 'the contacts row ' + JSON.stringify(row));
@@ -1520,7 +1562,7 @@ function checkVerify() {
   H.tg.say(TG3, '/start ' + t, { chat: 'group' }); H.tg.say(TG3, '/start ' + t, { isBot: true }); H.tg.say(TG3, '/start ' + t, { noFrom: true });
   r = tgcheck(H, t);
   tmp = H.tg.sent.slice(i);
-  ok(!r.verified && contactRows(H).length === before && tmp.length === 4 && tmp.every(function (x) { return x.text === TG_SAY.help && x.chat === TG3; }),
+  ok(!r.verified && contactRows(H).length === before && tmp.length === 4 && tmp.every(function (x) { return x.text === TG_SAY.help && x.chat === TG3 && !x.markup; }),
     'help answers ' + JSON.stringify(tmp) + ' ' + JSON.stringify(r));
   // /stop deletes every row of that account (a hand-made duplicate too), answers stopped, and keeps the other's.
   H.contacts.sheets.Contacts.appendRow(['\'2026-11-03', '\'' + TG1, 'telegram id', '', 'Devcon VIII Mumbai', 'curate bot', '']);
@@ -1529,10 +1571,84 @@ function checkVerify() {
   H.tg.say(TG1, '/stop');
   tgcheck(H, nonce());
   ok(tgRows(H, TG1).length === 0 && tgRows(H, TG2).length === 1 && contactRows(H).some(function (x) { return x[1] === 'ana@example.org'; }) &&
-    H.tg.sent.length === i + 1 && H.tg.sent[i].text === TG_SAY.stopped && !H.cache['tgc:' + TG1], '/stop ' + JSON.stringify(contactRows(H)));
+    H.tg.sent.length === i + 1 && H.tg.sent[i].text === TG_SAY.stopped && !H.tg.sent[i].markup && !H.cache['tgc:' + TG1], '/stop ' + JSON.stringify(contactRows(H)));
   // After /stop the id still plays (tries count), and verifying again adds the row back.
   t = nonce(); H.tg.say(TG1, '/start ' + t);
   ok(tgcheck(H, t).badge === id1 && tgRows(H, TG1).length === 1, 'verifying again after /stop');
+  // Back to the game (3 Nov b): the phone names its page (back) and app with every tgcheck while it waits; the bot's
+  // verified answer opens that page with ?tg=NONCE&app=APP, else the live game with ?tg=NONCE. Kept per nonce
+  // ('tgb:', 6 h) until it is verified, and stored before the poll the same call runs. Anything else: ignored, no error.
+  q = gsHarness({ token: true }); q.ctx.staffSetup();
+  t = nonce(); q.tg.say(TG1, '/start ' + t);
+  r = tgcheck(q, t, { back: PREVIEW, app: 'tokens' });
+  u = q.tg.sent[q.tg.sent.length - 1];
+  ok(r.ok && r.verified && r.badge === q.tgId(TG1) && u && u.text === TG_SAY.verified && JSON.stringify(u.markup) === backKb(PREVIEW + '?tg=' + t + '&app=tokens'),
+    'Back to the game, from the tgcheck whose poll verified it ' + JSON.stringify([r, u]));
+  // Sent earlier, then again with another page and app (the later wins); a tgcheck without back keeps it; the poll
+  // another phone's tgcheck runs uses it.
+  t = nonce();
+  r = tgcheck(q, t, { back: GAME, app: 'sights' });
+  ok(r.ok && r.verified === false && r.error === undefined && q.cache['tgb:' + t] && q.cache['tgb:' + t].v === JSON.stringify({ back: GAME, app: 'sights' }) &&
+    q.cache['tgb:' + t].t === q.clock + q.ctx.TG_NONCE_S * 1000, 'tgcheck with back and app ' + JSON.stringify([r, q.cache['tgb:' + t]]));
+  tgcheck(q, t, { back: NETLIFY, app: 'countries' }); tgcheck(q, t); tgcheck(q, t, { app: 'tokens' });
+  q.tg.say(TG2, '/start ' + t);
+  tgcheck(q, nonce());
+  u = q.tg.sent[q.tg.sent.length - 1];
+  ok(u.chat === TG2 && JSON.stringify(u.markup) === backKb(NETLIFY + '?tg=' + t + '&app=countries') && tgcheck(q, t).badge === q.tgId(TG2),
+    'a later back and app, used by a poll another phone ran ' + JSON.stringify(u));
+  // No app, or an empty one: the page alone.
+  [{ back: NETLIFY }, { back: NETLIFY, app: '' }, { back: NETLIFY, app: null }].forEach(function (x) {
+    var nn = nonce(), y;
+    tgcheck(q, nn, x); q.tg.say(TG1, '/start ' + nn); tgcheck(q, nn);
+    y = q.tg.sent[q.tg.sent.length - 1];
+    ok(JSON.stringify(y.markup) === backKb(NETLIFY + '?tg=' + nn), 'Back to the game with ' + JSON.stringify(x) + ': ' + JSON.stringify(y.markup));
+  });
+  // Ignored, never an error: not https, localhost, another host or a look-alike, another path, a query or hash, a
+  // trailing newline, a preview number too long, upper case, not a string; or a good back with an app that isn't one.
+  tmp = [];
+  ['http://devcon.kleros.io/curate/', 'https://localhost:8080/curate/', 'http://localhost:8080/curate/', 'https://127.0.0.1/curate/',
+    'https://evil.example/curate/', 'https://devcon.kleros.io.evil.example/curate/', 'https://evildevcon.kleros.io/curate/',
+    'https://devcon.kleros.io/curate', 'https://devcon.kleros.io/', 'https://devcon.kleros.io/curate/x', 'https://devcon.kleros.io/curate/index.html',
+    'https://devcon.kleros.io/curate/?lite=0', 'https://devcon.kleros.io/curate/#x', 'https://devcon.kleros.io/curate/\n', ' https://devcon.kleros.io/curate/',
+    'https://DEVCON.KLEROS.IO/curate/', 'https://user@devcon.kleros.io/curate/', 'https://devcon.kleros.io:444/curate/',
+    'https://deploy-preview-123456--kleros-devcon.netlify.app/curate/', 'https://deploy-preview---kleros-devcon.netlify.app/curate/',
+    'https://deploy-preview-12--kleros-devcon.netlify.app.evil.example/curate/', 'javascript:alert(1)//https://devcon.kleros.io/curate/', '',
+    [GAME], { back: GAME }, 5, true].forEach(function (b) { tmp.push([b, 'sights']); });
+  ['evil', 'Sights', 'sights ', 5, 0, true, false, ['sights'], { app: 'sights' }, 'constructor', '__proto__'].forEach(function (a) { tmp.push([NETLIFY, a]); });
+  i = q.tg.sent.length;
+  tmp.forEach(function (x) {
+    x.n = nonce(); x.r = tgcheck(q, x.n, { back: x[0], app: x[1] }); x.kept = q.cache['tgb:' + x.n];
+    q.tg.say(TG3, '/start ' + x.n);
+  });
+  tgcheck(q, nonce());
+  u = q.tg.sent.slice(i);
+  tmp.forEach(function (x, j) {
+    var url = u[j] && u[j].markup ? u[j].markup.inline_keyboard[0][0].url : '';
+    ok(x.r.ok === true && x.r.verified === false && x.r.error === undefined && !x.kept && url === GAME + '?tg=' + x.n,
+      'back ' + JSON.stringify(x[0]) + ' with app ' + JSON.stringify(x[1]) + ' was not ignored: ' + JSON.stringify([x.r, x.kept, url]));
+  });
+  ok(u.length === tmp.length, 'answers to the ignored backs: ' + u.length + ' of ' + tmp.length);
+  // A verified nonce keeps no back; a failed cache write is not an error (the button opens the live game); the
+  // tgTick trigger's poll uses the stored page too.
+  t = nonce(); q.tg.say(TG1, '/start ' + t); tgcheck(q, t);
+  r = tgcheck(q, t, { back: NETLIFY, app: 'tokens' });
+  ok(r.verified && !q.cache['tgb:' + t], 'a back kept for a verified nonce ' + JSON.stringify(q.cache['tgb:' + t]));
+  tmp = q.ctx.CacheService.getScriptCache; t = nonce();
+  q.ctx.CacheService.getScriptCache = function () {
+    var c = tmp(), put = c.put;
+    c.put = function (k, v, s) { if (/^tgb:/.test(k)) throw new Error('Exception: quota'); return put(k, v, s); };
+    return c;
+  };
+  r = tgcheck(q, t, { back: NETLIFY, app: 'tokens' });
+  q.ctx.CacheService.getScriptCache = tmp;
+  q.tg.say(TG1, '/start ' + t); tgcheck(q, t);
+  ok(r.ok && r.verified === false && JSON.stringify(q.tg.sent[q.tg.sent.length - 1].markup) === backKb(GAME + '?tg=' + t), 'a failed cache write ' + JSON.stringify(r));
+  t = nonce(); tgcheck(q, t, { back: PREVIEW, app: 'countries' }); q.tg.say(TG2, '/start ' + t);
+  q.clock += 2100; q.ctx.tgTick();
+  u = q.tg.sent[q.tg.sent.length - 1];
+  ok(u.text === TG_SAY.verified && JSON.stringify(u.markup) === backKb(PREVIEW + '?tg=' + t + '&app=countries'), 'tgTick: Back to the game ' + JSON.stringify(u.markup));
+  tmp = q.logs.join('\n');
+  ok(nc.every(function (x) { return tmp.indexOf(x) < 0; }) && tmp.indexOf('curate/') < 0, 'a log line holds a nonce or a back:\n' + tmp);
   // The poll runs at most every 2 s for all phones; a nonce lasts 6 h.
   gets = H.tg.gets;
   H.clock += 2100; H.call({ action: 'tgcheck', nonce: nonce() }); H.call({ action: 'tgcheck', nonce: nonce() }); H.clock += 1500;
@@ -1573,13 +1689,13 @@ function checkVerify() {
   r = tgcheck(H, t); row = tgcheck(H, code);
   ok(r.ok && r.verified && r.badge === H.tgId(TG3 + 1) && row.verified && row.badge === H.tgId(TG3 + 3) && H.props.TG_OFFSET === String(before + 1) && q === 1,
     'a broken contacts sheet stopped verifying ' + JSON.stringify([r, row, H.props.TG_OFFSET, before, q]));
-  ok(H.tg.sent.slice(i).map(function (x) { return x.text === TG_SAY.stopRetry ? 'retry' : x.text === TG_SAY.verified ? 'ok' : x.text; }).join() === 'retry,ok,ok,ok' &&
-    tgRows(H, TG3 + 1).length === 0 && JSON.parse(H.cache.tgq.v).join() === [TG3 + 1, TG3 + 3, TG3 + 4].join(), 'the answers or the waiting adds ' +
+  ok(H.tg.sent.slice(i).map(function (x) { return x.text === TG_SAY.stopRetry && !x.markup ? 'retry' : x.text === TG_SAY.verified && x.markup ? 'ok' : x.text; }).join() === 'retry,ok,ok,ok' &&
+    tgRows(H, TG3 + 1).length === 0 && H.cache.tgq.v === waiting([TG3 + 1, TG3 + 3, TG3 + 4]), 'the answers or the waiting adds ' +
     JSON.stringify([H.tg.sent.slice(i), H.cache.tgq]));
   // A /stop while its add still waits drops it, so the ID never comes back; the sheet back, the rest are added.
   i = H.tg.sent.length; H.tg.say(TG3 + 4, '/stop');
   tgcheck(H, nonce());
-  ok(H.tg.sent.length === i + 1 && H.tg.sent[i].text === TG_SAY.stopRetry && q === 2 && JSON.parse(H.cache.tgq.v).join() === [TG3 + 1, TG3 + 3].join(),
+  ok(H.tg.sent.length === i + 1 && H.tg.sent[i].text === TG_SAY.stopRetry && q === 2 && H.cache.tgq.v === waiting([TG3 + 1, TG3 + 3]),
     'a /stop with its add waiting ' + JSON.stringify([H.tg.sent.slice(i), H.cache.tgq, q]));
   H.ctx.SpreadsheetApp.openById = tmp;
   tgcheck(H, nonce());
@@ -1610,6 +1726,110 @@ function checkVerify() {
   q.props.TG_TOKEN = TG_TOKEN; tmp = q.ctx.tgPoll_; q.ctx.tgPoll_ = function () { throw new Error('boom ' + TG1); };
   q.ctx.tgTick(); q.ctx.tgPoll_ = tmp;
   ok(q.logs[q.logs.length - 1] === 'tgTick: the poll failed' && q.logs.join('\n').indexOf(String(TG1)) < 0, 'tgTick after a throw ' + q.logs.slice(-1));
+  // Curator info yes only with the tick (3 Nov c, review): the game sends agree: 1 with every tgcheck once the box is
+  // ticked, kept per nonce ('tga:', 6 h) while it waits; a page from before the tick sends none, so its row stays
+  // empty. A later ticked verify sets yes on the row already there; an unticked one never clears it, and writes nothing
+  // once the cache knows. A waiting add keeps its tick (an old bare-ID one has none).
+  q = gsHarness({ token: true }); q.ctx.staffSetup();
+  t = nonce(); r = tgcheck(q, t, { agree: 1 });
+  ok(r.ok && r.verified === false && q.cache['tga:' + t] && q.cache['tga:' + t].t === q.clock + q.ctx.TG_NONCE_S * 1000, 'agree kept for the nonce ' + JSON.stringify(q.cache['tga:' + t]));
+  q.tg.say(TG1, '/start ' + t); tgcheck(q, t);
+  ok(tgRows(q, TG1).length === 1 && tgRows(q, TG1)[0][3] === 'yes' && q.cache['tgc:' + TG1].v === 'yes', 'a ticked verify: ' + JSON.stringify(tgRows(q, TG1)));
+  [true, '1', 2, 'yes', [1], { agree: 1 }, 0].forEach(function (x, j) {
+    var nn = nonce(), who = TG3 + 10 + j;
+    tgcheck(q, nn, { agree: x }); q.tg.say(who, '/start ' + nn); tgcheck(q, nn);
+    ok(!q.cache['tga:' + nn] && tgRows(q, who).length === 1 && tgRows(q, who)[0][3] === '', 'agree ' + JSON.stringify(x) + ' counted as the tick');
+  });
+  t = nonce(); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
+  r = tgcheck(q, t, { agree: 1 });
+  ok(r.verified && !q.cache['tga:' + t] && tgRows(q, TG2)[0][3] === '' && q.cache['tgc:' + TG2].v === '1', 'agree after the verify ' + JSON.stringify(tgRows(q, TG2)));
+  t = nonce(); tgcheck(q, t, { agree: 1 }); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
+  ok(tgRows(q, TG2).length === 1 && tgRows(q, TG2)[0][3] === 'yes' && q.cache['tgc:' + TG2].v === 'yes', 'a ticked verify after an unticked one ' + JSON.stringify(tgRows(q, TG2)));
+  before = q.writes.length;
+  t = nonce(); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
+  delete q.cache['tgc:' + TG2];
+  t = nonce(); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
+  ok(tgRows(q, TG2).length === 1 && tgRows(q, TG2)[0][3] === 'yes' && q.writes.length === before && q.cache['tgc:' + TG2].v === 'yes',
+    'an unticked verify after a ticked one ' + JSON.stringify([tgRows(q, TG2), q.writes.slice(before)]));
+  tmp = q.ctx.SpreadsheetApp.openById;
+  q.ctx.SpreadsheetApp.openById = function () { throw new Error('boom'); };
+  t = nonce(); tgcheck(q, t, { agree: 1 }); q.tg.say(TG3 + 20, '/start ' + t);
+  t = nonce(); q.tg.say(TG3 + 21, '/start ' + t); tgcheck(q, t);
+  ok(q.cache.tgq.v === waiting([TG3 + 20, TG3 + 21], [TG3 + 20]), 'the waiting adds and their ticks ' + q.cache.tgq.v);
+  t = nonce(); tgcheck(q, t, { agree: 1 }); q.tg.say(TG3 + 21, '/start ' + t); tgcheck(q, t);
+  ok(q.cache.tgq.v === waiting([TG3 + 20, TG3 + 21], [TG3 + 20, TG3 + 21]), 'a tick on a second verify of a waiting add ' + q.cache.tgq.v);
+  q.ctx.SpreadsheetApp.openById = tmp;
+  q.cache.tgq.v = JSON.stringify(JSON.parse(q.cache.tgq.v).concat([String(TG3 + 22)]));   // as 2026-11-03a queued it
+  tgcheck(q, nonce());
+  ok(tgRows(q, TG3 + 20)[0][3] === 'yes' && tgRows(q, TG3 + 21)[0][3] === 'yes' && tgRows(q, TG3 + 22).length === 1 && tgRows(q, TG3 + 22)[0][3] === '' && !q.cache.tgq,
+    'the waiting adds once the sheet is back ' + JSON.stringify(contactRows(q).slice(-3)));
+  // The tap's watch (3 Nov c, review): watch: 1 reads the bot by long poll (TG_LONG_S each) until TG_WATCH_S after the
+  // tap, so a Start tapped meanwhile is answered at once, Back to the game button and all, though no phone asks (the
+  // player's page is hidden behind Telegram). It stops early once its nonce is in; regular polls stay timeout 0.
+  q = gsHarness({ token: true }); q.ctx.staffSetup();
+  ok(q.ctx.TG_WATCH_S === 30 && q.ctx.TG_WATCH_MAX_S === 90 && q.ctx.TG_LONG_S === 20 && q.ctx.TG_TICK_MIN === 1,
+    'watch timings ' + [q.ctx.TG_WATCH_S, q.ctx.TG_WATCH_MAX_S, q.ctx.TG_LONG_S, q.ctx.TG_TICK_MIN]);
+  tgcheck(q, nonce());
+  ok(q.tg.waits.join() === '0', 'a tgcheck long-polled ' + q.tg.waits);
+  t = nonce(); q.clock += 2100; t0 = q.clock; gets = q.tg.gets; q.locks = [];
+  r = q.call({ action: 'tgcheck', nonce: t, back: NETLIFY, app: 'tokens', agree: 1, watch: 1 });
+  ok(r.ok && r.verified === false && q.tg.waits.slice(1).join() === '20,10' && q.tg.gets === gets + 2 && q.clock === t0 + 30000 && q.locks.join() === 'document' &&
+    !q.cache['tg:watch'] && q.cache['tgb:' + t] && q.cache['tga:' + t], 'a watch with nothing to read ' + JSON.stringify([r, q.tg.waits, q.clock - t0, q.locks]));
+  t = nonce(); q.clock += 2100; t0 = q.clock; gets = q.tg.gets; i = q.tg.sent.length;
+  q.tg.wait = function () { q.tg.wait = null; q.clock += 4000; q.tg.say(TG1, '/start ' + t); };
+  r = q.call({ action: 'tgcheck', nonce: t, back: PREVIEW, app: 'countries', agree: 1, watch: 1 });
+  u = q.tg.sent[i] || {};
+  ok(r.verified && r.badge === q.tgId(TG1) && r.sig === q.sig(r.badge) && q.tg.sent.length === i + 1 && u.text === TG_SAY.verified && u.at === t0 + 4000 &&
+    JSON.stringify(u.markup) === backKb(PREVIEW + '?tg=' + t + '&app=countries') && tgRows(q, TG1)[0][3] === 'yes' && q.tg.gets === gets + 1 && q.clock === t0 + 4000,
+    'Start 4 s into a watch ' + JSON.stringify([r, u, q.tg.gets - gets, q.clock - t0]));
+  gets = q.tg.gets; q.clock += 2100;
+  ok(q.call({ action: 'tgcheck', nonce: t, watch: 1 }).verified && q.tg.gets === gets, 'a watch for a nonce already verified read the bot');
+  // Two taps: B taps 10 s into A's watch, whose run holds the lock, so B's call only moves 'tg:until' on and ends, and
+  // B's page's plain tgcheck reads the cache, not the bot. A's Start at 12 s, B's at 35 s: A's run answers both as they
+  // come and reads on until 30 s after B's tap. Then B's next tgcheck is verified from the cache.
+  wa = nonce(); wb = nonce(); q.clock += 2100; t0 = q.clock; i = q.tg.sent.length; tmp = [];
+  q.tg.wait = function (sec) {
+    var at = q.clock - t0;
+    if (at < 10000) {
+      q.clock = t0 + 10000; q.docBusy = true; k = q.tg.gets;
+      tmp.push(q.call({ action: 'tgcheck', nonce: wb, agree: 1, watch: 1 }), q.call({ action: 'tgcheck', nonce: wb, agree: 1 }), q.tg.gets - k);
+      q.docBusy = false; q.clock = t0 + 12000; q.tg.say(TG2, '/start ' + wa);
+    } else if (at < 35000) { q.clock = t0 + 35000; q.tg.say(TG3, '/start ' + wb); }
+    else { q.tg.wait = null; q.clock += sec * 1000; }
+  };
+  gets = q.tg.gets;
+  r = q.call({ action: 'tgcheck', nonce: wa, agree: 1, watch: 1 });
+  u = q.tg.sent.slice(i);
+  ok(r.verified && r.badge === q.tgId(TG2) && tmp[0].ok && tmp[0].verified === false && tmp[1].verified === false && tmp[2] === 0 && u.length === 2 &&
+    u[0].chat === TG2 && u[0].at === t0 + 12000 && u[1].chat === TG3 && u[1].at === t0 + 35000 && q.clock === t0 + 40000 && q.tg.gets === gets + 3 && !q.cache['tg:watch'],
+    'two taps, one watch ' + JSON.stringify([r.verified, tmp, u.map(function (x) { return [x.chat, x.at - t0]; }), q.clock - t0, q.tg.gets - gets]));
+  gets = q.tg.gets; q.locks = []; r = tgcheck(q, wb);
+  ok(r.verified && r.badge === q.tgId(TG3) && q.tg.gets === gets && q.locks.length === 0 && tgRows(q, TG3)[0][3] === 'yes', 'B after the watch ' + JSON.stringify(r));
+  // While a watch reads ('tg:watch'), a tgcheck and tgTick neither wait for the lock nor read.
+  q.cache['tg:watch'] = { v: '1', t: q.clock + 30000 }; q.locks = []; gets = q.tg.gets; q.clock += 2100;
+  r = q.call({ action: 'tgcheck', nonce: nonce() }); q.ctx.tgTick();
+  ok(r.ok && r.verified === false && q.locks.length === 0 && q.tg.gets === gets, 'a tgcheck and tgTick during a watch ' + JSON.stringify([q.locks, q.tg.gets - gets]));
+  delete q.cache['tg:watch'];
+  // One run reads at most TG_WATCH_MAX_S, however often taps move 'tg:until' on; at most TG_WATCH_MAX_S reads, should
+  // Telegram answer a long poll at once; Telegram down: one try, then the watch ends; a throw: "not yet", one plain line.
+  t = nonce(); q.clock += 2100; t0 = q.clock;
+  q.tg.wait = function (sec) { q.clock += sec * 1000; q.cache['tg:until'] = { v: String(q.clock + 30000), t: q.clock + 35000 }; };
+  r = q.call({ action: 'tgcheck', nonce: t, watch: 1 }); q.tg.wait = null;
+  ok(r.verified === false && q.clock === t0 + 90000 && !q.cache['tg:watch'], 'a watch moved on without end ran ' + (q.clock - t0) + ' ms');
+  q.tg.instant = true; gets = q.tg.gets; q.clock += 2100;
+  r = q.call({ action: 'tgcheck', nonce: nonce(), watch: 1 }); q.tg.instant = false;
+  ok(r.verified === false && q.tg.gets - gets === q.ctx.TG_WATCH_MAX_S, 'long polls Telegram answers at once: ' + (q.tg.gets - gets) + ' reads');
+  tmp = q.ctx.UrlFetchApp.fetch; k = 0;
+  q.ctx.UrlFetchApp.fetch = function (x, o) { k++; return tmp(x, o); };
+  q.tg.down = true; q.clock += 2100; t0 = q.clock;
+  r = q.call({ action: 'tgcheck', nonce: nonce(), watch: 1 });
+  q.tg.down = false; q.ctx.UrlFetchApp.fetch = tmp;
+  ok(r.ok && r.verified === false && k === 1 && q.clock === t0 && !q.cache['tg:watch'], 'a watch with Telegram down ' + JSON.stringify([r, k]));
+  tmp = q.ctx.tgPoll_; q.ctx.tgPoll_ = function () { throw new Error('boom ' + TG_TOKEN + ' ' + TG1); };
+  q.clock += 2100; r = q.call({ action: 'tgcheck', nonce: nonce(), watch: 1 }); q.ctx.tgPoll_ = tmp;
+  ok(r.ok && r.verified === false && !q.cache['tg:watch'] && q.logs[q.logs.length - 1] === 'tgcheck: the poll failed', 'a throw in a watch ' + JSON.stringify(r));
+  tmp = q.logs.join('\n');
+  ok(nc.every(function (x) { return tmp.indexOf(x) < 0; }) && tmp.indexOf(String(TG1)) < 0 && tmp.indexOf(TG_TOKEN) < 0, 'a log line holds a nonce, a Telegram ID or the token:\n' + tmp);
   // Busy above 2000 tgchecks a minute, all phones together.
   q = gsHarness({ token: true }); q.ctx.staffSetup(); q.cache['tgn:' + nc[1]] = { v: String(TG1), t: q.clock + 99999 };
   for (i = 0; i < 2001; i++) r = q.call({ action: 'tgcheck', nonce: nc[1] });
@@ -1689,7 +1909,9 @@ function checkVerify() {
   q.props.TG_TOKEN = TG_TOKEN; q.tg.down = true; q.ctx.telegramTest();
   ok(q.logs.join('\n').indexOf(TG_TOKEN) < 0 && /^Telegram failed: /.test(q.logs[q.logs.length - 1]), 'telegramTest with Telegram down ' + q.logs.slice(-1));
   console.log('Booth web app: how players verify\n  ' + n + ' cases (Verify with row and dropdown, mode in every reply, setmode, menu, tgcheck and the bot, ' +
-    'contacts rows and /stop, offset, poll throttle and locks, Telegram down, a broken contacts sheet, tgTick, signed starts, check by ticket QR or C- code, ' +
+    'contacts rows and /stop, Back to the game button and its page and app, Curator info by the tick (agree, a later tick, waiting adds), the tap’s watch ' +
+    '(long polls, Start answered at once, two taps, caps, Telegram down), offset, poll throttle and locks, Telegram down, a broken contacts sheet, tgTick every minute, ' +
+    'signed starts, check by ticket QR or C- code, ' +
     'privacy, telegramTest)');
 }
 // The contacts sheet's Day for now, as Sheets keeps the "'yyyy-MM-dd" text.
@@ -1700,28 +1922,36 @@ function dayOf(h) { return h.ctx.Utilities.formatDate(new Date(h.clock), 'Asia/K
 // every element is a stub that keeps textContent, hidden, value and attributes. v6 pages have no network; a badge-
 // mode page (opts.server = a gsHarness) gets a CurateBadge stub whose post() calls Code.gs synchronously (or answers
 // offline while server.offline is set), and a clock and timers tied to the harness clock. A v6 page may get a clock
-// too (opts.clock = { clock: ms }), so a case can move it to another day.
+// too (opts.clock = { clock: ms }), so a case can move it to another day. 3 Nov b: a link's href is its attribute, as
+// in a browser (removeAttribute('href') empties it); an event records preventDefault (click() returns it); focus()
+// counts; opts.url gives the page its address (location.origin, pathname, search, hash) and history.replaceState
+// moves it, keeping each new address in ctx.history.urls (opts.nohistory: a browser without it).
 function Store() { this.d = {}; }
 Store.prototype.getItem = function (k) { return Object.prototype.hasOwnProperty.call(this.d, k) ? this.d[k] : null; };
 Store.prototype.setItem = function (k, v) { this.d[k] = String(v); };
 Store.prototype.removeItem = function (k) { delete this.d[k]; };
 function stubEl() {
-  var attrs = {}, cls = {}, on = {};
-  return { textContent: '', hidden: false, title: '', href: '', open: false, children: [], value: '', checked: false, disabled: false,
-    className: '', style: { setProperty: function () {} },
+  var attrs = {}, cls = {}, on = {}, el;
+  el = { textContent: '', hidden: false, title: '', open: false, children: [], value: '', checked: false, disabled: false,
+    className: '', style: { setProperty: function () {} }, focused: 0,
     setAttribute: function (k, v) { attrs[k] = String(v); }, getAttribute: function (k) { return k in attrs ? attrs[k] : null; },
     removeAttribute: function (k) { delete attrs[k]; }, hasAttribute: function (k) { return k in attrs; },
     classList: { add: function (c) { cls[c] = 1; }, remove: function (c) { delete cls[c]; },
       toggle: function (c) { if (cls[c]) delete cls[c]; else cls[c] = 1; }, contains: function (c) { return !!cls[c]; } },
     querySelector: function () { return null; }, querySelectorAll: function () { return []; }, contains: function () { return false; },
-    appendChild: function () {}, removeChild: function () {}, insertBefore: function () {}, focus: function () {},
+    appendChild: function () {}, removeChild: function () {}, insertBefore: function () {}, focus: function () { this.focused++; },
     scrollIntoView: function () {}, setPointerCapture: function () {},
     addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); },
     fire: function (t) {
-      var e = { preventDefault: function () {}, stopPropagation: function () {}, target: null };
+      var e = { defaultPrevented: false, stopPropagation: function () {}, target: null };
+      e.preventDefault = function () { e.defaultPrevented = true; };
       (on[t] || []).forEach(function (fn) { fn(e); });
+      return e;
     },
-    click: function () { this.fire('click'); } };
+    click: function () { return this.fire('click'); } };
+  Object.defineProperty(el, 'href', { enumerable: true, get: function () { return 'href' in attrs ? attrs.href : ''; },
+    set: function (v) { attrs.href = String(v); } });
+  return el;
 }
 var RW_SRC = ['site/config.js', 'site/curate/settings.js', 'site/curate/decks.js', 'site/curate/rules.js', 'site/curate/rewards.js',
   'site/curate/earn.js'].map(function (f) { return [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]; });
@@ -1742,13 +1972,23 @@ function goLine(began) {
 }
 function page(ls, opts) {
   opts = opts || {};
-  var els = {}, G = opts.server, clk = null, timers = [], on = {}, ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
+  var k, els = {}, G = opts.server, clk = null, timers = [], on = {}, ctx = { console: console, localStorage: ls, location: { search: opts.kiosk ? '?kiosk=1' : '' },
+    history: { state: null, urls: [], replaceState: function (st, t, u) {
+      var x = new URL(String(u), ctx.location.href || 'https://test.invalid/curate/');
+      ctx.history.urls.push(String(u));
+      ctx.location.pathname = x.pathname; ctx.location.search = x.search; ctx.location.hash = x.hash; ctx.location.href = x.href;
+    } },
     document: { hidden: false, activeElement: null, readyState: 'complete', getElementById: function (id) { return els[id] || (els[id] = stubEl()); },
       createElement: stubEl, addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); } },
     addEventListener: function (t, fn) { (on[t] = on[t] || []).push(fn); }, setTimeout: function () { return 0; }, clearTimeout: function () {},
     setInterval: function () { return 1; }, clearInterval: function () {}, performance: { now: function () { return 0; } },
     requestAnimationFrame: function () { return 0; }, cancelAnimationFrame: function () {} };
   ctx.window = ctx;
+  if (opts.nohistory) delete ctx.history;
+  if (opts.url) {
+    k = new URL(opts.url);
+    ctx.location = { origin: k.origin, protocol: k.protocol, host: k.host, pathname: k.pathname, search: k.search, hash: k.hash, href: k.href };
+  }
   if (G || opts.clock) {
     clk = G || opts.clock;
     ctx.Date = function () { return arguments.length ? new (Function.prototype.bind.apply(Date, [null].concat([].slice.call(arguments))))() : new Date(clk.clock); };
@@ -1996,7 +2236,8 @@ function checkBadgeMode() {
   ok(R(p).online === true, 'online is false with an endpoint');
   ok(p.text('ladder-fine').indexOf('Your Devcon badge gives 2 tries for merch.') === 0, 'title fine line: ' + p.text('ladder-fine'));
   R(p).renderIntro();
-  ok(p.text('intro-note') === 'Your Devcon badge gives 2 tries for merch.' && !p.el('intro-scan').hidden, 'intro before a scan: ' + p.text('intro-note'));
+  ok(p.text('intro-note') === 'Your Devcon badge gives 2 tries for merch.' && !p.el('intro-scan').hidden && p.el('intro-priv').hidden === true,
+    'intro before a scan: ' + p.text('intro-note'));
   ok(setB(p, 'not a badge').error === 'notbadge', 'a non-badge scan');
   r = setB(p, 'AB12CD34');
   ok(r && r.ok && p.text('intro-badge') === 'Badge …CD34 · Try 1 of 2' && G.rows('Tries') === 1, 'a scan: ' + JSON.stringify(r) + ' ' + p.text('intro-badge') + ', Tries rows ' + G.rows('Tries'));
@@ -2142,11 +2383,17 @@ function checkBadgeMode() {
 // ---- Telegram and none modes (3 Nov) ----
 // rewards.js against Code.gs with Verify with on Telegram (the bot answers through the fake Bot API) or None: the
 // verify link and its nonce, the wait, verified then Start, an unverified start, the ticket's QR text (read back as
-// the desk reads it), the booth tablet's QR, and none mode's phone id with the contact step it keeps.
+// the desk reads it), the booth tablet's QR, and none mode's phone id with the contact step it keeps. 3 Nov b (spec 2):
+// the consent tick the link waits on, back and app on every tgcheck, and the way back from the bot's Back to the game
+// button (?tg=NONCE&app=APP).
+var CONSENT = 'I want to play this game and learn how Kleros Curate works, fully decentralised. I agree to get Telegram messages ' +
+  'on how to take part in real contests across Kleros apps. Leave any time: send /stop to the bot.';   // the owner's words
 function checkTelegramMode() {
   var n = 0, G = gsHarness({ token: true }), T = S.tiers, TG = S.telegram || {}, TEAL = Math.floor((T[1] + T[2]) / 2),
     TG1 = 5550001234, TG2 = 5550009876, LINK = /^https:\/\/t\.me\/KlerosBoothBot\?start=([A-Za-z0-9]{24})$/, ls, p, q, k, kls, r, m, a,
-    nn, rows, id, rec, qr, before;
+    nn, rows, id, rec, qr, before, e, c, u, t0, w, i, TGKEY = 'kleros_devcon_curate_tg', CKEY = 'kleros_devcon_curate_consent',
+    HTML = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'), GAME_JS = fs.readFileSync(path.join(DIR, 'game.js'), 'utf8'),
+    PREVIEW = 'https://deploy-preview-12--kleros-devcon.netlify.app/curate/';
   function ok(cond, msg) { n++; if (!cond) fail('telegram mode: ' + msg); }
   function R(pg) { return pg.CurateRewards; }
   function begin(pg, fun) { var out; R(pg).begin('sights', { fun: !!fun }, function (x) { out = x; }); return out; }
@@ -2160,7 +2407,15 @@ function checkTelegramMode() {
   }
   function shown(pg, id) { return pg.el(id).hidden === false; }
   function nonceOf(pg) { var x = LINK.exec(pg.el('intro-tg').href || ''); return x ? x[1] : ''; }
+  // The consent tick, as a tap on the box (or its label) sets it; on false unticks it.
+  function TICK(pg, on) { var x = pg.el('intro-consent'); x.checked = on !== false; x.fire('change'); }
+  // The link before the tick: no href (a tap goes nowhere), dimmed and still read as a link.
+  function inert(pg) { var x = pg.el('intro-tg'); return !x.hasAttribute('href') && x.href === '' && x.getAttribute('aria-disabled') === 'true' && x.getAttribute('role') === 'link'; }
+  function tgchecks(pg, from) { return pg.posts.slice(from || 0).filter(function (x) { return x.body.action === 'tgcheck'; }); }
+  // No wait from the nonce x on this browser (the verify state's own nonce, untapped, is fine).
+  function noWait(l, x) { var w = stored(l, TGKEY) || {}; return w.n !== x && !w.tap; }
   function stored(l, key) { return JSON.parse(l.getItem(key || 'kleros_devcon_curate_badge') || 'null'); }
+  function got(l, key) { return stored(l, key) || {}; }   // the same, never null (a missing record fails a case, not the run)
   // The desk's reading of a ticket QR (site/staff/desk.js gameTicket): KC1, the id and the sig, lower-cased.
   function deskCheck(text) {
     var x = String(text).split('.'), b = { action: 'check', key: G.props.STAFF_KEY, badge: String(x[1] || '').toLowerCase() };
@@ -2169,32 +2424,63 @@ function checkTelegramMode() {
   }
   ok(TG.bot === 'KlerosBoothBot' && G.ctx.TG_BOT === TG.bot, 'settings.js telegram.bot ' + TG.bot + ' / Code.gs TG_BOT ' + G.ctx.TG_BOT + ' (the spec’s bot)');
   G.ctx.staffSetup();
-  // Before verifying: the link (a real <a> with the bot and a 24-character nonce), no Start and no Play for fun.
+  // Before verifying: the consent tick and the link (a real <a> with the bot and a 24-character nonce), no Start and
+  // no Play for fun. 3 Nov b: the link has no href until the box is ticked.
   ls = new Store(); p = page(ls, { server: G });
   ok(R(p).mode() === 'telegram' && p.text('ladder-fine').indexOf('Verify with Telegram: 2 tries for merch.') === 0, 'title line ' + p.text('ladder-fine'));
   R(p).renderIntro();
-  nn = nonceOf(p);
-  ok(nn && shown(p, 'intro-tg') && p.text('intro-tg') === 'Verify with Telegram' && /\bid="intro-tg"/.test(fs.readFileSync(path.join(DIR, 'index.html'), 'utf8').match(/<a\b[^>]*>/g).join(' ')),
-    'the verify link ' + p.el('intro-tg').href + ' / ' + p.text('intro-tg'));
+  nn = (stored(ls, TGKEY) || {}).n || '';
+  ok(/^[A-Za-z0-9]{24}$/.test(nn) && shown(p, 'intro-tg') && p.text('intro-tg') === 'Verify with Telegram' && inert(p) && nonceOf(p) === '' &&
+    shown(p, 'intro-priv') && p.el('intro-consent').checked === false && /\bid="intro-tg"/.test(HTML.match(/<a\b[^>]*>/g).join(' ')),
+    'the verify link before the tick ' + p.el('intro-tg').href + ' / ' + p.text('intro-tg') + ' / ' + p.el('intro-tg').getAttribute('aria-disabled'));
   ok(!shown(p, 'intro-go') && !shown(p, 'intro-fun') && !shown(p, 'intro-scan') && !shown(p, 'intro-cancel') && !shown(p, 'intro-change'),
     'Start, Play for fun, Scan, Cancel or Use another Telegram shows before verifying');
-  ok(p.text('intro-note') === 'Verify with Telegram to play: 2 tries for merch.' && shown(p, 'intro-priv') &&
-    p.text('intro-priv-text') === 'Verifying adds your Telegram ID to Kleros news. Leave any time: send /stop to the bot.', 'intro note ' + p.text('intro-note'));
+  ok(p.text('intro-note') === 'Verify with Telegram to play: 2 tries for merch.' && p.text('intro-priv-text') === CONSENT,
+    'intro note ' + p.text('intro-note') + ' / consent ' + p.text('intro-priv-text'));
+  // The markup: a real checkbox, a <label for> that rewards.js fills, the Privacy link beside it; the link has no href
+  // of its own (an href in the page would work before the tick).
+  a = (/<div\b[^>]*\bid="intro-priv"[^>]*>([\s\S]*?)<\/div>/.exec(HTML) || [])[1] || '';
+  ok(/<input\b(?=[^>]*\btype="checkbox")(?=[^>]*\bid="intro-consent")[^>]*>/.test(a) && /<label\b(?=[^>]*\bfor="intro-consent")(?=[^>]*\bid="intro-priv-text")[^>]*><\/label>/.test(a) &&
+    /<a\b[^>]*\bhref="#curate-privacy"[^>]*>Privacy<\/a>/.test(a) && !/\bhref=/.test((/<a\b[^>]*\bid="intro-tg"[^>]*>/.exec(HTML) || ['href='])[0]),
+    'index.html: #intro-priv needs input#intro-consent (checkbox), label[for=intro-consent]#intro-priv-text and the Privacy link; #intro-tg no href');
   rows = G.rows('Tries');
   r = begin(p, true); q = begin(p);
   ok(r && r.ok === false && r.error === 'unverified' && q && q.error === 'unverified' && G.rows('Tries') === rows, 'a round before verifying ' + JSON.stringify([r, q]));
+  // A tap before the tick: nothing opens, no wait, no tgcheck; the note says why and the box takes focus.
+  k = p.posts.length; c = p.el('intro-consent').focused;
+  e = p.el('intro-tg').click();
+  ok(e.defaultPrevented && p.text('intro-note') === 'Tick the box first.' && !got(ls, TGKEY).tap && p.posts.length === k && R(p).tgWaiting() === false &&
+    p.el('intro-consent').focused === c + 1 && inert(p) && shown(p, 'intro-priv') && p.text('intro-tg') === 'Verify with Telegram',
+    'a tap before the tick ' + p.text('intro-note') + ' / ' + (p.posts.length - k) + ' posts');
+  // Ticked: kept on this browser, and the link gets its href at once. Unticked: forgotten, and the link inert again.
+  TICK(p);
+  c = stored(ls, CKEY);
+  ok(c && c.v === 1 && c.at === G.clock && nonceOf(p) === nn && p.el('intro-tg').getAttribute('aria-disabled') === null && p.el('intro-tg').getAttribute('role') === null &&
+    p.text('intro-note') === 'Verify with Telegram to play: 2 tries for merch.' && p.el('intro-consent').checked === true && shown(p, 'intro-priv'),
+    'the tick ' + JSON.stringify(c) + ' / ' + p.el('intro-tg').href + ' / ' + p.text('intro-note'));
+  TICK(p, false);
+  ok(ls.getItem(CKEY) === null && inert(p) && p.el('intro-consent').checked === false, 'unticking ' + JSON.stringify(ls.d));
+  TICK(p);
   R(p).setBadge('AB12CD34', function (x) { r = x; });
-  ok(stored(ls, 'kleros_devcon_curate_tg').n === nn && r && r.error === 'mode' && !stored(ls), 'the nonce is not kept, or a badge scan counts: ' + JSON.stringify(r));
-  // A reload keeps the link (and its nonce); the tap starts the wait.
+  ok(got(ls, TGKEY).n === nn && r && r.error === 'mode' && !stored(ls), 'the nonce is not kept, or a badge scan counts: ' + JSON.stringify(r));
+  // A reload keeps the link (its nonce) and the tick. The tap starts the wait and asks at once, naming the page to come
+  // back to, the app and the tick (this page has no origin: back is empty, which the server ignores). 3 Nov c: that
+  // ask is the watch, sent with keepalive and not waited on (the server reads the bot by long poll for 30 s; nothing
+  // comes here); the usual asks follow every pollMs, with the tick and no watch.
   q = page(ls, { server: G }); R(q).renderIntro();
-  ok(nonceOf(q) === nn, 'a reload made a new nonce');
-  p.el('intro-tg').click();
-  ok(p.text('intro-note') === 'Tap Start in the Kleros Booth bot, then come back here.' && p.text('intro-tg') === 'Open Telegram again' &&
-    nonceOf(p) === nn && shown(p, 'intro-cancel') && !shown(p, 'intro-fun') && stored(ls, 'kleros_devcon_curate_tg').tap > 0, 'tgwait ' + p.text('intro-note'));
-  before = G.tg.gets;
+  ok(nonceOf(q) === nn && q.el('intro-consent').checked === true && q.el('intro-tg').getAttribute('aria-disabled') === null, 'a reload made a new nonce or lost the tick');
+  before = G.tg.gets; k = p.posts.length; t0 = G.clock; w = G.tg.waits.length;
+  e = p.el('intro-tg').click();
+  m = tgchecks(p, k);
+  ok(!e.defaultPrevented && p.text('intro-note') === 'Tap Start in the Kleros Booth bot, then come back here.' && p.text('intro-tg') === 'Open Telegram again' &&
+    nonceOf(p) === nn && shown(p, 'intro-cancel') && !shown(p, 'intro-fun') && !shown(p, 'intro-priv') && got(ls, TGKEY).tap > 0, 'tgwait ' + p.text('intro-note'));
+  ok(m.length === 1 && m[0].body.nonce === nn && m[0].body.back === '' && m[0].body.app === 'sights' && m[0].body.agree === 1 && m[0].body.watch === 1 &&
+    m[0].opts && m[0].opts.keepalive === true && m[0].opts.timeoutMs > G.ctx.TG_WATCH_MAX_S * 1000 && G.tg.waits.slice(w).join() === '20,10' &&
+    G.tg.gets === before + 2 && G.clock === t0 + 30000, 'the tap’s tgcheck ' + JSON.stringify([m, G.tg.waits.slice(w), G.clock - t0]));
   p.tick(TG.pollMs);
-  m = p.posts.filter(function (x) { return x.body.action === 'tgcheck'; });
-  ok(G.tg.gets === before + 1 && m.length === 1 && m[0].body.nonce === nn && m[0].opts && m[0].opts.timeoutMs === S.server.statusTimeoutMs &&
+  m = tgchecks(p, k);
+  ok(G.tg.gets === before + 3 && G.tg.waits.slice(-1).join() === '0' && m.length === 2 && m[1].body.nonce === nn && m[1].body.back === '' && m[1].body.app === 'sights' &&
+    m[1].body.agree === 1 && m[1].body.watch === undefined && m[1].opts && m[1].opts.timeoutMs === S.server.statusTimeoutMs && !m[1].opts.keepalive &&
     p.text('intro-note') === 'Tap Start in the Kleros Booth bot, then come back here.', 'the first poll ' + JSON.stringify(m));
   // A reload during the wait asks at once, with the same nonce.
   G.clock += 2100; q = page(ls, { server: G });
@@ -2210,8 +2496,8 @@ function checkTelegramMode() {
   ok(p.text('intro-badge') === 'Telegram ✓ · Try 1 of 2' && shown(p, 'intro-go') && p.text('intro-go') === 'Start' && shown(p, 'intro-fun') &&
     p.text('intro-change') === 'Use another Telegram' && !shown(p, 'intro-tg') && !shown(p, 'intro-cancel') && !shown(p, 'intro-priv'),
     'verified intro ' + p.text('intro-badge') + ' / ' + p.text('intro-note'));
-  ok(rec && rec.v === 2 && rec.kind === 'tg' && rec.hash === id && rec.sig === G.sig(id) && rec.mode === 'telegram' && !ls.getItem('kleros_devcon_curate_tg') &&
-    JSON.stringify(ls.d).indexOf(String(TG1)) < 0, 'the stored id ' + JSON.stringify(rec));
+  ok(rec && rec.v === 2 && rec.kind === 'tg' && rec.hash === id && rec.sig === G.sig(id) && rec.mode === 'telegram' && !ls.getItem(TGKEY) &&
+    JSON.stringify(ls.d).indexOf(String(TG1)) < 0 && got(ls, CKEY).v === 1, 'the stored id ' + JSON.stringify(rec));
   R(p).refreshBrief();
   ok(p.text('ladder-fine').indexOf('Telegram ✓ · 2 tries for merch.') === 0, 'title line once verified ' + p.text('ladder-fine'));
   // Start carries the sig; the try's row says Contact yes, so a Teal round is a live ticket with no contact step.
@@ -2242,14 +2528,17 @@ function checkTelegramMode() {
   ok(q.text('intro-badge') === 'Telegram ✓ · Try 1 of 2', 'a stored Telegram id at load ' + q.text('intro-badge'));
   rows = G.rows('Tries');
   r = begin(q);
-  ok(r && r.ok === false && r.error === 'unverified' && G.rows('Tries') === rows && LINK.test(q.el('intro-tg').href) && shown(q, 'intro-tg') &&
-    !shown(q, 'intro-go') && !(stored(q.localStorage) || {}).hash, 'an unverified start ' + JSON.stringify(r));
+  ok(r && r.ok === false && r.error === 'unverified' && G.rows('Tries') === rows && inert(q) && shown(q, 'intro-tg') && shown(q, 'intro-priv') &&
+    !q.el('intro-consent').checked && !shown(q, 'intro-go') && !(stored(q.localStorage) || {}).hash, 'an unverified start ' + JSON.stringify(r));
+  TICK(q);
+  ok(LINK.test(q.el('intro-tg').href), 'the link after an unverified start, ticked ' + q.el('intro-tg').href);
   // Use another Telegram: the id goes, a new link shows.
   R(p).forgetBadge();
-  ok(!stored(ls) && shown(p, 'intro-tg') && LINK.test(p.el('intro-tg').href) && nonceOf(p) !== nn, 'Use another Telegram');
+  ok(!stored(ls) && shown(p, 'intro-tg') && LINK.test(p.el('intro-tg').href) && nonceOf(p) !== nn && shown(p, 'intro-priv') && p.el('intro-consent').checked,
+    'Use another Telegram (the tick kept on this browser)');
   // Cancel forgets the wait; no answer for waitMs: a new nonce and "No answer from Telegram yet".
   nn = nonceOf(p); p.el('intro-tg').click(); p.el('intro-cancel').click();
-  ok(!shown(p, 'intro-cancel') && p.text('intro-tg') === 'Verify with Telegram' && nonceOf(p) !== nn && !stored(ls, 'kleros_devcon_curate_tg').tap, 'Cancel');
+  ok(!shown(p, 'intro-cancel') && p.text('intro-tg') === 'Verify with Telegram' && nonceOf(p) !== nn && !got(ls, 'kleros_devcon_curate_tg').tap, 'Cancel');
   nn = nonceOf(p); p.el('intro-tg').click(); p.tick(TG.waitMs);
   ok(p.text('intro-note') === 'No answer from Telegram yet. Try again.' && nonceOf(p) && nonceOf(p) !== nn && !shown(p, 'intro-cancel'),
     'after waitMs ' + p.text('intro-note'));
@@ -2272,22 +2561,40 @@ function checkTelegramMode() {
     pending: null, at: G.clock }));
   k = page(q, { server: G }); R(k).renderIntro();
   ok(!(stored(q) || {}).hash && shown(k, 'intro-tg') && !k.text('intro-badge'), 'a stored badge under Telegram mode ' + JSON.stringify(stored(q)));
-  // The booth tablet: the link as a QR for the visitor's phone, asked about at once, nothing stored.
+  // The booth tablet: the link as a QR for the visitor's phone, asked about at once, nothing stored. 3 Nov b: the
+  // visitor ticks the box on the tablet first (kept in memory for this visitor only); no QR and no wait before.
   kls = new Store(); k = page(kls, { server: G, kiosk: true }); R(k).renderIntro();
+  ok(shown(k, 'intro-priv') && k.text('intro-priv-text') === CONSENT && !k.el('intro-consent').checked && !shown(k, 'intro-qr') && !shown(k, 'intro-tg') &&
+    !k.el('intro-qr-img').getAttribute('data-qr') && R(k).tgWaiting() === false && tgchecks(k).length === 0 && Object.keys(kls.d).length === 0,
+    'the kiosk before the tick ' + k.el('intro-qr-img').getAttribute('data-qr'));
+  TICK(k);
   a = k.el('intro-qr-img').getAttribute('data-qr') || '';
-  ok(LINK.test(a) && shown(k, 'intro-qr') && !shown(k, 'intro-tg') && k.text('intro-qr-cap') === 'Scan with your phone camera, tap Start in Telegram.' &&
+  ok(LINK.test(a) && shown(k, 'intro-qr') && !shown(k, 'intro-tg') && !shown(k, 'intro-priv') && k.text('intro-qr-cap') === 'Scan with your phone camera, tap Start in Telegram.' &&
     R(k).tgWaiting() === true && Object.keys(kls.d).length === 0, 'the kiosk QR ' + a + ' ' + JSON.stringify(kls.d));
+  // The tick hid the box it had focus on (3 Nov c, review): the QR takes it (role img, its label names the bot), or
+  // the note while the QR isn't drawn yet. Both can take focus from script only (tabindex -1); the kiosk asks no watch.
+  ok(k.el('intro-qr-img').focused === 1 && k.el('intro-note').focused === 0 && tgchecks(k).every(function (x) { return !x.body.watch; }) &&
+    /<div\b(?=[^>]*\bid="intro-qr-img")(?=[^>]*\btabindex="-1")(?=[^>]*\brole="img")(?=[^>]*\baria-label="[^"]*Kleros Booth bot)[^>]*>/.test(HTML) &&
+    /<p\b(?=[^>]*\bid="intro-note")(?=[^>]*\btabindex="-1")[^>]*>/.test(HTML), 'the kiosk tick: focus to the QR (' + k.el('intro-qr-img').focused + ')');
+  c = page(new Store(), { server: G, kiosk: true }); c.CurateBadge.loadQR = function (done) { done(false); };
+  R(c).renderIntro(); TICK(c);
+  ok(!shown(c, 'intro-qr') && !shown(c, 'intro-priv') && c.el('intro-note').focused === 1 && c.el('intro-qr-img').focused === 0 && c.text('intro-note'),
+    'the kiosk tick before the QR is drawn: focus to the note (' + c.el('intro-note').focused + ')');
   G.tg.say(TG2, '/start ' + LINK.exec(a)[1]);
   G.clock += 2100; k.tick(TG.pollMs);
   ok(k.text('intro-badge') === 'Telegram ✓ · Try 1 of 2' && !shown(k, 'intro-qr') && Object.keys(kls.d).length === 0 && R(k).tgWaiting() === false,
     'the kiosk after the visitor verified ' + k.text('intro-badge') + ' ' + JSON.stringify(kls.d));
   // 3 Nov review: verifying re-arms the tablet's idle reset (game.js hands rewards.js its idleNudge), so the visitor
   // gets a full idle period to look back from Telegram; nothing on the tablet was tapped.
-  ok(k.nudged === 1 && /var ui = \{[^}]*\bnudge: idleNudge\b/.test(fs.readFileSync(path.join(DIR, 'game.js'), 'utf8')),
+  ok(k.nudged === 1 && /var ui = \{[^}]*\bnudge: idleNudge\b/.test(GAME_JS),
     'verifying did not re-arm the kiosk idle reset (nudged ' + k.nudged + ')');
+  // The next visitor (every return to the title on a tablet): the box unticked again, no QR until they tick it.
+  R(k).refreshBrief(); R(k).renderIntro();
+  ok(!k.text('intro-badge') && shown(k, 'intro-priv') && !k.el('intro-consent').checked && !shown(k, 'intro-qr') && R(k).tgWaiting() === false &&
+    Object.keys(kls.d).length === 0, 'the next kiosk visitor ' + k.text('intro-badge') + ' / ticked ' + k.el('intro-consent').checked);
   // No answer within waitMs on the tablet: no new QR nobody waits on (the idle reset may take it back to the title),
   // and a Try again that makes a new QR and a new wait.
-  k = page(new Store(), { server: G, kiosk: true }); R(k).renderIntro();
+  k = page(new Store(), { server: G, kiosk: true }); R(k).renderIntro(); TICK(k);
   a = k.el('intro-qr-img').getAttribute('data-qr');
   k.tick(TG.waitMs);
   before = k.posts.length; k.tick(TG.pollMs); k.tick(TG.pollMs);
@@ -2300,7 +2607,7 @@ function checkTelegramMode() {
     'Try again on the kiosk ' + k.el('intro-qr-img').getAttribute('data-qr'));
   // An Everyone ticket carries the QR too (with the live clock, no C- code): the desk scans it, sees under Teal, and
   // a check-in K- code then opens any tier.
-  ls = new Store(); p = page(ls, { server: G }); R(p).renderIntro();
+  ls = new Store(); p = page(ls, { server: G }); R(p).renderIntro(); TICK(p);
   nn = nonceOf(p); G.tg.say(TG2 + 1, '/start ' + nn); p.el('intro-tg').click(); p.tick(TG.pollMs);
   id = G.tgId(TG2 + 1); rec = stored(ls);
   r = begin(p);
@@ -2324,12 +2631,115 @@ function checkTelegramMode() {
   r = G.call({ action: 'claim', key: G.props.STAFF_KEY, badge: id, tier: 'purple', item: 'x', ticket: 'K-EVR123', staff: 'Ana', id: 'claimevr0001', how: 'scan' });
   ok(r.ok, 'an Everyone ticket with a check-in K- code ' + JSON.stringify(r));
 
+  // Back to the game (3 Nov b). Each tgcheck names this page (location.origin + /curate/) and the app picked; the
+  // bot's button opens that page with ?tg=NONCE&app=APP in whatever browser Telegram picks. There the nonce becomes the
+  // wait (ticked: its link needed the tick), tg and app leave the address bar, init asks at once, and game.js opens that
+  // app's intro (landed(), once). The player's first browser verifies too once it shows again.
+  // 3 Nov c (review): the player taps Start 4 s after the tap, their page hidden behind Telegram and asking nothing; the
+  // tap's watch reads it at once, so the bot answers then, button and all, with no other phone and no tgTick.
+  ls = new Store(); p = page(ls, { server: G, url: PREVIEW + '?lite=0' });
+  R(p).setPref('deck', 'countries'); R(p).renderIntro(); TICK(p); nn = nonceOf(p);
+  k = p.posts.length; t0 = G.clock; i = G.tg.sent.length;
+  G.tg.wait = function () { G.tg.wait = null; p.document.hidden = true; G.clock += 4000; G.tg.say(TG2 + 2, '/start ' + nn); };   // in Telegram
+  p.el('intro-tg').click();
+  m = tgchecks(p, k);
+  ok(m.length === 1 && m[0].body.nonce === nn && m[0].body.back === PREVIEW && m[0].body.app === 'countries' && m[0].body.watch === 1 &&
+    G.cache['tgb:' + nn] && G.cache['tgb:' + nn].v === JSON.stringify({ back: PREVIEW, app: 'countries' }), 'the tap names the page and app ' + JSON.stringify(m));
+  u = G.tg.sent[i] || {};
+  a = u.markup ? u.markup.inline_keyboard[0][0].url : '';
+  ok(a === PREVIEW + '?tg=' + nn + '&app=countries' && u.markup.inline_keyboard[0][0].text === '▶️ Back to the game' && u.at === t0 + 4000 && G.tg.sent.length === i + 1 &&
+    p.posts.length === k + 1, 'the bot’s Back to the game, 4 s after the tap ' + JSON.stringify([u, G.tg.sent.length - i, p.posts.length - k]));
+  kls = new Store(); q = page(kls, { server: G, url: a });
+  m = tgchecks(q); id = G.tgId(TG2 + 2); rec = stored(kls);
+  ok(q.location.search === '' && q.location.pathname === '/curate/' && q.history.urls.join() === '/curate/' && m.length === 1 && m[0].body.nonce === nn &&
+    rec && rec.kind === 'tg' && rec.hash === id && rec.sig === G.sig(id) && !kls.getItem(TGKEY) && got(kls, CKEY).v === 1 && R(q).getPref('deck') === 'countries',
+    'landing from the bot ' + JSON.stringify([q.history.urls, m.length, rec, kls.d]));
+  ok(R(q).landed() === 'countries' && R(q).landed() === '', 'landed() names the app, once');
+  R(q).renderIntro();
+  ok(q.text('intro-badge') === 'Telegram ✓ · Try 1 of 2' && shown(q, 'intro-go') && !shown(q, 'intro-tg') && !shown(q, 'intro-priv'), 'the landed intro ' + q.text('intro-badge'));
+  p.document.hidden = false; p.fire('visibilitychange');
+  ok((stored(ls) || {}).hash === id, 'the first browser after Back to the game ' + JSON.stringify(stored(ls)));
+  // game.js boot, after the title shows (and after rewards.js init took the nonce): that app's intro, as its card's tap.
+  a = (/function boot\(\) \{[\s\S]*?\n  \}/.exec(GAME_JS) || [''])[0];
+  ok(a.indexOf('rw(\'init\'') > -1 && a.indexOf('goBrief()') > -1 && a.indexOf('rw(\'landed\')') > a.indexOf('goBrief()') &&
+    a.indexOf('rw(\'landed\')') > a.indexOf('rw(\'init\'') && /setDeck\(land\)[^}]*rw\('setPref', 'deck', deckId\)[^}]*showIntro\(\)/.test(a),
+    'game.js boot() must open the landed app’s intro after init and the title');
+  // A nonce the bot hasn't seen yet: the wait from now (the other params and the hash stay), asked about at once.
+  nn = 'LandAbcdefghij0123456789';
+  kls = new Store(); q = page(kls, { server: G, url: 'https://devcon.kleros.io/curate/?lite=0&tg=' + nn + '&app=tokens&x=1#top' });
+  m = tgchecks(q); rec = stored(kls, TGKEY);
+  ok(q.history.urls.join() === '/curate/?lite=0&x=1#top' && q.location.search === '?lite=0&x=1' && q.location.hash === '#top' && rec && rec.n === nn &&
+    rec.at === G.clock && rec.tap === G.clock && got(kls, CKEY).v === 1 && m.length === 1 && m[0].body.nonce === nn && m[0].body.app === 'tokens' &&
+    m[0].body.back === 'https://devcon.kleros.io/curate/' && R(q).tgWaiting() === true && R(q).landed() === 'tokens',
+    'landing with a nonce not seen yet ' + JSON.stringify([q.history.urls, rec, m.length]));
+  R(q).renderIntro();
+  ok(q.text('intro-note') === 'Tap Start in the Kleros Booth bot, then come back here.' && nonceOf(q) === nn && !shown(q, 'intro-priv'), 'the landed wait ' + q.text('intro-note'));
+  G.tg.say(TG2 + 3, '/start ' + nn); G.clock += 2100; q.tick(TG.pollMs);
+  ok((stored(kls) || {}).hash === G.tgId(TG2 + 3) && q.text('intro-badge') === 'Telegram ✓ · Try 1 of 2', 'the landed wait, verified ' + q.text('intro-badge'));
+  // An id already verified on this browser wins: the nonce is ignored (no wait, no tgcheck), the address bar cleaned;
+  // the app's intro still opens.
+  rec = stored(ls); nn = 'Othr' + 'Abcdefghijklmnopqrst';
+  q = page(ls, { server: G, url: 'https://devcon.kleros.io/curate/?tg=' + nn + '&app=tokens' });
+  ok(stored(ls).hash === rec.hash && !ls.getItem(TGKEY) && tgchecks(q).every(function (x) { return x.body.nonce !== nn; }) && q.history.urls.join() === '/curate/' &&
+    R(q).landed() === 'tokens', 'landing on a browser already verified ' + JSON.stringify([stored(ls, TGKEY), q.history.urls]));
+  // Ignored, apart from cleaning the address bar: a bad nonce, an unknown app (the nonce still counts), a booth tablet
+  // (its own visitor only; kiosk stays), no server (v6), another mode; a browser with no history API still lands. (The
+  // stub's intro is never hidden, so the verify state may make its own nonce: never with a tap, never the landed one.)
+  ['short', 'x'.repeat(41), 'abc-def_ghijklmnopqrstu', '%41' + 'a'.repeat(20), ''].forEach(function (x) {
+    var l = new Store(), g = page(l, { server: G, url: 'https://devcon.kleros.io/curate/?tg=' + x + '&app=countries' });
+    ok(g.history.urls.join() === '/curate/' && noWait(l, x) && !l.getItem(CKEY) && R(g).landed() === '' && tgchecks(g).length === 0 &&
+      R(g).getPref('deck') === 'sights', 'landing with nonce ' + JSON.stringify(x) + ' ' + JSON.stringify(l.d));
+  });
+  // A nonce of another length (16 to 40, as Code.gs takes) survives a reload.
+  nn = 'UnknownApp0123456789abcdefABCDEF';
+  kls = new Store(); q = page(kls, { server: G, url: 'https://devcon.kleros.io/curate/?app=evil&tg=' + nn });
+  ok(got(kls, TGKEY).n === nn && R(q).landed() === '' && R(q).getPref('deck') === 'sights' && q.history.urls.join() === '/curate/', 'landing with an unknown app');
+  G.clock += 2100; q = page(kls, { server: G });
+  ok(tgchecks(q).some(function (x) { return x.body.nonce === nn; }) && R(q).tgWaiting() === true, 'a reload after landing with a 32-character nonce');
+  kls = new Store(); k = page(kls, { server: G, kiosk: true, url: 'https://devcon.kleros.io/curate/?kiosk=1&tg=' + nn + '&app=countries' });
+  ok(R(k).kiosk === true && k.history.urls.join() === '/curate/?kiosk=1' && Object.keys(kls.d).length === 0 && R(k).landed() === '' && tgchecks(k).length === 0,
+    'landing on the booth tablet ' + JSON.stringify([k.history.urls, kls.d]));
+  kls = new Store(); k = page(kls, { url: 'https://devcon.kleros.io/curate/?tg=' + nn + '&app=countries' });
+  ok(R(k).online === false && k.history.urls.join() === '/curate/' && !kls.getItem(TGKEY) && !kls.getItem(CKEY) && R(k).landed() === '', 'landing in v6 mode');
+  kls = new Store();
+  kls.setItem('kleros_devcon_curate_badge', JSON.stringify({ v: 2, kind: 'device', hash: 'd'.repeat(64), tail: '', best: null, contact: false, collected: false,
+    mode: 'none', pending: null, at: G.clock }));
+  k = page(kls, { server: G, url: 'https://devcon.kleros.io/curate/?tg=' + nn + '&app=countries' });
+  ok(noWait(kls, nn) && !kls.getItem(CKEY) && R(k).landed() === '' && tgchecks(k).length === 0 && k.history.urls.join() === '/curate/',
+    'landing in none mode ' + JSON.stringify([kls.d, tgchecks(k).length]));
+  kls = new Store(); k = page(kls, { server: G, nohistory: true, url: 'https://devcon.kleros.io/curate/?tg=' + nn + '&app=countries' });
+  ok(got(kls, TGKEY).n === nn && R(k).landed() === 'countries', 'landing without a history API');
+  // Any page sends its back (the server keeps only its own hosts): localhost is sent and ignored; a file page sends none.
+  [['http://localhost:8080/curate/?x=1', 'http://localhost:8080/curate/'], ['file:///Users/x/site/curate/index.html', '']].forEach(function (x) {
+    var l = new Store(), g = page(l, { server: G, url: x[0] }), y;
+    R(g).renderIntro(); TICK(g); y = nonceOf(g); g.el('intro-tg').click();
+    ok(tgchecks(g).length === 1 && tgchecks(g)[0].body.back === x[1] && !G.cache['tgb:' + y], 'back from ' + x[0] + ': ' + JSON.stringify(tgchecks(g)));
+  });
+  // 3 Nov c (review): a wait saved by a page from before the tick, this browser with no tick kept, asks with agree 0,
+  // so its contacts row has Curator info empty; the rows of players who ticked here say yes. The privacy notice beside
+  // the tick gives the tick's purpose, not Kleros news.
+  kls = new Store(); nn = 'OldPage0123456789abcdefg';
+  kls.setItem(TGKEY, JSON.stringify({ n: nn, at: G.clock, tap: G.clock }));
+  G.clock += 2100; q = page(kls, { server: G });
+  m = tgchecks(q);
+  ok(m.length === 1 && m[0].body.nonce === nn && m[0].body.agree === 0 && !m[0].body.watch && !kls.getItem(CKEY), 'a wait from before the tick ' + JSON.stringify(m));
+  G.tg.say(TG2 + 9, '/start ' + nn); G.clock += 2100; q.tick(TG.pollMs);
+  a = G.contacts.sheets.Contacts.rows.filter(function (x) { return x && x[2] === 'telegram id'; }).map(function (x) { return [String(x[1]), x[3]]; });
+  ok((stored(kls) || {}).hash === G.tgId(TG2 + 9) && JSON.stringify(a) === JSON.stringify([[TG1, 'yes'], [TG2, 'yes'], [TG2 + 1, 'yes'], [TG2 + 2, 'yes'],
+    [TG2 + 3, 'yes'], [TG2 + 9, '']].map(function (x) { return [String(x[0]), x[1]]; })), 'Curator info by tick (the tablet’s and a landed page’s too) ' + JSON.stringify(a));
+  a = ((/<p\b[^>]*\bid="cp-tg"[^>]*>([\s\S]*?)<\/p>/.exec(HTML) || [])[1] || '').replace(/\s+/g, ' ');
+  ok(a.indexOf('to send you Telegram messages through the Kleros Booth bot on how to take part in real contests across Kleros apps.') > -1 &&
+    a.indexOf('Kleros news') < 0 && CONSENT.indexOf('real contests across Kleros apps') > -1, 'index.html #cp-tg must give the tick’s purpose: ' + a);
+  // game.js never focuses the link before the tick (no href: it can't take focus) or a control in a hidden wrapper.
+  ok(/function focusOn\(ids\) \{[\s\S]*?aria-disabled[\s\S]*?\n  \}/.test(GAME_JS) && /function focusOn\(ids\) \{[\s\S]*?parentNode[\s\S]*?\n  \}/.test(GAME_JS),
+    'game.js focusOn() must skip an aria-disabled control and one whose wrapper is hidden');
+
   // None mode: the phone makes its own id (salted hash of 24 random characters); the contact step stays.
   q = gsHarness({ mode: 'none' }); q.ctx.staffSetup();
   ls = new Store(); p = page(ls, { server: q }); R(p).renderIntro();
   rec = stored(ls);
   ok(R(p).mode() === 'none' && rec && rec.kind === 'device' && /^[0-9a-f]{64}$/.test(rec.hash) && !rec.sig && p.text('intro-note') === 'Your phone gets 2 tries for merch.' &&
-    shown(p, 'intro-go') && shown(p, 'intro-fun') && !shown(p, 'intro-tg') && !shown(p, 'intro-scan') && !shown(p, 'intro-change'),
+    shown(p, 'intro-go') && shown(p, 'intro-fun') && !shown(p, 'intro-tg') && !shown(p, 'intro-scan') && !shown(p, 'intro-change') && !shown(p, 'intro-priv'),
     'none mode intro ' + p.text('intro-note') + ' ' + JSON.stringify(rec));
   ok(p.posts.some(function (x) { return x.body.action === 'status' && x.body.badge === rec.hash; }), 'none mode: the new id’s tries were not asked');
   k = page(ls, { server: q }); R(k).renderIntro();
@@ -2347,7 +2757,10 @@ function checkTelegramMode() {
     p.text('t-hint') === 'Show this QR at the merch desk.', 'none mode ticket ' + p.el('t-qr').getAttribute('data-qr') + ' / ' + p.text('t-org'));
   r = deskCheck(qr);
   ok(r.ok && r.badge === rec.hash && r.contact === true && r.earned === 1, 'the desk scanning a none-mode ticket ' + JSON.stringify(r));
-  console.log('Telegram and none modes\n  ' + n + ' cases (verify link and nonce, no play before verifying, wait, reload, hidden page, verified then Start, Contact yes, ticket QR read by ' +
+  console.log('Telegram and none modes\n  ' + n + ' cases (consent tick: link inert until ticked, kept, unticked, kiosk per visitor; verify link and nonce, no play ' +
+    'before verifying, wait, back, app and the tick on every tgcheck, the tap’s watch (keepalive; the bot answers Start while the page is hidden), ' +
+    'a wait from before the tick, the privacy notice, the tablet’s focus after the tick, Back to the game landing: nonce taken, address bar cleaned, app intro, verified, ignored cases; ' +
+    'reload, hidden page, verified then Start, Contact yes, ticket QR read by ' +
     'the desk, unverified start, another Telegram, Cancel, waitMs, offline, no bot token, a badge id dropped, kiosk QR, kiosk idle after verifying and after waitMs, ' +
     'Everyone ticket QR and a K- code, QR load retry, none mode id, contact step and QR)');
 }
@@ -2436,6 +2849,20 @@ function checkBadgeJs() {
       if (c[1]) ok(N - 8 <= c[1], c[0].slice(0, 12) + '… makes a ' + (N - 8) + '-module QR, more than ' + c[1] + ' (not the alphanumeric kind)');
     });
   })();
+  // post() (3 Nov c, review): opts.keepalive reaches fetch, so the Telegram tap's ask outlives the page; the rest as ever.
+  (function () {
+    var inits = [], ctx = { console: console, navigator: {}, CURATE_SETTINGS: { server: { endpoint: 'https://script.google.com/macros/s/X/exec' } },
+      setTimeout: function () { return 1; }, clearTimeout: function () {} };
+    ctx.window = ctx;
+    ctx.fetch = function (url, init) { inits.push(init); return { then: function () { return { then: function () {} }; } }; };
+    vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(path.join(DIR, 'badge.js'), 'utf8'), ctx, { filename: 'badge.js' });
+    ctx.CurateBadge.post({ action: 'tgcheck' }, function () {}, { keepalive: true, timeoutMs: 120000 });
+    ctx.CurateBadge.post({ action: 'status' }, function () {});
+    ok(inits.length === 2 && inits[0].keepalive === true && inits[1].keepalive === false && inits.every(function (x) {
+      return x.method === 'POST' && x.credentials === 'omit' && x.headers['Content-Type'] === 'text/plain;charset=utf-8';
+    }), 'post() and keepalive ' + JSON.stringify(inits));
+  })();
   ok(B.SALT === 'kleros-devcon-badge|', 'SALT changed: the desk and the game would hash apart from the v6 desk');
   [['?id=AB12CD34', 'AB12CD34'], ['https://x/t/AB12CD34', 'AB12CD34'], ['AB12CD34', 'AB12CD34'], [' ab12-cd34 ', 'AB12CD34'],
     ['https://x/ticket?ref=XYZ9', 'TICKETXYZ9'], ['https://x/u/abc12/badge', 'UABC12BADGE']].forEach(function (c) {
@@ -2456,7 +2883,7 @@ function checkBadgeJs() {
     ok(order.indexOf('jsQR.js') < 0 && order.indexOf('qrcode.js') < 0, pg[0] + ': jsQR or qrcode loads up front');
   });
   ok(!fs.existsSync(path.join(STAFF, 'vendor')), 'site/staff/vendor is back (jsQR lives in /curate/vendor/)');
-  console.log('badge.js\n  ' + n + ' cases (ids, badge test, hash salt, ticket and Telegram QRs read back with jsQR, script order in both pages)');
+  console.log('badge.js\n  ' + n + ' cases (ids, badge test, hash salt, ticket and Telegram QRs read back with jsQR, post() and keepalive, script order in both pages)');
 }
 
 // ---- GL watchdog ----
@@ -2657,9 +3084,10 @@ if (SIM) simulate();
 // Not automated (spec 9.G): check these by hand before the booth opens.
 console.log('Manual QA before opening\n' +
   '  the intro, up to Verify with Telegram / Start, fits above the fold at 375×548\n' +
-  '  Verify with Telegram on an iPhone and an Android phone against the live script: the link opens the Telegram app, Start, back to the game verified\n' +
+  '  Verify with Telegram on an iPhone and an Android phone against the live script: the link does nothing until the box is ticked, then opens the ' +
+  'Telegram app, Start: the bot answers within a second or two (the tap’s watch), and its Back to the game button opens the app picked, verified\n' +
   '  the merch desk scanning a ticket QR on another phone, and typing its C- code\n' +
-  '  a full kiosk cycle on the tablet: the Telegram QR, a visitor verifies on their phone, round, ticket, reset\n' +
+  '  a full kiosk cycle on the tablet: the visitor ticks the box, the Telegram QR (VoiceOver reads it next), they verify on their phone, round, ticket, reset (the next one starts unticked)\n' +
   '  badge mode only if it is switched on: a badge scan on an iPhone (jsQR) and on an Android phone (BarcodeDetector)\n' +
   '  the full guide in apps-script/staff-desk/README.md (2 tries per player for the whole event; delete test rows after)');
 warnings.forEach(function (w) { console.log('warn  ' + w); });

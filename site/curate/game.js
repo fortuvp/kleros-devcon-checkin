@@ -201,10 +201,14 @@
     showView('brief');
     if (focus) park('brief-title');
   }
-  // Focus the first visible, enabled control of a list.
+  // Focus the first visible, enabled control of a list (its wrapper shown too: the consent tick's; a link with no
+  // href yet, Verify with Telegram before the tick, can't take focus).
   function focusOn(ids) {
     var i, el;
-    for (i = 0; i < ids.length; i++) { el = $(ids[i]); if (el && !el.hidden && !el.disabled) { focusEl(el); return; } }
+    for (i = 0; i < ids.length; i++) {
+      el = $(ids[i]);
+      if (el && !el.hidden && !(el.parentNode && el.parentNode.hidden) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') { focusEl(el); return; }
+    }
   }
 
   // ---- Intro ----
@@ -297,7 +301,7 @@
       beginning = false;
       if (mode !== 'intro' || curView !== 'intro') return;   // left meanwhile
       if (r && r.ok) { began = r; startFlow(); }
-      else focusOn(['intro-unlock', 'intro-go', 'intro-tg', 'intro-scan', 'intro-fun']);
+      else focusOn(['intro-unlock', 'intro-go', 'intro-tg', 'intro-consent', 'intro-scan', 'intro-fun']);
     });
   }
   // rewards.js without begin(): canCount()'s answer, spending nothing.
@@ -1082,7 +1086,7 @@
     on('intro-fun', function (e) { keyboard = e.detail === 0; begin(true); });
     on('intro-scan', onIntroScan);
     // Not your badge? (scan again) / Use another Telegram (back to the verify link).
-    on('intro-change', function () { rw('forgetBadge'); if (rw('mode') === 'badge') openScanner(); else focusOn(['intro-tg', 'intro-go']); });
+    on('intro-change', function () { rw('forgetBadge'); if (rw('mode') === 'badge') openScanner(); else focusOn(['intro-tg', 'intro-consent', 'intro-go']); });
     on('intro-unlock', function () { rw('showTicket'); });   // the locked ticket, its contact step
     on('intro-back', function () { goBrief(true); });
     on('badge-type', function () { txt('badge-msg', ''); showForm(); });
@@ -1172,6 +1176,7 @@
     for (id in k) if (k.hasOwnProperty(id) && $(id)) $(id).setAttribute('aria-keyshortcuts', k[id]);
   }
   function boot() {
+    var land;
     body('rm', RM); body('lite', LITE); body('is-kiosk', KIOSK);
     if (!S || !D || !R || !$('tpl-card')) throw new Error('Curate: a module or template is missing');
     keyHelp();
@@ -1183,6 +1188,10 @@
     renderCredits();
     wire();
     goBrief();
+    // Back from the bot's Back to the game button (?tg=…&app=…, rewards.js took the nonce): that app's intro, as a
+    // tap on its card would open it.
+    land = rw('landed');
+    if (land && D.hasOwnProperty(land)) { setDeck(land); rw('setPref', 'deck', deckId); showIntro(); }
   }
   // Errors during boot (here or in the deferred scripts before DOMContentLoaded) show #err.
   var booting = true;

@@ -62,7 +62,8 @@
   }
 
   // ---- Network ----
-  // text/plain: no CORS preflight (Apps Script can't answer one). Any JSON reply goes back as is.
+  // text/plain: no CORS preflight (Apps Script can't answer one). Any JSON reply goes back as is. opts.keepalive: the
+  // request goes on if the page goes away (the Telegram tap's ask).
   function post(body, done, opts) {
     var url = endpoint(), sv = cfg('server'), ctl = window.AbortController ? new window.AbortController() : null, called, timer;
     function fin(err, j) { if (called) return; called = true; clearTimeout(timer); done(err, j); }
@@ -71,7 +72,7 @@
     timer = setTimeout(function () { if (ctl) ctl.abort(); fin('timeout'); }, (opts && opts.timeoutMs) ||
       (body.action === 'status' ? sv.statusTimeoutMs || 8000 : sv.timeoutMs || 20000));
     window.fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body),
-      credentials: 'omit', signal: ctl ? ctl.signal : undefined })
+      credentials: 'omit', keepalive: !!(opts && opts.keepalive), signal: ctl ? ctl.signal : undefined })
       .then(function (r) { return r.text(); })
       .then(function (t) {
         var j = null;
