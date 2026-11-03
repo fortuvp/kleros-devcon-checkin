@@ -4,7 +4,10 @@
 // tier simulation (v5 pick model; 2 Nov: 2 counted tries per badge for the whole event). Badge tries (2 Nov): the booth web app
 // (apps-script/staff-desk/Code.gs) runs here against an in-memory Sheets stub, and rewards.js, earn.js and badge.js
 // run against it in fake pages. Verify modes (3 Nov): the same in telegram mode (a fake Telegram Bot API) and none mode;
-// 3 Nov b: the consent tick, the bot's Back to the game button and the game's landing from it.
+// 3 Nov b: the consent tick, the bot's Back to the game button and the game's landing from it. 3 Nov c: kinder points
+// (100 a right answer, 10 a wrong one; Teal at 6 right, Purple at 8, Gold for 10 of 10; 5 fakes a round, so blind
+// taps stay under Teal; TARGET moved to match), the title's descender, Telegram usernames in the contacts sheet and
+// the desk's Reset a player.
 // Node 22, no dependencies. It runs the very settings.js, decks.js and rules.js the phones load.
 //   node scripts/curate-check.js          checks only
 //   node scripts/curate-check.js --sim    checks, then 20,000 simulated players per profile
@@ -125,6 +128,118 @@ function checkSettings() {
     cfg = load(['site/config.js']).KLEROS_BOOTH_CONFIG;
     if (JSON.stringify(cfg.merch) !== JSON.stringify(fm)) warn('settings.js: fallbackMerch differs from config.js merch');
   } catch (e) { warn('config.js could not be read: ' + e.message); }
+}
+
+// ---- Scoring (3 Nov c) ----
+// The owner (3 Nov): 8 of 10 right still won only a sticker; 6 of 10 should reach the next tier. So 100 points a right
+// answer, 10 a wrong one, 0 an entry still undecided at time-out, no evidence or streak bonus, and the tiers follow the
+// right answers: Teal at 6 right, Purple at 8, Gold for 10 out of 10. Played here with the real rules on dealt rounds of
+// every deck, whatever the mix of mistakes and the parts picked; then the game's own flash (verdict(), run from
+// game.js), Results (rewards.js in a fake page), How it works and the title's gradient text.
+var RIGHT_FOR = [0, 6, 8, 10];   // right answers of 10 for Everyone, Teal, Purple, Gold
+// Correct on everything: the real entries right, the fakes wrong.
+function allCorrect() { return (S.entries - S.fakes) * S.points.letThrough + S.fakes * S.points.leak; }
+function checkScoring() {
+  var n = 0, P = S.points, rand = mulberry32(303), GAME = fs.readFileSync(path.join(DIR, 'game.js'), 'utf8'),
+    HTML = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'), bad = {}, bonus = 0, m, f, verdict, how, css, fake, good, x;
+  function ok(cond, msg) { n++; if (!cond) fail('scoring: ' + msg); }
+  function want(right) { for (var t = 3; t > 0; t--) if (right >= RIGHT_FOR[t]) return t; return 0; }
+  function pts(right, wrong) { return right * P.catch + wrong * P.leak; }
+  // A dealt round of deck with `right` of its entries right (picked at random), the first `decided` decided; each right
+  // Wrong taps the wrong part or another one by a coin flip, each mistake is whichever the entry allows.
+  function round(deck, right, decided) {
+    var items = R.buildRun(deck, [], rand).items, sc = R.newScore(), at = items.map(function (y, i) { return i; }), yes = {}, i, it, r, act, pk, sw;
+    for (i = at.length - 1; i > 0; i--) { r = Math.floor(rand() * (i + 1)); sw = at[i]; at[i] = at[r]; at[r] = sw; }
+    at.slice(0, right).forEach(function (j) { yes[j] = 1; });
+    for (i = 0; i < Math.min(decided, items.length); i++) {
+      it = items[i];
+      act = !!it.bad === !!yes[i] ? 'challenge' : 'letThrough';
+      pk = act !== 'challenge' ? '' : !it.bad ? anyPart(it, rand) : rand() < 0.5 ? it.bad : wrongPart(it, rand);
+      if (R.apply(sc, it, R.judge(it, act, pk)).streakBonus) bonus++;
+    }
+    R.finish(sc);
+    return sc;
+  }
+  ok(S.entries === RIGHT_FOR[3] && P.catch === P.letThrough && P.wrongChallenge === P.leak && P.leak >= 0 && P.evidence === 0 &&
+    P.streakBonus === 0 && P.streakEvery > 0, 'points must be one value a right answer, one a wrong one (never below 0), no evidence or streak bonus: ' + JSON.stringify(P));
+  // Every count of right answers, decided in full: the score is the answers, and the tier follows the right ones.
+  DECK_IDS.forEach(function (deck) {
+    var right, k, sc;
+    for (right = 0; right <= S.entries; right++) {
+      for (k = 0; k < 20; k++) {
+        sc = round(deck, right, S.entries);
+        if (sc.final !== pts(right, S.entries - right) || R.tierFor(sc.final) !== want(right)) bad[deck + ' ' + right] = sc.final + ' (tier ' + R.tierFor(sc.final) + ')';
+      }
+    }
+    // Time ran out: undecided entries score nothing, and the tier still follows the right answers.
+    for (right = 0; right <= S.entries; right++) {
+      sc = round(deck, S.entries, right);
+      if (sc.final !== pts(right, 0) || R.tierFor(sc.final) !== want(right)) bad[deck + ' ' + right + ' of ' + right + ' decided'] = sc.final;
+    }
+  });
+  ok(!Object.keys(bad).length, 'rounds whose score or tier does not follow the right answers (' + RIGHT_FOR.slice(1).join(' / ') + ' right for Teal / Purple / Gold): ' + JSON.stringify(bad));
+  ok(bonus === 0, bonus + ' streak bonuses in the dealt rounds');
+  // The flash, from game.js itself: a right answer shows its points, a mistake none (its 10 are no reward), and a fake
+  // marked Wrong scores the same with the wrong part or another one (the soft flash only teaches).
+  m = ['fmt', 'signed'].map(function (k) { return (new RegExp('\\n  function ' + k + '\\(n\\) \\{[^\\n]*\\}\\n').exec(GAME) || [''])[0]; });
+  f = /\n  function verdict\(o, item, picked\) \{[\s\S]*?\n  \}\n/.exec(GAME);
+  if (!f || !m[0] || !m[1]) return fail('game.js: verdict(), fmt() or signed() is missing, so the flash checks did not run');
+  verdict = new Function('MINUS', 'partName', 'fixText', m.join('') + f[0] + '\nreturn verdict;')('−',
+    function (it, k) { return String(k); }, function (it) { return it.fix; });
+  D.sights.items.forEach(function (it) { if (it.bad && !fake) fake = it; if (!it.bad && !good) good = it; });
+  [['a fake marked Wrong, its wrong part', fake, 'challenge', fake.bad, 'good', '+' + P.catch],
+    ['a fake marked Wrong, another part', fake, 'challenge', wrongPart(fake, rand), 'soft', '+' + P.catch],
+    ['a real entry marked Correct', good, 'letThrough', '', 'good', '+' + P.letThrough],
+    ['a real entry marked Wrong', good, 'challenge', anyPart(good, rand), 'bad', ''],
+    ['a fake marked Correct', fake, 'letThrough', '', 'bad', '']].forEach(function (c) {
+    var o = R.judge(c[1], c[2], c[3]), v = verdict(o, c[1], c[3]);
+    ok(v.tone === c[4] && v.pts === c[5], 'the flash for ' + c[0] + ': ' + JSON.stringify(v) + ', want tone ' + c[4] + ' and points “' + c[5] + '”');
+  });
+  ok(/\n    if \(res\.streakBonus\) extra\.push\(/.test(GAME), 'game.js: the streak line no longer waits for a streak bonus (with none, it must not show)');
+  ok(/hudScore\(R\.shown\(score\), !o\.correct\)/.test(GAME), 'game.js: a mistake’s 10 points bump the score like a reward');
+  // Results: “N of 10 right”, the tier by right answers and the points to the next one (rewards.js, a v6 page).
+  [5, 6, 7, 8, 9].forEach(function (right) {
+    var pg = page(new Store()), sc = round('sights', right, S.entries), i = pg.CurateRewards.startShift('sights'), g = want(right),
+      line, names = ['Everyone', 'Teal', 'Purple', 'Gold'];
+    pg.CurateRewards.finishShift({ deck: 'sights', counted: i.counted, shiftNo: i.shiftNo, code: i.code, relaxed: false, endedBy: 'done',
+      final: sc.final, raw: sc.raw, timeBonus: 0, reviewed: sc.reviewed, entries: S.entries, caught: sc.caught, fakesSeen: sc.fakesSeen,
+      listed: sc.listed, goodsSeen: sc.goodsSeen, evidence: sc.evidence, wrong: sc.wrong, leaks: sc.leaks, trust: sc.trust,
+      bestStreak: sc.bestStreak, misses: sc.misses, at: 0, reason: '' });
+    line = pg.text('rep-tier-line');
+    ok(pg.text('rep-sub') === right + ' of ' + S.entries + ' right' && line.indexOf(g ? names[g] + ' tier · ' : 'Everyone · ') === 0 &&
+      line.slice(-(' · ' + (S.tiers[g + 1] - sc.final) + ' pts to ' + names[g + 1]).length) === ' · ' + (S.tiers[g + 1] - sc.final) + ' pts to ' + names[g + 1],
+      'Results for ' + right + ' right (' + sc.final + ' pts): ' + pg.text('rep-sub') + ' / ' + line);
+  });
+  // How it works says the rule in one line, from settings.js (a retune must update it), and names no bonus.
+  how = 'Here: Wrong is a challenge. ' + P.catch + ' points for each right answer, ' + P.leak + ' for trying. Teal at ' + RIGHT_FOR[1] +
+    ' right, Purple at ' + RIGHT_FOR[2] + ', Gold for ' + RIGHT_FOR[3] + ' out of ' + S.entries + '.';
+  x = (/<dialog\b[^>]*\bid="how"[\s\S]*?<\/dialog>/.exec(HTML) || [''])[0];
+  ok(x.indexOf('<p>' + how + '</p>') > -1, 'How it works must say: ' + how);
+  ok(!/extra points|bonus|streak/i.test(x.replace(/<!--[\s\S]*?-->|<[^>]*>/g, ' ')), 'How it works names a bonus there is none of');
+  // The title's descender (3 Nov c, the g of “get”): a gradient clipped to the text paints inside the box only, so each
+  // such rule pads its bottom and takes the padding back with a negative margin, so nothing below it moves.
+  css = ((HTML.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) || []).join('\n').replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+\{[^{}]*background-clip:\s*text[^{}]*\}/g) || []);
+  ok(css.some(function (r) { return /^\s*#brief h1\s*\{/.test(r); }), 'index.html: #brief h1 is no longer gradient text (update this check)');
+  css.forEach(function (r) {
+    var pb = /padding-bottom:\s*(\d*\.?\d+)em/.exec(r), mb = /margin-bottom:\s*-(\d*\.?\d+)em/.exec(r);
+    ok(pb && mb && Number(pb[1]) >= 0.1 && pb[1] === mb[1], 'index.html: ' + r.split('{')[0].trim() + ' clips a gradient to its text without padding-bottom ≥ .1em and the same negative margin-bottom (its descenders are cut)');
+  });
+  // Blind play (3 Nov c). Wrong on everything is the fakes right, Correct on everything the real entries right: with 4
+  // fakes in 10 that was 6 right, Teal by the owner's rule for 10 taps without reading, so a round deals 5 fakes and
+  // either is 5 right, under Teal.
+  x = S.fakes * P.catch + (S.entries - S.fakes) * P.wrongChallenge;
+  ok(R.tierFor(x) === 0, 'Wrong on everything, without reading, scores ' + x + ': Teal or above');
+  x = allCorrect();
+  ok(R.tierFor(x) === 0, 'Correct on everything, without reading, scores ' + x + ' (' + (S.entries - S.fakes) + ' real entries of ' + S.entries +
+    ' right): Teal or above for 10 taps (deal more fakes, or raise Teal)');
+  // The project README's tier table (outside the game: a warning only).
+  x = fs.existsSync(path.join(ROOT, 'README.md')) ? fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8') : '';
+  (x.match(/`tiers\[[123]\]` points \(\d[\d,]*/g) || []).forEach(function (s) {
+    var k = +/\[(\d)\]/.exec(s)[1], v = Number(/\((\d[\d,]*)/.exec(s)[1].replace(/,/g, ''));
+    if (v !== S.tiers[k]) warn('README.md: the tier table says tiers[' + k + '] is ' + v + '; settings.js says ' + S.tiers[k]);
+  });
+  console.log('Scoring\n  ' + n + ' cases (' + P.catch + ' a right answer, ' + P.leak + ' a wrong one; Teal / Purple / Gold at ' + RIGHT_FOR.slice(1).join(' / ') +
+    ' right, in dealt rounds of every deck; the flash, Results, How it works, the title’s descender)');
 }
 
 // ---- Schema ----
@@ -788,6 +903,12 @@ var DAILY = [[/\btr(?:y|ies)\b[^.]*\b(?:a|per|each|every) day\b/i, 'tries a day'
   [/\btoday(?:[’']s)? tr(?:y|ies)\b/i, 'today’s tries'], [/\btomorrow\b/i, 'tomorrow'], [/\bnew tries\b/i, 'new tries'],
   [/\bdaily tr(?:y|ies)\b/i, 'daily tries']];
 function daily(t) { for (var i = 0; i < DAILY.length; i++) if (DAILY[i][0].test(t)) return DAILY[i][1]; return ''; }
+// 3 Nov c (spec 3): the desk's Reset a player confirm says the player “can play 2 new tries” once staff delete their
+// record: tries a reset gives back, not a day. Only that sentence, and only in the staff desk, passes.
+function dailyAt(t, where) {
+  var d = daily(t);
+  return d === 'new tries' && /^site\/staff\//.test(where) && /\bdeleted: they can play \d+ new tries\b/.test(t) ? '' : d;
+}
 // The tries lines are built from fragments (' left', ' · Go!'), so a fragment saying “today” or “a day” fails on
 // its own in the game’s code and markup, wherever the “try” is. The deck data is exempt (“a day trip”, “Today
 // it’s Tokyo”), and so is stock (“Gone today”, “gone for today”): staff restock by the day.
@@ -817,7 +938,7 @@ function checkCopy() {
       return;
     }
     BANNED.forEach(function (r) { if (r[0].test(t)) { hits++; fail(where + ': user copy says ' + r[1] + ': ' + t.trim().slice(0, 70)); } });
-    if (daily(t)) { hits++; fail(where + ': user copy counts tries by the day (' + daily(t) + '): ' + t.trim().slice(0, 70)); }
+    if (dailyAt(t, where)) { hits++; fail(where + ': user copy counts tries by the day (' + daily(t) + '): ' + t.trim().slice(0, 70)); }
     else if (/^site\/curate\/(?!decks\.js)/.test(where) && dayWord(t)) {
       hits++; fail(where + ': game copy says ' + dayWord(t) + ' (tries are for the whole event; only stock is per day): ' + t.trim().slice(0, 70));
     }
@@ -994,6 +1115,8 @@ function checkSizes() {
 var GS_SRC = fs.existsSync(GS) ? fs.readFileSync(GS, 'utf8') : '';
 var GS_T0 = Date.parse('2026-11-03T05:00:00Z');   // 10:30 IST on the first booth day
 var TG_TOKEN = '7712345678:AAF-check-script-fake-token_x9';   // never a real token: the fake Bot API below answers it
+// The Telegram username the fake Bot API gives a sender unless a case says otherwise (3 Nov c): one per account.
+function tgUser(id) { return 'user' + id; }
 function gsHarness(opts) {
   opts = opts || {};
   var H = { clock: GS_T0, lockBusy: false, docBusy: false, offline: false, logs: [], toasts: [], alerts: [], writes: [], menu: [],
@@ -1105,11 +1228,13 @@ function gsHarness(opts) {
     }
     return reply(404, { ok: false, error_code: 404, description: 'Not Found' });
   }
-  // A private message to the bot (fromId's own chat) queued for the next getUpdates; more: { chat, isBot, noFrom }.
+  // A private message to the bot (fromId's own chat) queued for the next getUpdates; more: { chat, isBot, noFrom,
+  // username }. 3 Nov c: each sender has its own username (tgUser), or more.username: a string, or null for none.
   H.tg.say = function (fromId, text, more) {
     var x = more || {}, u = { update_id: ++H.tg.seq, message: { message_id: H.tg.seq, date: Math.floor(H.clock / 1000), text: text,
       chat: { id: x.chat ? -100123 : fromId, type: x.chat || 'private' } } };
-    if (!x.noFrom) u.message.from = { id: fromId, is_bot: !!x.isBot, first_name: 'Ana', username: 'ana_k' };
+    if (!x.noFrom) u.message.from = { id: fromId, is_bot: !!x.isBot, first_name: 'Ana' };
+    if (!x.noFrom && x.username !== null) u.message.from.username = x.username === undefined ? tgUser(fromId) : x.username;
     H.tg.updates.push(u);
     return u.update_id;
   };
@@ -1195,6 +1320,8 @@ function maxScore() {
 function checkServer() {
   var n = 0, H, r, key, i, t1, t2, t3, t4, last, before, crow, sw, tmp, A = 'a'.repeat(64), B = 'b'.repeat(64),
     C = 'c'.repeat(64), E = 'e'.repeat(64), F = 'f'.repeat(64), seq = 0, HOUR = 3600 * 1000;
+  // A Purple round (3 Nov c: 8 right and 2 wrong is 820), read from settings.js so a retune keeps these cases Purple.
+  var P2 = S.tiers[2] + 20;
   function ok(cond, msg) { n++; if (!cond) fail('Code.gs: ' + msg); }
   function tok() { seq++; return ('tok' + seq + 'qwertyuiopasdfghjk').slice(0, 20); }
   function start(h, badge, t, more) {
@@ -1225,7 +1352,7 @@ function checkServer() {
   sw = H.tab('Switches') ? H.tab('Switches').rows : [];
   ok(sw[1] && sw[1][0] === 'Merch open' && sw[1][1] === true && [2, 3, 4].every(function (k) { return sw[k] && sw[k][1] === false; }),
     'Switches: Merch open ticked, the three sold-out boxes not ' + JSON.stringify(sw));
-  ok(H.contacts.sheets.Contacts.rows[0].join() === 'Day,Contact,Kind,Curator info,Event,Source,Id' && !H.bound.sheets.Contacts, 'Contacts headers, in the contacts sheet only');
+  ok(H.contacts.sheets.Contacts.rows[0].join() === 'Day,Contact,Kind,Curator info,Event,Source,Id,Username' && !H.bound.sheets.Contacts, 'Contacts headers, in the contacts sheet only');
   ['Badge claims', 'Tries', 'Switches'].forEach(function (t) { ok(H.tab(t).prot.some(function (p) { return p.calls.indexOf('remove') > -1; }), t + ' is not protected'); });
   ok(H.contacts.sheets.Contacts.prot.some(function (p) { return p.calls.indexOf('remove') > -1; }), 'Contacts is not protected');
   key = H.props.STAFF_KEY;
@@ -1290,13 +1417,13 @@ function checkServer() {
   H.clock += 5000;
   ok(H.call({ action: 'finish', token: t1, score: 500 }).error === 'early', 'a finish 5 s after its start');
   H.clock += 3 * HOUR;
-  r = H.call({ action: 'finish', token: t1, score: 615, tier: 3, relaxed: false, endedBy: 'done' });
-  ok(r.ok && r.score === 615 && r.tier === 2 && r.best && r.best.score === 615 && r.perBadge === 2 && r.left === 0,
+  r = H.call({ action: 'finish', token: t1, score: P2, tier: 3, relaxed: false, endedBy: 'done' });
+  ok(r.ok && r.score === P2 && r.tier === 2 && r.best && r.best.score === P2 && r.perBadge === 2 && r.left === 0,
     'the tier comes from the score, not the body ' + JSON.stringify(r));
   ok(r.best && /^C-[A-Z0-9]{6}$/.test(r.best.code) && r.best.code === 'C-' + t1.slice(0, 6).toUpperCase(), 'best.code ' + (r.best || {}).code);
   H.clock += 7 * HOUR;
-  ok(H.call({ action: 'finish', token: t1, score: 615 }).ok === true, 'the same finish again (7 h later) is not ok');
-  ok(H.call({ action: 'finish', token: t1, score: 616 }).error === 'used', 'a second score for one token');
+  ok(H.call({ action: 'finish', token: t1, score: P2 }).ok === true, 'the same finish again (7 h later) is not ok');
+  ok(H.call({ action: 'finish', token: t1, score: P2 + 1 }).error === 'used', 'a second score for one token');
   ok(H.call({ action: 'finish', token: t2, score: 400 }).error === 'late', 'a finish 10 h after its start');
   ok(H.call({ action: 'finish', token: 'unknowntoken12345', score: 1 }).error === 'badtoken', 'an unknown token');
   t3 = tok(); start(H, C, t3); H.clock += 60000;
@@ -1304,7 +1431,7 @@ function checkServer() {
   ok(H.call({ action: 'finish', token: t3, score: -1 }).error === 'badscore' && H.call({ action: 'finish', token: t3, score: 3.5 }).error === 'badscore', 'badscore');
   // 6. status: the best across days, with its game code and time.
   r = H.call({ action: 'status', badge: A });
-  ok(r.ok && r.v && r.tiers.join() === S.tiers.join() && r.maxScore === maxScore() && r.badge && r.badge.best && r.badge.best.score === 615 &&
+  ok(r.ok && r.v && r.tiers.join() === S.tiers.join() && r.maxScore === maxScore() && r.badge && r.badge.best && r.badge.best.score === P2 &&
     r.badge.best.at === '13:30' && r.badge.left === 0 && r.badge.triesUsed === 2 && r.badge.today === undefined && r.perBadge === 2 &&
     r.badge.contact === false && r.badge.collected === false, 'status ' + JSON.stringify(r));
   ok(H.call({ action: 'status' }).badge === null, 'status without a badge');
@@ -1327,12 +1454,12 @@ function checkServer() {
     crow[0][1] === 'ana@example.org' && crow[0][2] === 'email' && crow[0][3] === 'yes' && crow[1][2] === 'telegram',
     'contacts rows: Day is a date only, Source curate, kind and curator tick ' + JSON.stringify(crow));
   tmp = JSON.stringify(H.contacts.sheets);
-  ok(!/[0-9a-f]{64}/.test(tmp) && [t1, t2, t4].every(function (t) { return tmp.indexOf(t) < 0; }) && tmp.indexOf('615') < 0, 'the contacts sheet holds a badge, token or score');
+  ok(!/[0-9a-f]{64}/.test(tmp) && [t1, t2, t4].every(function (t) { return tmp.indexOf(t) < 0; }) && tmp.indexOf(String(P2)) < 0, 'the contacts sheet holds a badge, token or score');
   tmp = JSON.stringify(H.bound.sheets);
   ok(tmp.indexOf('@') < 0 && tmp.indexOf('ana@example.org') < 0 && tmp.indexOf('ana_k') < 0, 'the badge sheet holds a contact');
   ok(H.writes.indexOf('\'\t=1') > -1, 'the event \\t=1 is not written as \'\\t=1');
   r = H.call({ action: 'check', key: H.props.STAFF_KEY, badge: A });
-  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === 615 && r.triesUsed === 2 &&
+  ok(r.ok && r.contact === true && r.earned === 2 && r.used === false && r.game && r.game.score === P2 && r.triesUsed === 2 &&
     r.today === undefined, 'check after the contact ' + JSON.stringify(r));
   // 9. claim: one item per badge, up to the earned tier; a check-in ticket (K-) allows any open tier, once.
   ok(claim(H, A, 'gold', 'claimida0001').error === 'notearned', 'Gold claimed on a Purple badge');
@@ -1370,6 +1497,20 @@ function checkServer() {
   start(r, A); start(r, A);
   r.tab('Tries').rows[1][1] = new Date('2026-11-01T00:00:00+05:30'); r.tab('Tries').rows[2][1] = '2026-11-02';
   ok(start(r, A).reason === 'limit', 'tries with an earlier Day (a Date, or text) gave new tries');
+  // A retune never downgrades a tier already earned: a round stored under 2026-11-03b (the 750 scale: 450 was Teal)
+  // stays the best over a later 550 (Everyone now) in finish, check and claim; an old 560 Purple over a new 640 Teal.
+  r = gsHarness({ mode: 'badge' }); r.ctx.staffSetup();
+  t1 = tok(); start(r, A, t1); r.clock += 60000; r.call({ action: 'finish', token: t1, score: 450 }); r.tab('Tries').rows[1][7] = 1;
+  t2 = tok(); start(r, A, t2); r.clock += 60000;
+  tmp = r.call({ action: 'finish', token: t2, score: 550 });
+  ok(tmp.ok && tmp.tier === 0 && tmp.best && tmp.best.tier === 1 && tmp.best.score === 450, 'a later round under the new scale downgraded a tier ' + JSON.stringify(tmp));
+  r.call({ action: 'contact', badge: A, contact: 'ana@example.org', id: 'abcdefabcdef' });
+  tmp = r.call({ action: 'check', key: r.props.STAFF_KEY, badge: A });
+  ok(tmp.ok && tmp.earned === 1 && tmp.game && tmp.game.score === 450 && claim(r, A, 'teal', 'claimidr0001').ok, 'check and claim after a retune ' + JSON.stringify(tmp));
+  t1 = tok(); start(r, B, t1); r.clock += 60000; r.call({ action: 'finish', token: t1, score: 560 }); r.tab('Tries').rows[3][7] = 2;
+  t2 = tok(); start(r, B, t2); r.clock += 60000; r.call({ action: 'finish', token: t2, score: 640 });
+  tmp = r.call({ action: 'status', badge: B });
+  ok(tmp.badge && tmp.badge.best && tmp.badge.best.tier === 2 && tmp.badge.best.score === 560, 'an old Purple lost to a new Teal ' + JSON.stringify(tmp.badge));
   // 11. Caps and the lock: busy, and nothing written.
   r = gsHarness({ mode: 'badge' }); r.ctx.staffSetup();
   for (i = 0; i < 61; i++) last = start(r, (i % 10 + '').repeat(64));
@@ -1390,7 +1531,7 @@ function checkServer() {
   ok(tmp.ok === false && tmp.error === 'server' && JSON.stringify(tmp).indexOf('boom') < 0, 'an internal throw ' + JSON.stringify(tmp));
   // 12. Error codes are identifiers (lowercase letters only), so the clients and the copy lint can tell them apart.
   (GS_SRC.match(/\berror: '[^']*'|\bfail_\('[^']*'\)/g) || []).forEach(function (m) { ok(/'[a-z]+'/.test(m), 'error code ' + m); });
-  console.log('Booth web app (Code.gs)\n  ' + n + ' cases (setup, sync with settings.js, 2 tries per badge, no new tries on a new day, finish, status, contacts sheet, claims, switches, caps, lock)');
+  console.log('Booth web app (Code.gs)\n  ' + n + ' cases (setup, sync with settings.js, 2 tries per badge, no new tries on a new day, finish, status, contacts sheet, claims, a retune never downgrades a tier, switches, caps, lock)');
 }
 
 // ---- Booth web app: how players verify (3 Nov) ----
@@ -1431,12 +1572,13 @@ function checkVerify() {
   function backKb(url) { return JSON.stringify({ inline_keyboard: [[{ text: TG_SAY.back, url: url }]] }); }
   function contactRows(h) { return h.contacts.sheets.Contacts.rows.slice(1).filter(function (x) { return x && x.length; }); }
   function tgRows(h, id) { return contactRows(h).filter(function (x) { return String(x[1]) === String(id) && x[2] === 'telegram id'; }); }
-  // The cache's waiting adds ('tgq') as Code.gs keeps them (3 Nov c): [Telegram ID, ticked], no tick unless said.
-  function waiting(ids, ticked) { return JSON.stringify(ids.map(function (x) { return [String(x), (ticked || []).indexOf(x) > -1]; })); }
+  // The cache's waiting adds ('tgq') as Code.gs keeps them (3 Nov c): [Telegram ID, ticked, username], no tick unless
+  // said; the username is the sender's (tgUser, from the fake Bot API).
+  function waiting(ids, ticked) { return JSON.stringify(ids.map(function (x) { return [String(x), (ticked || []).indexOf(x) > -1, tgUser(x)]; })); }
   if (!GS_SRC) return;
   // Version, the default mode and the Verify with row: a text cell with its dropdown, never a checkbox.
   H = gsHarness();
-  ok(H.ctx.SCRIPT_V === '2026-11-03b', 'SCRIPT_V is ' + H.ctx.SCRIPT_V);
+  ok(H.ctx.SCRIPT_V === '2026-11-03c', 'SCRIPT_V is ' + H.ctx.SCRIPT_V);
   r = H.call({ action: 'status' });
   ok(r.ok && r.mode === 'telegram' && r.tg === false, 'a sheet with no Switches tab: mode ' + r.mode + ', tg ' + r.tg);
   H.ctx.staffSetup();
@@ -1529,10 +1671,12 @@ function checkVerify() {
   // Its one button: the live game with the nonce (this phone sent no back), so that page verifies at once.
   ok(H.tg.sent.length === 1 && H.tg.sent[0].chat === TG1 && H.tg.sent[0].text === TG_SAY.verified && H.tg.sent[0].preview === true &&
     JSON.stringify(H.tg.sent[0].markup) === backKb(GAME + '?tg=' + t), 'the verified answer ' + JSON.stringify(H.tg.sent));
-  // Curator info: empty here, since no tgcheck said the box was ticked (agree; its own cases below, 3 Nov c).
+  // Curator info: empty here, since no tgcheck said the box was ticked (agree; its own cases below, 3 Nov c). Username:
+  // the sender's, as text (3 Nov c; its own cases in checkReset).
   row = tgRows(H, TG1);
   ok(row.length === 1 && row[0][0] === dayOf(H) && row[0][3] === '' && row[0][4] === 'Devcon VIII Mumbai' && row[0][5] === 'curate bot' &&
-    row[0][6] === '' && typeof row[0][1] === 'string' && H.writes.indexOf('\'' + TG1) > -1, 'the contacts row ' + JSON.stringify(row));
+    row[0][6] === '' && row[0][7] === tgUser(TG1) && row[0].length === 8 && typeof row[0][1] === 'string' && H.writes.indexOf('\'' + TG1) > -1 &&
+    H.writes.indexOf('\'' + tgUser(TG1)) > -1, 'the contacts row ' + JSON.stringify(row));
   ok(H.props.TG_OFFSET === String(i + 1), 'TG_OFFSET ' + H.props.TG_OFFSET + ' after update ' + i);
   // The same nonce again: still verified, from the cache, no poll; for 6 h only.
   gets = H.tg.gets;
@@ -1734,7 +1878,7 @@ function checkVerify() {
   t = nonce(); r = tgcheck(q, t, { agree: 1 });
   ok(r.ok && r.verified === false && q.cache['tga:' + t] && q.cache['tga:' + t].t === q.clock + q.ctx.TG_NONCE_S * 1000, 'agree kept for the nonce ' + JSON.stringify(q.cache['tga:' + t]));
   q.tg.say(TG1, '/start ' + t); tgcheck(q, t);
-  ok(tgRows(q, TG1).length === 1 && tgRows(q, TG1)[0][3] === 'yes' && q.cache['tgc:' + TG1].v === 'yes', 'a ticked verify: ' + JSON.stringify(tgRows(q, TG1)));
+  ok(tgRows(q, TG1).length === 1 && tgRows(q, TG1)[0][3] === 'yes' && q.cache['tgc:' + TG1].v === 'yes|' + tgUser(TG1), 'a ticked verify: ' + JSON.stringify(tgRows(q, TG1)));
   [true, '1', 2, 'yes', [1], { agree: 1 }, 0].forEach(function (x, j) {
     var nn = nonce(), who = TG3 + 10 + j;
     tgcheck(q, nn, { agree: x }); q.tg.say(who, '/start ' + nn); tgcheck(q, nn);
@@ -1742,14 +1886,14 @@ function checkVerify() {
   });
   t = nonce(); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
   r = tgcheck(q, t, { agree: 1 });
-  ok(r.verified && !q.cache['tga:' + t] && tgRows(q, TG2)[0][3] === '' && q.cache['tgc:' + TG2].v === '1', 'agree after the verify ' + JSON.stringify(tgRows(q, TG2)));
+  ok(r.verified && !q.cache['tga:' + t] && tgRows(q, TG2)[0][3] === '' && q.cache['tgc:' + TG2].v === '1|' + tgUser(TG2), 'agree after the verify ' + JSON.stringify(tgRows(q, TG2)));
   t = nonce(); tgcheck(q, t, { agree: 1 }); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
-  ok(tgRows(q, TG2).length === 1 && tgRows(q, TG2)[0][3] === 'yes' && q.cache['tgc:' + TG2].v === 'yes', 'a ticked verify after an unticked one ' + JSON.stringify(tgRows(q, TG2)));
+  ok(tgRows(q, TG2).length === 1 && tgRows(q, TG2)[0][3] === 'yes' && q.cache['tgc:' + TG2].v === 'yes|' + tgUser(TG2), 'a ticked verify after an unticked one ' + JSON.stringify(tgRows(q, TG2)));
   before = q.writes.length;
   t = nonce(); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
   delete q.cache['tgc:' + TG2];
   t = nonce(); q.tg.say(TG2, '/start ' + t); tgcheck(q, t);
-  ok(tgRows(q, TG2).length === 1 && tgRows(q, TG2)[0][3] === 'yes' && q.writes.length === before && q.cache['tgc:' + TG2].v === 'yes',
+  ok(tgRows(q, TG2).length === 1 && tgRows(q, TG2)[0][3] === 'yes' && q.writes.length === before && q.cache['tgc:' + TG2].v === 'yes|' + tgUser(TG2),
     'an unticked verify after a ticked one ' + JSON.stringify([tgRows(q, TG2), q.writes.slice(before)]));
   tmp = q.ctx.SpreadsheetApp.openById;
   q.ctx.SpreadsheetApp.openById = function () { throw new Error('boom'); };
@@ -1916,6 +2060,158 @@ function checkVerify() {
 }
 // The contacts sheet's Day for now, as Sheets keeps the "'yyyy-MM-dd" text.
 function dayOf(h) { return h.ctx.Utilities.formatDate(new Date(h.clock), 'Asia/Kolkata', 'yyyy-MM-dd'); }
+
+// ---- Booth web app: Telegram usernames and the desk's reset (3 Nov c) ----
+// The bot keeps each verify's Telegram username (no @; '' when the player has none) next to the ID in the contacts
+// sheet, in a Username column added at the end (an older 7-column header gets it from staffSetup or the first write),
+// rewritten when it changes, and taken off another account's row that held it. The staff action reset finds a player
+// by it (exact, any case, one leading @) and deletes their Tries and Badge claims rows under the lock, so they play 2
+// fresh tries and can get merch again; the contacts row stays, and the log has the staff name and the counts only.
+function checkReset() {
+  var n = 0, H, q, r, t, tmp, before, logs, nn = 0, seq = 0, TG1 = 5550001234, TG2 = 5550009876, TG3 = 5550005555,
+    OLD = 5550000001, id2, id3, HEAD7 = ['Day', 'Contact', 'Kind', 'Curator info', 'Event', 'Source', 'Id'];
+  function ok(cond, msg) { n++; if (!cond) fail('Code.gs reset: ' + msg); }
+  function nonce() { nn++; return ('Rs' + nn + 'aBcDeFgHiJkLmNoPqRsTuVwXyZ').slice(0, 24); }
+  function tok() { seq++; return ('rs' + seq + 'qwertyuiopasdfghjkzx').slice(0, 20); }
+  // fromId sends /start with that username (undefined: tgUser's, null: none); a tgcheck past the 2 s throttle reads it.
+  function verify(h, fromId, user) {
+    var x = nonce();
+    h.tg.say(fromId, '/start ' + x, { username: user }); h.clock += 2100;
+    return h.call({ action: 'tgcheck', nonce: x });
+  }
+  function rowOf(h, id) { return h.contacts.sheets.Contacts.rows.slice(1).filter(function (x) { return x && String(x[1]) === String(id) && x[2] === 'telegram id'; }); }
+  function nameOf(h, id) { var x = rowOf(h, id); return x.length === 1 ? x[0][7] : 'rows: ' + JSON.stringify(x); }
+  function reset(h, name, more) {
+    var b = { action: 'reset', key: h.props.STAFF_KEY, username: name, staff: 'Ana' }, k;
+    for (k in more || {}) b[k] = more[k];
+    return h.call(b);
+  }
+  // A signed try for player id, finished with that score (0: left unfinished); start's reply.
+  function play(h, id, score) {
+    var x = tok(), s = h.call({ action: 'start', badge: id, token: x, app: 'sights', sig: h.sig(id) });
+    h.clock += 60000;
+    if (score) h.call({ action: 'finish', token: x, score: score });
+    return s;
+  }
+  function claim(h, id, tier, cid, more) {
+    var b = { action: 'claim', key: h.props.STAFF_KEY, badge: id, tier: tier, item: 'x', staff: 'Ana', id: cid }, k;
+    for (k in more || {}) b[k] = more[k];
+    return h.call(b);
+  }
+  function triesOf(h, id) { return h.tab('Tries').rows.slice(1).filter(function (x) { return x && x[2] === id; }).length; }
+  function claimsOf(h, id) { return h.tab('Badge claims').rows.slice(1).filter(function (x) { return x && x[1] === id; }).length; }
+  if (!GS_SRC) return;
+  // The header: an older 7-column one gets Username from staffSetup (its rows stay as they are) or from the bot's first
+  // write; a header row that isn't the script's is left alone. (A new sheet's: checkServer.)
+  q = gsHarness({ token: true }); tmp = q.contacts.sheets.Contacts;
+  tmp.appendRow(HEAD7); tmp.appendRow(['\'2026-11-02', '\'' + OLD, 'telegram id', 'yes', 'Devcon VIII Mumbai', 'curate bot', '']);
+  q.ctx.staffSetup();
+  ok(tmp.rows[0].join() === HEAD7.concat('Username').join() && tmp.rows[1].length === 7 && tmp.getLastRow() === 2, 'staffSetup on a 7-column header ' + JSON.stringify(tmp.rows));
+  // A player who verified before 2026-11-03c gets their username on their next verify, on the row they have.
+  verify(q, OLD, 'Old_Name');
+  ok(rowOf(q, OLD).length === 1 && nameOf(q, OLD) === 'Old_Name' && rowOf(q, OLD)[0][3] === 'yes', 'an older row on its next verify ' + JSON.stringify(rowOf(q, OLD)));
+  q = gsHarness({ token: true }); tmp = q.contacts.sheets.Contacts; tmp.appendRow(HEAD7);
+  r = verify(q, TG1, 'Ana_K');
+  ok(r.verified && tmp.rows[0][7] === 'Username' && nameOf(q, TG1) === 'Ana_K', 'the bot’s first write on a 7-column header ' + JSON.stringify(tmp.rows));
+  q = gsHarness({ token: true }); tmp = q.contacts.sheets.Contacts; tmp.appendRow(['Notes', 'x']); q.ctx.staffSetup();
+  ok(tmp.rows[0].join() === 'Notes,x', 'a header row that isn’t the script’s was changed ' + JSON.stringify(tmp.rows[0]));
+  // Stored as text on every /start NONCE, rewritten when it changes or goes; the same one again writes nothing.
+  H = gsHarness({ token: true }); H.ctx.staffSetup();
+  id2 = H.tgId(TG2); id3 = H.tgId(TG3);
+  r = verify(H, TG1, 'Ana_K');
+  ok(r.verified && r.badge === H.tgId(TG1) && nameOf(H, TG1) === 'Ana_K' && H.writes.indexOf('\'Ana_K') > -1 && H.cache['tgc:' + TG1].v === '1|Ana_K',
+    'a verify keeps the username ' + JSON.stringify(rowOf(H, TG1)));
+  before = H.writes.length;
+  verify(H, TG1, 'Ana_K'); delete H.cache['tgc:' + TG1]; verify(H, TG1, 'Ana_K');
+  ok(H.writes.length === before && nameOf(H, TG1) === 'Ana_K', 'the same username again wrote ' + JSON.stringify(H.writes.slice(before)));
+  verify(H, TG1, 'Ana_Kay');
+  ok(rowOf(H, TG1).length === 1 && nameOf(H, TG1) === 'Ana_Kay' && H.cache['tgc:' + TG1].v === '1|Ana_Kay', 'a changed username ' + JSON.stringify(rowOf(H, TG1)));
+  verify(H, TG1, null);
+  ok(nameOf(H, TG1) === '' && H.cache['tgc:' + TG1].v === '1|', 'a dropped username ' + JSON.stringify(rowOf(H, TG1)));
+  // Not a Telegram username (4–32 letters, digits or _): kept as none.
+  verify(H, TG1, 'Ana_K');
+  ['abc', 'bad-name', 'x'.repeat(33), '@Ana_K', ' Ana_K', '=1+1', 5].forEach(function (u) {
+    verify(H, TG1, u);
+    ok(nameOf(H, TG1) === '', 'username ' + JSON.stringify(u) + ' was stored as ' + JSON.stringify(nameOf(H, TG1)));
+  });
+  // All digits stays text; a value cached by 2026-11-03b (no bar) reads the row once more and sets its username.
+  verify(H, TG3 + 1, '12345');
+  ok(nameOf(H, TG3 + 1) === '12345' && H.writes.indexOf('\'12345') > -1, 'an all-digit username is not text ' + JSON.stringify(rowOf(H, TG3 + 1)));
+  // A 4-character username (collectible, sold on Fragment) is one too.
+  verify(H, TG3 + 3, 'Nate');
+  ok(nameOf(H, TG3 + 3) === 'Nate', 'a 4-character username ' + JSON.stringify(rowOf(H, TG3 + 3)));
+  H.cache['tgc:' + TG1] = { v: '1', t: H.clock + 99999 };
+  verify(H, TG1, 'Ana_K');
+  ok(nameOf(H, TG1) === 'Ana_K' && H.cache['tgc:' + TG1].v === '1|Ana_K', 'a row cached by 2026-11-03b got no username ' + JSON.stringify(rowOf(H, TG1)));
+  // A username is one account's at a time: another account verifying with it (any case) takes it, and the first row's
+  // cache goes, so its next verify reads the sheet.
+  verify(H, TG2, 'ana_k');
+  ok(nameOf(H, TG1) === '' && nameOf(H, TG2) === 'ana_k' && !H.cache['tgc:' + TG1] && rowOf(H, TG1).length === 1,
+    'a username another account now holds ' + JSON.stringify([rowOf(H, TG1), rowOf(H, TG2)]));
+  // A failed add waits with its username; one queued by 2026-11-03b ([ID, ticked]) is added with none.
+  tmp = H.ctx.SpreadsheetApp.openById; H.ctx.SpreadsheetApp.openById = function () { throw new Error('boom'); };
+  r = verify(H, TG3, 'Cara_3');
+  H.ctx.SpreadsheetApp.openById = tmp;
+  ok(r.verified && H.cache.tgq && H.cache.tgq.v === JSON.stringify([[String(TG3), false, 'Cara_3']]), 'a waiting add ' + JSON.stringify(H.cache.tgq));
+  H.cache.tgq.v = JSON.stringify(JSON.parse(H.cache.tgq.v).concat([[String(TG3 + 2), true]]));
+  H.clock += 2100; H.call({ action: 'tgcheck', nonce: nonce() });
+  ok(nameOf(H, TG3) === 'Cara_3' && nameOf(H, TG3 + 2) === '' && rowOf(H, TG3 + 2)[0][3] === 'yes' && !H.cache.tgq,
+    'the waiting adds once the sheet is back ' + JSON.stringify([rowOf(H, TG3), rowOf(H, TG3 + 2)]));
+
+  // reset. ana_k (TG2): a Teal round, a try left unfinished between Cara_3's (TG3) and the claim; Cara_3: one round
+  // and a K- ticket claim. Its rows go, bottom up; Cara_3's stay in order.
+  play(H, id2, S.tiers[1] + 40); play(H, id3, 100); play(H, id2, 0);
+  ok(claim(H, id2, 'teal', 'claimrs00001').ok && claim(H, id3, 'gold', 'claimrs00002', { ticket: 'K-RST001' }).ok &&
+    [triesOf(H, id2), claimsOf(H, id2), triesOf(H, id3), claimsOf(H, id3)].join() === '2,1,1,1', 'the reset cases’ rows');
+  // The staff key, then an exact username only: nothing changes and nothing is logged.
+  before = H.snap(); logs = H.logs.length;
+  ok(H.call({ action: 'reset', username: 'ana_k' }).error === 'wrongkey' && reset(H, 'ana_k', { key: 'WRONG' }).error === 'wrongkey', 'reset without the staff key');
+  [undefined, null, '', '   ', '@', 'ana', 'ana_', 'na_k', 'ana_k2', 'ana k', '@@ana_k', 'ana_k@', '@ ana_k', 'ana_k\n2', String(TG2), 'Ana_Kay',
+    tgUser(TG2), 'Old_Name'].forEach(function (u) {
+    r = reset(H, u);
+    ok(JSON.stringify(r) === '{"ok":false,"error":"nouser"}', 'reset of ' + JSON.stringify(u) + ': ' + JSON.stringify(r));
+  });
+  ok(H.snap() === before && H.logs.length === logs, 'a refused reset wrote or logged ' + H.logs.slice(logs));
+  // Found: one leading @, spaces round it, any case.
+  tmp = H.contacts.sheets.Contacts.getLastRow();
+  r = reset(H, '  @ANA_K ', { staff: '=Ana' });
+  ok(r.ok === true && r.tries === 2 && r.claims === 1 && r.open === true && Array.isArray(r.soldOut) && r.mode === 'telegram' &&
+    triesOf(H, id2) === 0 && claimsOf(H, id2) === 0 && H.rows('Tries') === 2 && H.tab('Tries').rows[1][2] === id3 && claimsOf(H, id3) === 1 &&
+    H.rows('Badge claims') === 2, 'a reset ' + JSON.stringify(r) + ' ' + JSON.stringify(H.tab('Tries').rows.slice(1)));
+  ok(nameOf(H, TG2) === 'ana_k' && H.contacts.sheets.Contacts.getLastRow() === tmp, 'the reset touched the contacts row ' + JSON.stringify(rowOf(H, TG2)));
+  ok(H.logs.length === logs + 1 && H.logs[logs] === 'reset by \'=Ana: 2 tries, 1 claims', 'the reset’s log ' + JSON.stringify(H.logs.slice(logs)));
+  // After it: 2 fresh tries, then the limit; the desk sees a new round and gives merch again.
+  r = play(H, id2, S.tiers[2] + 20); q = play(H, id2, 0);
+  ok(r.counted && r.tryNo === 1 && r.left === 1 && q.counted && q.tryNo === 2 && q.left === 0 && play(H, id2, 0).reason === 'limit', 'tries after a reset ' + JSON.stringify([r, q]));
+  r = H.call({ action: 'check', key: H.props.STAFF_KEY, badge: id2, sig: H.sig(id2) });
+  ok(r.ok && r.used === false && r.earned === 2 && r.triesUsed === 2 && claim(H, id2, 'purple', 'claimrs00003').ok, 'merch after a reset ' + JSON.stringify(r));
+  // Nothing left to delete is still found; an all-digit name; a busy lock writes nothing.
+  r = [reset(H, 'Cara_3'), reset(H, 'cara_3')].map(function (x) { return [x.ok, x.tries, x.claims].join(); });
+  ok(r.join(' ') === 'true,1,1 true,0,0' && H.logs[H.logs.length - 1] === 'reset by Ana: 0 tries, 0 claims' && reset(H, '12345').ok === true &&
+    reset(H, 'nate').ok === true, 'reset with nothing left, an all-digit or a 4-character name ' + JSON.stringify(r));
+  H.lockBusy = true; before = H.snap();
+  r = reset(H, 'ana_k');
+  H.lockBusy = false;
+  ok(r.error === 'busy' && H.snap() === before, 'a reset under a held lock ' + JSON.stringify(r));
+  // After /stop the row is gone, so the name is too.
+  H.tg.say(TG2, '/stop'); H.clock += 2100; H.call({ action: 'tgcheck', nonce: nonce() });
+  ok(rowOf(H, TG2).length === 0 && reset(H, 'ana_k').error === 'nouser', 'a reset after /stop');
+  // Never a username, a Telegram ID or a player id in a log line, nor a username in the badge sheet.
+  tmp = H.logs.join('\n');
+  ok(['ana_k', 'Ana_K', 'Cara_3', '12345', 'Nate', 'Old_Name', String(TG2), String(TG3), id2, id3].every(function (x) { return tmp.toLowerCase().indexOf(x.toLowerCase()) < 0; }),
+    'a log line holds a username or an id:\n' + tmp);
+  tmp = JSON.stringify(H.bound.sheets);
+  ok(['ana_k', 'Ana_K', 'Cara_3', 'Username'].every(function (x) { return tmp.indexOf(x) < 0; }), 'the badge sheet holds a username');
+  // No contacts tab: nouser. The contacts sheet broken: server, logged as 'error reset' only.
+  q = gsHarness({ token: true }); q.ctx.staffSetup(); delete q.contacts.sheets.Contacts;
+  ok(reset(q, 'ana_k').error === 'nouser', 'a reset with no Contacts tab');
+  q.ctx.SpreadsheetApp.openById = function () { throw new Error('boom ana_k ' + TG2); };
+  r = reset(q, 'ana_k');
+  ok(r.ok === false && r.error === 'server' && q.logs[q.logs.length - 1] === 'error reset', 'a reset with the contacts sheet broken ' + JSON.stringify([r, q.logs.slice(-1)]));
+  console.log('Booth web app: usernames and reset\n  ' + n + ' cases (Username header, stored and rewritten on each verify, kept as text, one account at a time, ' +
+    'waiting adds, reset by exact username with the staff key, Tries and claims deleted bottom up, contact kept, 2 fresh tries and merch again, ' +
+    'busy, /stop, logs with counts only)');
+}
 
 // ---- Rewards ----
 // rewards.js and earn.js in vm "pages" that share one fake localStorage, like two tabs on one phone. No real DOM:
@@ -2767,9 +3063,10 @@ function checkTelegramMode() {
 
 // ---- Staff desk (3 Nov review) ----
 // site/staff/desk.js in a vm against stub elements and a booth script (gsHarness) whose replies wait until flush(), so a
-// reply can land while a screen is open. Today: Advanced follows a mode the sheet reports while it is open.
+// reply can land while a screen is open. Today: Advanced follows a mode the sheet reports while it is open; 3 Nov c:
+// Advanced's Reset a player (a confirm names the player, then the sheet's reset), each request sent kept in `sent`.
 function checkDesk() {
-  var n = 0, G = gsHarness({ token: true }), els = {}, waiting = [], radios, ctx, ls = new Store();
+  var n = 0, G = gsHarness({ token: true }), els = {}, waiting = [], sent = [], radios, ctx, ls = new Store(), TGB = 5550007777, bob, x, r;
   function ok(cond, msg) { n++; if (!cond) fail('desk.js: ' + msg); }
   function flush() { var w = waiting; waiting = []; w.forEach(function (f) { f(); }); }
   function radio(v) { return radios.filter(function (r) { return r.value === v; })[0]; }
@@ -2783,7 +3080,10 @@ function checkDesk() {
       querySelectorAll: function (q) { return q === 'input[name="adv-mode"]' ? radios : []; },
       querySelector: function (q) { return q === 'input[name="adv-mode"]:checked' ? radios.filter(function (r) { return r.checked; })[0] || null : null; } },
     CurateBadge: { endpoint: function () { return 'https://test/exec'; },
-      post: function (body, done) { waiting.push(function () { done(null, G.call(JSON.parse(JSON.stringify(body)))); }); } } };
+      post: function (body, done) {
+        sent.push(JSON.parse(JSON.stringify(body)));
+        waiting.push(function () { done(null, G.call(JSON.parse(JSON.stringify(body)))); });
+      } } };
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(STAFF, 'desk.js'), 'utf8'), ctx, { filename: 'desk.js' });
@@ -2807,7 +3107,72 @@ function checkDesk() {
   flush();
   ok(els['adv-now'].textContent === 'Now: players verify with their badge.' && radio('telegram').checked && !radio('badge').checked && !els['adv-apply'].disabled,
     'a reply moved the lead’s pick: ' + els['adv-now'].textContent);
-  console.log('Staff desk\n  ' + n + ' cases (Advanced follows a mode reply while open, keeps the lead’s pick)');
+  // Reset a player (3 Nov c). Bob_K verified with the bot, played both tries (a Teal round) and got merch.
+  G.tg.say(TGB, '/start DeskResetNonce0123456789', { username: 'Bob_K' }); G.clock += 2100;
+  G.call({ action: 'tgcheck', nonce: 'DeskResetNonce0123456789' });
+  bob = G.tgId(TGB);
+  ['deskrs1qwertyuiopasd', 'deskrs2qwertyuiopasd'].forEach(function (t, i) {
+    G.call({ action: 'start', badge: bob, token: t, app: 'sights', sig: G.sig(bob) }); G.clock += 60000;
+    if (!i) G.call({ action: 'finish', token: t, score: S.tiers[1] + 40 });
+  });
+  r = G.call({ action: 'claim', key: G.props.STAFF_KEY, badge: bob, tier: 'teal', item: 'x', staff: 'Ana', id: 'deskrs00001' });
+  ok(r.ok && G.rows('Tries') === 3 && G.rows('Badge claims') === 2, 'Bob_K’s rows ' + JSON.stringify(r));
+  // Advanced opens with the section empty and Reset player off; a name (one @ and spaces dropped) turns it on.
+  els['adv-cancel'].click(); flush(); els['adv-go'].click();
+  ok(els['rs-name'].value === '' && els['rs-go'].disabled && els['rs-ask'].hidden && els['rs-msg'].textContent === '', 'Reset a player as Advanced opens');
+  els['rs-name'].value = '  @ '; els['rs-name'].fire('input');
+  ok(els['rs-go'].disabled, 'Reset player is on for a name of only @');
+  els['rs-name'].value = '  @Bob_K '; els['rs-name'].fire('input');
+  ok(!els['rs-go'].disabled, 'a name typed: Reset player is still off');
+  // Its confirm names the player, with the spec's words; Cancel, or editing the name, closes it with nothing sent.
+  x = sent.length; els['rs-go'].click();
+  ok(els['rs-ask'].hidden === false && els['rs-go'].hidden === true && sent.length === x &&
+    els['rs-q'].textContent === 'Reset @Bob_K? Their tries and merch record are deleted: they can play 2 new tries and get merch again.', 'the confirm: ' + els['rs-q'].textContent);
+  els['rs-no'].click();
+  ok(els['rs-ask'].hidden && !els['rs-go'].hidden && sent.length === x, 'the confirm’s Cancel');
+  els['rs-go'].click(); els['rs-name'].value = 'Bob_K2'; els['rs-name'].fire('input');
+  ok(els['rs-ask'].hidden && !els['rs-go'].hidden && els['rs-q'].textContent === '' && sent.length === x, 'editing the name left the confirm open');
+  // Yes, reset: one request with the name as typed (no @), Advanced's two buttons off until the reply (the lead's
+  // mode change is ready: Telegram picked, CHANGE typed), then Done with the counts, and the box empty.
+  radio('telegram').checked = true; radio('badge').checked = false; els['adv-confirm'].value = 'CHANGE'; els['adv-confirm'].fire('input');
+  els['rs-name'].value = '@bob_k'; els['rs-name'].fire('input'); els['rs-go'].click(); els['rs-yes'].click();
+  ok(sent.length === x + 1 && JSON.stringify(sent[x]) === JSON.stringify({ action: 'reset', username: 'bob_k', staff: 'Ana', key: G.props.STAFF_KEY }) &&
+    els['rs-msg'].textContent === 'Resetting @bob_k…' && els['rs-ask'].hidden && els['rs-go'].disabled && els['adv-apply'].disabled,
+    'Yes, reset: ' + JSON.stringify(sent.slice(x)) + ' / ' + els['rs-msg'].textContent);
+  els['rs-yes'].click(); els['adv-apply'].click();
+  ok(sent.length === x + 1, 'a second request went while the reset was out');
+  flush();
+  ok(els['rs-msg'].textContent === 'Done: @bob_k can start again. (2 tries, 1 merch deleted)' && els['rs-name'].value === '' && els['rs-go'].disabled &&
+    !els['adv-apply'].disabled && G.rows('Tries') === 1 && G.rows('Badge claims') === 1 && els.adv.hidden === false, 'after the reset: ' + els['rs-msg'].textContent);
+  // Again (nothing left: the counts say so, 1 try in the singular), then a name the sheet doesn't have: kept in the box.
+  G.call({ action: 'start', badge: bob, token: 'deskrs3qwertyuiopasd', app: 'sights', sig: G.sig(bob) });
+  els['rs-name'].value = 'Bob_K'; els['rs-name'].fire('input'); els['rs-go'].click(); els['rs-yes'].click(); flush();
+  ok(els['rs-msg'].textContent === 'Done: @Bob_K can start again. (1 try, 0 merch deleted)', 'one try: ' + els['rs-msg'].textContent);
+  els['rs-name'].value = 'Bob'; els['rs-name'].fire('input');
+  ok(els['rs-msg'].textContent === '', 'typing kept the last result');
+  els['rs-go'].click(); els['rs-yes'].click(); flush();
+  ok(els['rs-msg'].textContent === 'That user is not in the DB.' && els['rs-name'].value === 'Bob' && !els['rs-go'].disabled, 'nouser: ' + els['rs-msg'].textContent);
+  // The sheet busy, then a script from before 2026-11-03c (no reset action): the desk's usual lines.
+  G.lockBusy = true; els['rs-name'].value = 'Bob_K'; els['rs-go'].click(); els['rs-yes'].click(); flush(); G.lockBusy = false;
+  ok(els['rs-msg'].textContent === 'Can’t reach the list. Check the connection, then try again.', 'busy: ' + els['rs-msg'].textContent);
+  r = G.ctx.STAFF_.reset; delete G.ctx.STAFF_.reset;
+  els['rs-go'].click(); els['rs-yes'].click(); flush(); G.ctx.STAFF_.reset = r;
+  ok(els['rs-msg'].textContent === 'The booth sheet script can’t reset players yet. Ask the booth lead to update it.', 'an older script: ' + els['rs-msg'].textContent);
+  // A reply that lands after Advanced closed changes nothing on screen, and Advanced opens clean again.
+  els['rs-go'].click(); els['rs-yes'].click(); els['adv-cancel'].click(); flush();
+  ok(els.adv.hidden && els['rs-msg'].textContent.indexOf('Done') < 0, 'a late reset reply: ' + els['rs-msg'].textContent);
+  els['adv-go'].click();
+  ok(els['rs-msg'].textContent === '' && els['rs-name'].value === '' && els['rs-ask'].hidden && !els['rs-go'].hidden, 'Advanced opened after a reset');
+  // A mode change out holds Reset player off; a wrong key goes back to the key screen.
+  radio('telegram').checked = true; radio('badge').checked = false; els['adv-confirm'].value = 'CHANGE'; els['adv-confirm'].fire('input');
+  els['rs-name'].value = 'Bob_K'; els['rs-name'].fire('input'); els['adv-apply'].click();
+  ok(els['rs-go'].disabled && sent[sent.length - 1].action === 'setmode', 'Reset player while a mode change is out');
+  flush(); flush(); els['adv-go'].click();   // the mode change, then home's stats
+  G.props.STAFF_KEY = 'NEWKEY2345678ABC';
+  els['rs-name'].value = 'Bob_K'; els['rs-name'].fire('input'); els['rs-go'].click(); els['rs-yes'].click(); flush();
+  ok(els.setup.hidden === false && els.adv.hidden, 'a wrong key did not go back to the key screen');
+  console.log('Staff desk\n  ' + n + ' cases (Advanced follows a mode reply while open, keeps the lead’s pick; Reset a player: the confirm, Cancel, ' +
+    'one request at a time, Done with the counts, not in the DB, busy, an older script, a late reply, a wrong key)');
 }
 
 // ---- badge.js ----
@@ -2923,7 +3288,11 @@ var PROFILES = [   // name, mix share, accuracy, mean decision s, pick accuracy
   ['Expert', 0.07, 0.95, 1.7, 0.95], ['Strong', 0.20, 0.90, 2.2, 0.9], ['Average', 0.38, 0.82, 2.8, 0.8],
   ['Casual', 0.25, 0.72, 3.5, 0.65], ['Novice', 0.10, 0.62, 4.3, 0.5]
 ];
-var TARGET = { standard: [26, 36, 24, 14] }, TOLERANCE = 4;   // 2 Nov: one 90 s round, no time bonus; Gold = a perfect round (best of 2 tries)
+// 2 Nov: one 90 s round, no time bonus; Gold = a perfect round (best of 2 tries): §2.8's 26 / 36 / 24 / 14.
+// 3 Nov c (owner: kinder points, 100 a right answer and 10 a wrong one, Teal at 6 right, Purple at 8, Gold for 10 of 10):
+// simulated 4.5 / 21.4 / 49.9 / 24.2 %, so about half the players reach Purple and a quarter Gold, by the owner's choice.
+// With 5 fakes a round (so Correct on everything stays under Teal), 3 Nov: 4.5 / 21.2 / 50.2 / 24 %.
+var TARGET = { standard: [5, 21, 50, 24] }, TOLERANCE = 4;
 function gauss(rand) { return Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand()); }
 function lognormal(rand, mean) { return Math.exp(Math.log(mean) - SIGMA * SIGMA / 2 + SIGMA * gauss(rand)); }
 function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
@@ -3012,12 +3381,12 @@ function simulate() {
         pad(s.decided, 9) + pad(s.median, 8) + pad(shares(s.one).join('/'), 14) + shares(s.best).join('/'));
     });
     mix = mix.map(function (x) { return Math.round(x * 10) / 10; });
-    console.log('  Mix: ' + mix.join(' / ') + ' %   (§2.8: ≈ ' + TARGET[mode].join(' / ') + ' %, ±' + TOLERANCE + ')' +
+    console.log('  Mix: ' + mix.join(' / ') + ' %   (target ≈ ' + TARGET[mode].join(' / ') + ' %, ±' + TOLERANCE + ')' +
       '   tiers ' + S.tiers.join(' / '));
     if (FIT && !relaxed) fit(all);
     mix.forEach(function (x, i) {
       if (Math.abs(x - TARGET[mode][i]) > TOLERANCE) {
-        (relaxed ? warn : fail)(mode + ' mix tier ' + i + ' is ' + x + '%, §2.8 says ' + TARGET[mode][i] + '% ±' + TOLERANCE);
+        (relaxed ? warn : fail)(mode + ' mix tier ' + i + ' is ' + x + '%, TARGET says ' + TARGET[mode][i] + '% ±' + TOLERANCE);
       }
     });
   });
@@ -3036,8 +3405,10 @@ function fit(all) {
   console.log('  Fit: tiers [0, ' + cut.join(', ') + '] would give about ' + TARGET.standard.join(' / ') + ' %');
 }
 // Lazy strategies must never reach Teal. Random fast swiping is reported only: it calls 10 entries by coin flip
-// and picks a random part, right 1 time in 4 (v4, no pick: about 7% reached Teal); see the README notes.
-// A round here is one try, so the lazy lines hold for each of the day’s tries.
+// and picks a random part, right 1 time in 4 (v4, no pick: about 7% reached Teal); see the README notes. 3 Nov c:
+// the part no longer scores and Teal is 6 right, so random swiping (5 right in 10 on average) reaches Teal far more;
+// Correct on everything is 5 right (5 fakes a round), so it stays a failure. A round here is one try, so the lazy
+// lines hold for each try.
 function simLazy(rand) {
   console.log('\nLazy strategies, standard (' + RUNS + ' rounds each)');
   [['let', 'Correct on everything'], ['challenge', 'Wrong on everything'], ['idle', 'Idle'],
@@ -3066,6 +3437,7 @@ function simLazy(rand) {
 
 // ---- Main ----
 checkSettings();
+try { checkScoring(); } catch (e) { fail('scoring: the checks threw ' + e.stack); }
 checkCredits();
 checkSchema();
 checkDealing();
@@ -3073,6 +3445,7 @@ checkLint();
 checkCopy();
 try { checkServer(); } catch (e) { fail('Code.gs: the server checks threw ' + e.message); }
 try { checkVerify(); } catch (e) { fail('Code.gs verify: the checks threw ' + e.stack); }
+try { checkReset(); } catch (e) { fail('Code.gs reset: the checks threw ' + e.stack); }
 try { checkRewards(); } catch (e) { fail('rewards.js: the ticket checks threw ' + e.message); }
 try { checkBadgeMode(); } catch (e) { fail('badge mode: the checks threw ' + e.stack); }
 try { checkTelegramMode(); } catch (e) { fail('telegram mode: the checks threw ' + e.stack); }

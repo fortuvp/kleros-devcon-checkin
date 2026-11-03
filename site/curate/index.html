@@ -80,7 +80,9 @@ button { font:inherit; color:inherit; touch-action:manipulation; }
 /* No hero stage any more: the real pictures live on the app cards, and the block sits a little below the top bar */
 .title { margin-top:clamp(4px,calc(100svh - 760px),22px); }
 #brief:has(#welcome:not([hidden])) .title { margin-top:clamp(2px,calc(100svh - 800px),22px); }   /* returning players: room for the chip */
-#brief h1 { font-size:clamp(28px,8.4vw,36px); line-height:1.06; letter-spacing:-.02em; margin-top:5px; background:linear-gradient(180deg,#fff 35%,#c7b6ff 115%); -webkit-background-clip:text; background-clip:text; color:transparent; }
+/* The clipped gradient paints inside the box only: the padding keeps the last line's descenders (the g of “get”),
+   the negative margin the layout */
+#brief h1 { font-size:clamp(28px,8.4vw,36px); line-height:1.06; letter-spacing:-.02em; margin-top:5px; padding-bottom:.12em; margin-bottom:-.12em; background:linear-gradient(180deg,#fff 35%,#c7b6ff 115%); -webkit-background-clip:text; background-clip:text; color:transparent; }
 .lead { margin:7px auto 0; max-width:30em; font-size:14px; line-height:1.42; color:#ddd3ff; text-wrap:balance; }
 /* Gesture hint: one compact row; Wrong is red and Correct green, the same colours as the buttons and the flash */
 .hints { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:6px 8px; margin:10px 0 0; padding:0; list-style:none; font:600 12.5px Inter,sans-serif; }
@@ -711,11 +713,12 @@ a.primary[aria-disabled=true]:active { transform:none; }
      rewards.js shows the paragraph for how players verify: Telegram, or the contact step (badge and none modes, v6) ---- -->
 <details id="curate-privacy">
   <summary>Privacy</summary>
-  <p id="cp-tg">If you play with Telegram, Cooperative Kleros keeps your Telegram user ID (a number: never your name or
-  username) in a private list, to send you Telegram messages through the Kleros Booth bot on how to take part in real
-  contests across Kleros apps. We keep it until you send /stop
-  to the bot, which deletes it, or ask us to delete it: <span id="cp-mail-tg">ask at the booth</span>. Your game tries
-  are stored under a scrambled code, in a separate list, never next to your Telegram ID.</p>
+  <p id="cp-tg">If you play with Telegram, Cooperative Kleros keeps your Telegram user ID (a number) and your Telegram
+  username (if you have one) in a private list, to send you Telegram messages through the Kleros Booth bot on how to
+  take part in real contests across Kleros apps. Booth staff can use your username to find your game tries and reset
+  them. We keep both until you send /stop to the bot, which deletes them, or ask us to delete them:
+  <span id="cp-mail-tg">ask at the booth</span>. Your game tries are stored under a scrambled code, in a separate list,
+  never next to your Telegram ID or username.</p>
   <p id="cp-contact" hidden>If you leave an email or @Telegram to unlock merch, Cooperative Kleros keeps it in a private list for the
   Kleros newsletter, and for curator info only if you tick that box. A Telegram handle gets one message with the
   newsletter channel link, nothing else. We keep it until you unsubscribe or ask us to delete it:
@@ -793,7 +796,7 @@ a.primary[aria-disabled=true]:active { transform:none; }
       <li>Anyone can challenge an entry that breaks the rules.</li>
       <li>Kleros jurors decide. The winner takes the deposit.</li>
     </ol>
-    <p>Here: Wrong is a challenge. Tap the wrong part for extra points. Effort counts: your score never drops below 10 points per entry you decide.</p>
+    <p>Here: Wrong is a challenge. 100 points for each right answer, 10 for trying. Teal at 6 right, Purple at 8, Gold for 10 out of 10.</p>
     <p id="how-merch" hidden></p>   <!-- rewards.js: who gets the tries, by how players verify -->
     <p class="not-kiosk"><a class="link" href="https://docs.kleros.io/products/curate" target="_blank" rel="noopener">Read about Kleros Curate →</a></p>
     <h3 id="credits-title">Photo credits</h3>

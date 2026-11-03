@@ -5,8 +5,8 @@
 // their best game round earned, and staff record what they hand over. Badge reading, hashing, the camera and the
 // network live in /curate/badge.js (shared with the game, so both hash a badge alike): only the salted hash
 // leaves this phone. Checking saves nothing; only tapping an item adds a row. Advanced, at the bottom of home,
-// changes the mode for every phone. Never talks to the check-in backend. User text reaches the DOM through
-// textContent only.
+// changes the mode for every phone and resets a Telegram player by username. Never talks to the check-in backend.
+// User text reaches the DOM through textContent only.
 // /staff/?test=1 calibrates badges (raw text, normalised id, verdict, pattern) without saving anything: use it
 // on real badges to set settings.js badge.pattern (and badge.typed) before opening badge play.
 (function () {
@@ -29,6 +29,7 @@
   // modeNew: Advanced just changed it (home says "now" until the next home).
   var mode = TEST ? 'badge' : 'telegram', modeNew = false;
   var seen = [];   // test mode: this session's scans { raw, id }, newest last
+  var asked = '';   // Advanced, Reset a player: the username its open confirm step names ('' while closed)
 
   // Always reached at call time (never cached at load), like the game does.
   function B() { return window.CurateBadge; }
@@ -404,15 +405,18 @@
   // bottom of home behind a typed CHANGE: only the booth lead should use it. Nothing changes until the sheet says ok.
   function picked() { var r = document.querySelector('input[name="adv-mode"]:checked'); return r ? r.value : ''; }
   function pick(m) { Array.prototype.forEach.call(document.querySelectorAll('input[name="adv-mode"]'), function (r) { r.checked = r.value === m; }); }
+  // One request at a time in Advanced: a mode change and a reset each wait for the other.
   function advReady() {
     var m = picked();
     $('adv-apply').disabled = busy || !m || m === mode || $('adv-confirm').value.trim().toUpperCase() !== 'CHANGE';
+    $('rs-go').disabled = busy || !rsName();
   }
   $('adv-go').addEventListener('click', function () {
     if (TEST) return;
     show('adv');
     pick(mode);
     $('adv-confirm').value = ''; txt('adv-msg', '');
+    $('rs-name').value = ''; rsAsk(''); txt('rs-msg', '');
     txt('adv-now', 'Now: players verify with ' + MODE_NAME[mode] + '.');
     advReady();
     window.scrollTo(0, 0);
@@ -424,7 +428,7 @@
     var m = picked(), g = gen;
     advReady();
     if ($('adv-apply').disabled) return;
-    busy = true; $('adv-apply').disabled = true; txt('adv-msg', 'Changing…');
+    busy = true; advReady(); txt('adv-msg', 'Changing…');
     post({ action: 'setmode', mode: m, staff: me.staff || '' }, function (e, j) {
       if (g !== gen) return;
       busy = false;
@@ -437,6 +441,43 @@
       }
       if (MODES.indexOf(j.mode) > -1) mode = j.mode; else mode = m;
       home(); modeNew = true; modeLine();
+    });
+  });
+
+  // ---- Advanced: reset a player ----
+  // Deletes one Telegram player's tries and merch record (the sheet keeps their contact row), so they play 2 fresh
+  // tries and can get merch again. Found by Telegram username, exact match only: the sheet ignores case and one
+  // leading @, and logs only the counts. Asks first, then resets the name it asked about.
+  function rsName() { return $('rs-name').value.trim().replace(/^@/, ''); }
+  function rsAsk(name) {
+    asked = name;
+    $('rs-ask').hidden = !name; $('rs-go').hidden = !!name;
+    txt('rs-q', name ? 'Reset @' + name + '? Their tries and merch record are deleted: they can play 2 new tries and get merch again.' : '');
+  }
+  function count(n, one, more) { n = Number(n) || 0; return n + ' ' + (n === 1 ? one : more); }
+  // Typing closes the confirm step, so it never names someone other than the box.
+  $('rs-name').addEventListener('input', function () { rsAsk(''); if (!busy) txt('rs-msg', ''); advReady(); });
+  $('rs-go').addEventListener('click', function () {
+    advReady();
+    if ($('rs-go').disabled) return;
+    rsAsk(rsName()); txt('rs-msg', '');
+  });
+  $('rs-no').addEventListener('click', function () { rsAsk(''); advReady(); });
+  $('rs-yes').addEventListener('click', function () {
+    var name = asked, g = gen;
+    if (busy || !name) return;
+    rsAsk(''); busy = true; advReady(); txt('rs-msg', 'Resetting @' + name + '…');
+    post({ action: 'reset', username: name, staff: me.staff || '' }, function (e, j) {
+      if (g !== gen) return;
+      busy = false;
+      if (e === 'key') { home(); return; }
+      if (!e && j.ok) $('rs-name').value = '';
+      txt('rs-msg', e ? 'Can’t reach the list. Check the connection, then try again.' :
+        j.ok ? 'Done: @' + name + ' can start again. (' + count(j.tries, 'try', 'tries') + ', ' + (Number(j.claims) || 0) + ' merch deleted)' :
+        j.error === 'nouser' ? 'That user is not in the DB.' :
+        j.error === 'badrequest' ? 'The booth sheet script can’t reset players yet. Ask the booth lead to update it.' :
+        'That didn’t go through. Try again, or ask the booth lead.');
+      advReady();
     });
   });
 

@@ -617,12 +617,12 @@
   // ---- HUD ----
   // Under the opaque flash a bump is unseen and forces a reflow in the flash's first frame: play it as the flash lifts.
   function bumpScore() { bump($('score-v'), 'bump'); }
-  function hudScore(raw) {
+  function hudScore(raw, quiet) {   // quiet: no bump
     var sv = $('score-v'), pips = document.querySelectorAll('#streak i'), segs = document.querySelectorAll('#meter i');
     var t = S.tiers, on = score ? score.streak % S.points.streakEvery : 0, i, k;
     if (sv && sv.textContent !== (raw < 0 ? MINUS : '') + fmt(raw)) {
       sv.textContent = (raw < 0 ? MINUS : '') + fmt(raw);
-      if (!flashOn) bumpScore(); else if (flashQ.indexOf(bumpScore) < 0) flashQ.push(bumpScore);
+      if (!quiet) { if (!flashOn) bumpScore(); else if (flashQ.indexOf(bumpScore) < 0) flashQ.push(bumpScore); }
     }
     for (i = 0; i < pips.length; i++) pips[i].classList.toggle('on', i < on);
     for (i = 0; i < segs.length; i++) {
@@ -672,7 +672,7 @@
     flashSet('fl-line', f.line || '');
     flashSet('fl-extra', f.extra || '');
     // #flash is shown and filled in one task, which screen readers rarely announce; #say carries the verdict (word first).
-    say((f.tone === 'bad' ? 'Wrong.' : 'Correct.') + ' ' + f.pts + ' points.' + (f.line ? ' ' + f.line.replace(/\.?$/, '.') : '') +
+    say((f.tone === 'bad' ? 'Wrong.' : 'Correct.') + (f.pts ? ' ' + f.pts + ' points.' : '') + (f.line ? ' ' + f.line.replace(/\.?$/, '.') : '') +
       (f.extra ? ' ' + f.extra.split(' · ').join('. ') + '.' : ''));
     if (f.extra && f.tone === 'good') ms += 350;   // a streak or a tier needs a beat to read
     flashOn = true; flashT0 = now();
@@ -702,9 +702,10 @@
     var x = item.fix;
     return item.bad === listOf(item).objField ? x.charAt(0).toLowerCase() + x.slice(1) : x;
   }
-  // The flash for an outcome (rules.js judge). Points come from settings so the copy follows any retune.
+  // The flash for an outcome (rules.js judge). Points come from settings so the copy follows any retune;
+  // a mistake's +10 is no reward: the red flash hides it.
   function verdict(o, item, picked) {
-    var f = { tone: o.correct ? 'good' : 'bad', pts: signed(o.points), line: '' };
+    var f = { tone: o.correct ? 'good' : 'bad', pts: o.correct || o.points < 0 ? signed(o.points) : '', line: '' };
     if (o.kind === 'catch') {
       if (o.evidence === 'sharp') f.line = 'You spotted the ' + partName(item, picked);
       else if (o.evidence === 'wrong') { f.tone = 'soft'; f.line = 'The wrong part was the ' + partName(item, item.bad) + (item.fix ? ': ' + fixText(item) : '') + '.'; }
@@ -746,7 +747,7 @@
     }
     f.extra = extra.join(' · ');
     flash(f);
-    hudScore(R.shown(score));   // effort points: the score never drops below 10 per entry decided
+    hudScore(R.shown(score), !o.correct);
     if (!o.correct) buzz([20, 40, 20]); else if (o.kind === 'catch') buzz(12);
     fly(top, action === 'challenge' ? -1 : 1, o);
     advance();
@@ -860,7 +861,7 @@
     if (pc) contest(pc, false);
     mode = 'ended'; clockOn = false;
     R.finish(score);   // no time bonus: the score is the answers
-    hudScore(R.shown(score));   // effort points: the score never drops below 10 per entry decided
+    hudScore(R.shown(score));   // with the effort points (rules.js shown)
     if (by === 'done') {
       // After the last card's flash.
       afterFlash(function () {

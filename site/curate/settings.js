@@ -3,15 +3,14 @@
 // After changing points, seconds or tiers, run `node scripts/curate-check.js --sim` to see the new tier shares.
 window.CURATE_SETTINGS = {
   v: 1,
-  seconds: 90, entries: 10, fakes: 4,       // 2 Nov: one calm 90 s round for everyone (no More time option)
+  seconds: 90, entries: 10, fakes: 5,       // 2 Nov: one calm 90 s round for everyone. 3 Nov c: 5 fakes, so all Correct = 5 right
   windows: [],                               // v5: no per-card countdown and no auto-listing
-  points: { catch: 75, evidence: 50, letThrough: 25, wrongChallenge: -75, leak: -75,
-            streakEvery: 5, streakBonus: 50, effort: 10 },
-  // evidence: the fake part picked in pick mode. 2 Nov: no time bonus: the score comes from the answers only.
-  // effort: the score never drops below this many points per entry decided, so a played round never scores 0
-  // (10 entries × 10 = 100, well under Teal: effort alone wins no merch).
+  points: { catch: 100, evidence: 0, letThrough: 100, wrongChallenge: 10, leak: 10,
+            streakEvery: 5, streakBonus: 0, effort: 10 },
+  // 3 Nov: 100 points per right answer, 10 per wrong one, 0 undecided. No evidence or streak bonus: the part picked
+  // only teaches (streakEvery stays: nothing divides by zero). effort: the floor per entry decided.
   trust: { leak: -15, wrongChallenge: -5 },
-  tiers: [0, 300, 550, 750],                 // Everyone, Teal, Purple, Gold (2 Nov: refitted by --fit for answers-only scoring; Gold = a perfect round; Code.gs TIERS matches: curate-check.js fails if not)
+  tiers: [0, 600, 800, 1000],                // Everyone, Teal, Purple, Gold (3 Nov: Teal = 6 right, Purple = 8, Gold = 10 of 10, whatever the wrong ones add; Code.gs TIERS matches: curate-check.js fails if not)
   checkinNeededFrom: 1,                      // v6 mode only (no server): every tier above Everyone needs a confirmed check-in on this phone (anti-replay: the check-in dedupes by email/Telegram); 3 = Gold only
   countedTries: 2,                           // counted tries for the whole event: per player id (Telegram, badge or phone) with the server, per phone in v6 mode; no daily reset (Code.gs TRIES_PER_BADGE matches)
   kioskMaxTier: 1,                           // v6 mode only: a booth tablet caps at this tier (badge mode: the badge is the identity, no cap)

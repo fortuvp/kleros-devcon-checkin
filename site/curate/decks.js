@@ -509,7 +509,7 @@
                   fields: [['photo', 'Photo'], ['name', 'Name'], ['city', 'City'], ['country', 'Country']], objField: 'photo' }
       },
       intro: { good: 's-eiffel' },   // the intro’s correct example; practice[0] is its wrong one
-      split: { sights: [10, 4] },   // [entries, fakes]
+      split: { sights: [10, 5] },   // [entries, fakes] (= settings.js)
       practice: sights([
         ['p-eiffel', 'eiffel', 1, 'eiffel', 'Eiffel Tower', 'Marseille', 'France', 'The Eiffel Tower is in Paris, not Marseille.',
           'city', 'know', 'Paris']
@@ -530,7 +530,7 @@
                      objField: 'flag' }
       },
       intro: { good: 'c-in' },
-      split: { countries: [10, 4] },
+      split: { countries: [10, 5] },
       practice: country([
         ['p-india', 'in', 1, 'in', 'India', 'Mumbai', '.in', 'Mumbai is big, but New Delhi is the capital.',
           'capital', 'know', 'New Delhi']
@@ -551,7 +551,7 @@
                   fields: [['logo', 'Logo'], ['name', 'Name'], ['ticker', 'Ticker'], ['site', 'Website']], objField: 'logo' }
       },
       intro: { good: 't-btc' },
-      split: { tokens: [10, 4] },
+      split: { tokens: [10, 5] },
       practice: tokens([
         ['p-btc', 'btc', 1, 'btc', 'Bitcoin', 'BTC', 'bitcoin-giveaway.com', 'Giveaway sites are a trick. It’s bitcoin.org.',
           'site', 'know', 'bitcoin.org']

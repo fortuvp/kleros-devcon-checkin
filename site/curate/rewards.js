@@ -583,7 +583,7 @@
     // Capped by the count, not by fakes: say why.
     txt('rep-title', cb === 2 && band < 2 ? (sum.endedBy === 'time' ? 'Out of time' : 'Ended early') :
       band3(copy.headlines, HEADLINES, Math.max(band, cb)));
-    // A fake marked Wrong is right even with the wrong part picked: the part only changes the points.
+    // A fake marked Wrong is right even with the wrong part picked: the part only changes the flash's line.
     txt('rep-sub', fmt(right) + ' of ' + fmt(of) + ' right');
     // What happened to the app's list, in plain words: how many fakes were marked Correct. A round cut short
     // with few cards seen says nothing about the list, so it gets no line.

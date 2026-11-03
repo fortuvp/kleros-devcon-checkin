@@ -2,33 +2,33 @@
 // step, and the staff merch desk at /staff/. Bound to the badge list Sheet (Extensions › Apps Script); the contacts go
 // to a separate Sheet by id. Separate from the booth check-in backend (apps-script/Code.gs), which it never touches.
 // Public actions (no key): status, start, finish, contact, tgcheck. Staff actions (staff key): check, claim, stats,
-// setmode.
+// setmode, reset.
 // Players verify as the Switches "Verify with" cell says: Telegram (the default: the bot @KlerosBoothBot, read by
 // tgcheck, the tap's own one by long poll for half a minute, and the 1-minute tgTick trigger, polling getUpdates, no
 // webhook), badge (a scanned Devcon badge) or none (a random id made on the phone). The bot's "verified" answer has one button, Back to the game: the page the phone verified
 // from (or the live game) with ?tg=NONCE, which verifies that page at once in whatever browser Telegram opens.
 // Whatever the mode, the "badge" field is the player id, 64 hex characters, so tries, claims and stats never change.
 // Player data never goes to the contacts Sheet and contacts never go to the badge Sheet: the badge Sheet holds only
-// a yes/no "contact given" flag per player. A Telegram ID sits in the contacts Sheet only (the player id is an HMAC
-// of it). Setup (paste, run staffSetup, add TG_TOKEN, run telegramTest, deploy): apps-script/staff-desk/README.md.
+// a yes/no "contact given" flag per player. A Telegram ID and username sit in the contacts Sheet only (the player id
+// is an HMAC of the ID). Setup (paste, run staffSetup, add TG_TOKEN, run telegramTest, deploy): see README.md here.
 // staffSetup also installs tgTick, so /stop is read even when no phone is verifying (and after the web app is archived).
-var SCRIPT_V = '2026-11-03b';   // shown by doGet and status: tells the owner which pasted copy is live
+var SCRIPT_V = '2026-11-03c';   // shown by doGet and status: tells the owner which pasted copy is live
 var SHEET_ID = '';   // empty: the Sheet this script is bound to (the badge list); else that Sheet's id
 var CONTACTS_SHEET_ID = '1LzRQ9IizuRMrqWAclFuY2v0bONkgxb2ezvXPbVsBtIc';   // the newsletter contacts, a separate Sheet
 var CLAIMS = 'Badge claims', TRIES = 'Tries', SWITCHES = 'Switches', CONTACTS = 'Contacts';   // tab names
 var CLAIM_HEAD = ['Time', 'Badge (hashed)', 'Tier', 'Item', 'Ticket', 'Staff', 'Id', 'How'];   // How added at the end only
 var TRY_HEAD = ['Token', 'Day', 'Badge (hashed)', 'Try', 'Started', 'Finished', 'Score', 'Tier', 'App', 'Kiosk', 'Contact'];
-var CONTACT_HEAD = ['Day', 'Contact', 'Kind', 'Curator info', 'Event', 'Source', 'Id'];   // no badge, score or token, ever
+var CONTACT_HEAD = ['Day', 'Contact', 'Kind', 'Curator info', 'Event', 'Source', 'Id', 'Username'];   // no badge, score or token, ever; Username added at the end only
 var SWITCH_ROWS = ['Merch open', 'Teal sold out', 'Purple sold out', 'Gold sold out', 'Verify with'];   // labels in Switches!A, read by label
 var SWITCH_DEFAULTS = [true, false, false, false, 'Telegram'];   // a missing label takes its default; Verify with is text, not a checkbox
 var MODES = ['telegram', 'badge', 'none'];   // how players verify: the Verify with cell lower-cased; anything else reads as telegram
 var MODE_NAMES = ['Telegram', 'Badge', 'None'];   // the Verify with dropdown, in MODES order
-var TIERS = [0, 300, 550, 750];   // = settings.js tiers (scripts/curate-check.js fails if they differ)
+var TIERS = [0, 600, 800, 1000];   // = settings.js tiers (scripts/curate-check.js fails if they differ)
 var TIER_KEYS = ['teal', 'purple', 'gold'];   // tier 1..3
 var APPS = ['sights', 'countries', 'tokens'];   // deck ids (checked against decks.js)
 var ENDED = ['done', 'time', 'quit'];   // how a round ended (accepted for the record; not stored)
 var TRIES_PER_BADGE = 2;          // counted tries per badge for the whole event, never reset daily (= settings.js countedTries, checked)
-var MAX_SCORE = 750;              // the best possible round under settings.js: answers only, no time bonus (checked)
+var MAX_SCORE = 1000;             // the best possible round under settings.js: 10 right answers at 100 points (checked)
 var MIN_ROUND_MS = 8000;          // start → finish at least: banners plus 10 fast decisions
 var MAX_SEND_MS = 6 * 60 * 60 * 1000;   // start → finish received at most: pauses and dead Wi-Fi fit in 6 h
 var LOCK_MS = 6000;               // tryLock wait: the server answers 'busy' well before the client gives up (20 s)
@@ -65,7 +65,7 @@ function now_() { return new Date(); }
 // Body: JSON text sent as text/plain (no CORS preflight). Every reply is JSON with ok; errors are identifier
 // codes (lowercase letters only) that clients switch on, never prose and never a raw exception message.
 var PUBLIC_ = { status: status_, start: start_, finish: finish_, contact: contact_, tgcheck: tgcheck_ };
-var STAFF_ = { check: check_, claim: claim_, stats: stats_, setmode: setmode_ };
+var STAFF_ = { check: check_, claim: claim_, stats: stats_, setmode: setmode_, reset: reset_ };
 
 function doPost(e) {
   var action = '', d;
@@ -80,8 +80,8 @@ function doPost(e) {
   } catch (err) {
     if (err && err.code) return json_({ ok: false, error: err.code });
     // Never the request body; for a contact not even the message (it carries a visitor's email or handle), nor for
-    // tgcheck (its poll handles Telegram IDs and message text).
-    Logger.log('error ' + action.slice(0, 12) + (action === 'contact' || action === 'tgcheck' ? '' : ': ' + (err && err.message)));
+    // tgcheck (its poll handles Telegram IDs and message text) or reset (a Telegram username).
+    Logger.log('error ' + action.slice(0, 12) + (action === 'contact' || action === 'tgcheck' || action === 'reset' ? '' : ': ' + (err && err.message)));
     return json_({ ok: false, error: 'server' });
   }
 }
@@ -168,13 +168,16 @@ function dayName_(v) { return Utilities.formatDate(new Date(v), TZ, 'EEE d MMM')
 function triesTab_() { return tab_(book_(), TRIES, TRY_HEAD); }
 function triesRows_(sh) { return rows_(sh, TRY_HEAD.length); }
 function done_(r) { return r[5] !== '' && r[5] !== null && r[6] !== '' && r[6] !== null; }
-// The badge's best finished round over all days (ties: the earlier one), or null.
+// The badge's best finished round over all days, or null: the highest stored tier, then the highest score (ties: the
+// earlier one). A retune never downgrades a tier already earned (rows from before 2026-11-03c are on the 750 scale).
 function best_(rows, badge) {
-  var b = null, i, r;
+  var b = null, i, r, t, bt;
   for (i = 0; i < rows.length; i++) {
     r = rows[i];
     if (String(r[2]) !== badge || !done_(r)) continue;
-    if (!b || Number(r[6]) > Number(b[6])) b = r;
+    t = Number(r[7]) || 0;
+    bt = b ? Number(b[7]) || 0 : -1;
+    if (!b || t > bt || (t === bt && Number(r[6]) > Number(b[6]))) b = r;
   }
   if (!b) return null;
   return { score: Number(b[6]), tier: Number(b[7]) || 0, app: String(b[8] || ''), at: hhmm_(b[5]), day: dayName_(b[5]),
@@ -397,8 +400,8 @@ function tgBack_(cache, nonce, d) {
 // bot gets "/start NONCE" from their Telegram user ID. No webhook: tgcheck and the tgTick trigger poll getUpdates. The
 // player id is an HMAC of that ID under TG_SECRET (Script properties), so the raw ID never reaches the badge Sheet or
 // the game; only the contacts Sheet holds it, for the bot's messages (on real contests across Kleros apps, when the
-// player ticked the box), until the player sends /stop.
-// The bot token, nonces, Telegram IDs and message text are never logged.
+// player ticked the box), until the player sends /stop. Their username sits next to it, for the desk's reset.
+// The bot token, nonces, Telegram IDs, usernames and message text are never logged.
 function tgToken_() { return String(PropertiesService.getScriptProperties().getProperty('TG_TOKEN') || '').trim(); }
 // The HMAC key: made by staffSetup, or here on first use. Changing it gives every Telegram player new ids, and so
 // new tries: never change it during the event.
@@ -498,18 +501,18 @@ function tgTrigger_() {
   ScriptApp.newTrigger('tgTick').timeBased().everyMinutes(TG_TICK_MIN).create();
 }
 // Reads the bot's new private messages once and answers them: "/start NONCE" caches the nonce's Telegram ID for
-// tgcheck and adds the ID to the contacts Sheet (its answer's button leads back to the game: tgBackUrl_); "/stop"
-// deletes it; anything else gets the help text. TG_OFFSET (Script properties) marks what was read. Telegram down or
-// refusing: nothing changes, the next poll tries again. wait: seconds Telegram may hold the read open for a first
-// message (a long poll, tgWatch_), else 0. Says whether Telegram answered.
+// tgcheck and adds the ID and username to the contacts Sheet (its answer's button leads back to the game:
+// tgBackUrl_); "/stop" deletes it; anything else gets the help text. TG_OFFSET (Script properties) marks what was
+// read. Telegram down or refusing: nothing changes, the next poll tries again. wait: seconds Telegram may hold the
+// read open for a first message (a long poll, tgWatch_), else 0. Says whether Telegram answered.
 // The contacts Sheet only feeds the bot's messages, so a write to it that fails never stops verifying or the offset:
 // a failed add waits in the cache ('tgq', 6 h, like the nonces) for the next poll, and a failed /stop asks the player
 // to send it again (STOPPED only once the rows are gone; a /stop also drops a waiting add, so it never comes back).
 function tgPoll_(wait) {
   var props = PropertiesService.getScriptProperties(), token = tgToken_(), offset = Number(props.getProperty('TG_OFFSET')) || 0;
   var cache = CacheService.getScriptCache(), next = offset, out = [], bot = '@' + TG_BOT.toLowerCase(), book = {};
-  var q = tgQueue_(), queued = q.length, left = [], res, read, i, u, m, w, cmd, id, say, yes;
-  for (i = 0; i < q.length; i++) { try { addTgContact_(q[i][0], book, q[i][1]); } catch (x) { left.push(q[i]); } }   // last poll's failed adds
+  var q = tgQueue_(), queued = q.length, left = [], res, read, i, u, m, w, cmd, id, say, yes, who;
+  for (i = 0; i < q.length; i++) { try { addTgContact_(q[i][0], book, q[i][1], q[i][2]); } catch (x) { left.push(q[i]); } }   // last poll's failed adds
   q = left;
   res = tgCall_(token, 'getUpdates', 'offset=' + offset + '&timeout=' + (wait || 0) + '&limit=100&allowed_updates=' + encodeURIComponent('["message"]'));
   read = !!res.ok && Array.isArray(res.result);
@@ -526,7 +529,8 @@ function tgPoll_(wait) {
       if (cmd === '/start' && w.length === 2 && NONCE_RE.test(w[1])) {
         cache.put('tgn:' + w[1], id, TG_NONCE_S);
         yes = !!cache.get('tga:' + w[1]);   // the game said this nonce's player ticked the box
-        try { addTgContact_(id, book, yes); } catch (x) { tgEnqueue_(q, id, yes); }
+        who = tgName_(m.from.username);
+        try { addTgContact_(id, book, yes, who); } catch (x) { tgEnqueue_(q, id, yes, who); }
         out.push({ chat: m.chat.id, text: TG_SAY.verified, url: tgBackUrl_(cache, w[1]) });
       } else if (cmd === '/stop') {
         q = q.filter(function (x) { return x[0] !== id; });
@@ -543,16 +547,19 @@ function tgPoll_(wait) {
   return read;
 }
 // Telegram IDs whose contacts row failed to save, for the next poll (cache only: 6 h, the most a nonce lasts too),
-// each as [ID, ticked]. A bare ID (queued by 2026-11-03a) has no tick on record.
+// each as [ID, ticked, username]. A bare ID (queued by 2026-11-03a) has no tick on record; none before 2026-11-03c
+// has a username.
 function tgQueue_() {
   var q;
   try { q = JSON.parse(CacheService.getScriptCache().get('tgq') || '[]'); } catch (x) { q = []; }
-  return Array.isArray(q) ? q.map(function (x) { return Array.isArray(x) ? [String(x[0]), x[1] === true] : [String(x), false]; }) : [];
+  return Array.isArray(q) ? q.map(function (x) {
+    return Array.isArray(x) ? [String(x[0]), x[1] === true, tgName_(x[2])] : [String(x), false, ''];
+  }) : [];
 }
-// A failed add waits once per Telegram ID; a tick on any of its verifies counts.
-function tgEnqueue_(q, id, yes) {
-  for (var i = 0; i < q.length; i++) if (q[i][0] === id) { q[i][1] = q[i][1] || yes; return; }
-  q.push([id, yes]);
+// A failed add waits once per Telegram ID; a tick on any of its verifies counts, and the latest username.
+function tgEnqueue_(q, id, yes, who) {
+  for (var i = 0; i < q.length; i++) if (q[i][0] === id) { q[i][1] = q[i][1] || yes; q[i][2] = who; return; }
+  q.push([id, yes, who]);
 }
 function tgQueueSave_(q) {
   var cache = CacheService.getScriptCache();
@@ -582,7 +589,7 @@ function tgSend_(token, out) {
 // so a broken contacts Sheet costs one failed open per poll, not one per message. Throws while it can't be had.
 function tgBook_(book) {
   if (!book.sh && !book.bad) {
-    try { book.sh = tab_(contactsBook_(), CONTACTS, CONTACT_HEAD); } catch (x) { book.bad = true; }
+    try { book.sh = tab_(contactsBook_(), CONTACTS, CONTACT_HEAD); contactsHead_(book.sh); } catch (x) { book.bad = true; }
   }
   if (!book.sh) throw new Error('contacts sheet');
   return book.sh;
@@ -590,22 +597,43 @@ function tgBook_(book) {
 // A verified Telegram ID in the contacts Sheet, once (Kind 'telegram id'; no player id, score or token, as ever).
 // Curator info is yes only when the game said the player ticked the consent box (messages on taking part in real
 // contests): agree on the nonce's tgcheck ('tga:', yes here). A page opened before the tick existed says nothing, so
-// its player's row has it empty; a later verify with the tick sets it on the row already there. The cache ('tgc:')
-// remembers the row and whether it says yes.
-function addTgContact_(tgId, book, yes) {
-  var id = String(tgId), cache = CacheService.getScriptCache(), had = cache.get('tgc:' + id), sh, rows, i;
-  if (had === 'yes' || (had && !yes)) return;
+// its player's row has it empty; a later verify with the tick sets it on the row already there.
+// Username (who: no @, '' when the player has none) is what this verify's /start came with: a changed or dropped one
+// is rewritten. A username is one account's at a time, so another row still holding it loses it (the desk's reset then
+// finds the account that has it now). The cache ('tgc:') remembers what the row says: yes or 1, a bar, the username
+// (a value cached before 2026-11-03c has no bar, so that row is read once more and gets its username).
+function addTgContact_(tgId, book, yes, who) {
+  var id = String(tgId), cache = CacheService.getScriptCache(), had = String(cache.get('tgc:' + id) || '').split('|');
+  var sh, rows, i, mine = -1, on;
+  who = tgName_(who);
+  if (had.length === 2 && had[1] === who && (had[0] === 'yes' || !yes)) return;
   sh = tgBook_(book || {});
-  rows = rows_(sh, 4);
+  rows = rows_(sh, CONTACT_HEAD.length);
   for (i = 0; i < rows.length; i++) {
-    if (String(rows[i][1]).replace(/^'/, '') === id && String(rows[i][2]) === 'telegram id') {
-      if (yes && rows[i][3] !== 'yes') sh.getRange(i + 2, 4, 1, 1).setValue('yes');
-      cache.put('tgc:' + id, yes || rows[i][3] === 'yes' ? 'yes' : '1', 21600);
-      return;
+    if (String(rows[i][2]) !== 'telegram id') continue;
+    if (String(rows[i][1]).replace(/^'/, '') === id) { if (mine < 0) mine = i; continue; }
+    if (who && tgName_(rows[i][7]).toLowerCase() === who.toLowerCase()) {
+      sh.getRange(i + 2, 8, 1, 1).setValue('');
+      cache.remove('tgc:' + String(rows[i][1]).replace(/^'/, ''));
     }
   }
-  sh.appendRow(["'" + dayKey_(now_()), text_(id), 'telegram id', yes ? 'yes' : '', 'Devcon VIII Mumbai', 'curate bot', '']);
-  cache.put('tgc:' + id, yes ? 'yes' : '1', 21600);
+  if (mine >= 0) {
+    on = yes || rows[mine][3] === 'yes';
+    if (yes && rows[mine][3] !== 'yes') sh.getRange(mine + 2, 4, 1, 1).setValue('yes');
+    if (tgName_(rows[mine][7]) !== who) sh.getRange(mine + 2, 8, 1, 1).setValue(text_(who));
+  } else {
+    on = yes;
+    sh.appendRow(["'" + dayKey_(now_()), text_(id), 'telegram id', yes ? 'yes' : '', 'Devcon VIII Mumbai', 'curate bot', '', text_(who)]);
+  }
+  cache.put('tgc:' + id, (on ? 'yes' : '1') + '|' + who, 21600);
+}
+// A Telegram username as the contacts Sheet keeps it (no @), or '' when there is none or it isn't one. 4 to 32: the
+// 4-character ones are collectible (Fragment), and a Devcon crowd has them.
+function tgName_(v) { v = String(v == null ? '' : v).replace(/^'/, ''); return /^[A-Za-z0-9_]{4,32}$/.test(v) ? v : ''; }
+// An older 7-column contacts header row (before 2026-11-03c) gets Username at the end; older rows keep it empty.
+function contactsHead_(sh) {
+  var h = sh.getRange(1, 1, 1, 8).getValues()[0];
+  if (h[0] === 'Day' && h[7] === '') sh.getRange(1, 8, 1, 1).setValue('Username');
 }
 // /stop: every contacts row of this Telegram ID goes (bottom up, so the row numbers ahead stay right).
 function removeTgContact_(tgId, book) {
@@ -705,6 +733,39 @@ function setmode_(d) {
   return { ok: true, mode: mode };
 }
 
+// ---- Staff: reset ----
+// The desk's hidden Advanced panel, Reset a player: a Telegram username (as typed: one leading @ or none, any case,
+// as Telegram reads them) → every Tries and Badge claims row of that player goes, so they get 2 new tries and can get
+// merch again. Only an exact match on a contacts row's Username counts; anything else is nouser (so is a player who
+// verified before 2026-11-03c or has no username). Their contacts row stays (their consent, and the name). Logged with
+// the staff name and the counts only, never the username or the Telegram ID.
+function reset_(d) {
+  var want = String(d.username == null ? '' : d.username).trim().replace(/^@/, '').toLowerCase(), sh, rows, i, tg = '', badge, n;
+  if (want) {
+    sh = contactsBook_().getSheetByName(CONTACTS);
+    rows = sh ? rows_(sh, CONTACT_HEAD.length) : [];
+    for (i = 0; i < rows.length; i++) {
+      if (String(rows[i][2]) === 'telegram id' && tgName_(rows[i][7]).toLowerCase() === want) tg = String(rows[i][1]).replace(/^'/, '');
+    }
+  }
+  if (!tg) throw fail_('nouser');
+  badge = tgId_(tg);
+  n = locked_(function () {
+    var t = dropRows_(triesTab_(), 2, badge), c = dropRows_(claimsTab_(), 1, badge);
+    SpreadsheetApp.flush();
+    return { tries: t, claims: c };
+  });
+  Logger.log('reset by ' + plain_(String(d.staff || '').slice(0, 40)) + ': ' + n.tries + ' tries, ' + n.claims + ' claims');
+  return { ok: true, tries: n.tries, claims: n.claims };
+}
+// Deletes every row whose column col (0-based) is this player id, bottom up (so the row numbers ahead stay right);
+// says how many went.
+function dropRows_(sh, col, badge) {
+  var rows = rows_(sh, col + 1), n = 0, i;
+  for (i = rows.length - 1; i >= 0; i--) if (String(rows[i][col]) === badge) { sh.deleteRow(i + 2); n++; }
+  return n;
+}
+
 // ---- Staff key ----
 function staffOk_(k) {
   var want = PropertiesService.getScriptProperties().getProperty('STAFF_KEY');
@@ -737,6 +798,7 @@ function staffSetup() {
   protect_(tab_(ss, TRIES, TRY_HEAD));
   protect_(switchesTab_(ss));
   contacts = tab_(cs, CONTACTS, CONTACT_HEAD);
+  contactsHead_(contacts);   // an older header row gets Username at the end
   contacts.setFrozenRows(1);
   protect_(contacts);
   // Owner-only is real only when nobody else can edit the file.
@@ -748,7 +810,7 @@ function staffSetup() {
   tgTrigger_();   // once: reads /stop every TG_TICK_MIN, also when no phone is verifying
   CacheService.getScriptCache().remove('switches');
   Logger.log('Staff key: ' + key);
-  Logger.log('Ready (' + SCRIPT_V + '): Badge claims, Tries, Switches (with Verify with); Contacts in the contacts sheet.');
+  Logger.log('Ready (' + SCRIPT_V + '): Badge claims, Tries, Switches (with Verify with); Contacts (with Username) in the contacts sheet.');
   Logger.log(tgToken_() ? 'Telegram: ready' :
     'Telegram: add TG_TOKEN in Project Settings › Script properties, then run telegramTest');
   Logger.log('Telegram: the bot is read every ' + (TG_TICK_MIN === 1 ? 'minute' : TG_TICK_MIN + ' minutes') +

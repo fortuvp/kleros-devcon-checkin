@@ -74,8 +74,15 @@ button.tiny { width:auto; min-height:0; margin:40px auto 0; padding:8px 14px; ba
 #adv .opt input { flex:none; width:22px; height:22px; margin:2px 0 0; padding:0; accent-color:var(--purple); }
 #adv .opt b { display:block; font-size:17px; }
 #adv-apply { background:var(--bad); }
-#adv-apply:disabled { opacity:.4; cursor:default; }
+#adv-apply:disabled, #rs-go:disabled { opacity:.4; cursor:default; }
 #adv-msg { margin-top:10px; font-weight:600; }
+/* Advanced, Reset a player: a confirm step names the player before anything is deleted */
+#adv h2 { font-size:22px; line-height:1.2; margin:36px 0 0; padding-top:20px; border-top:1px solid rgba(255,255,255,.12); }
+#rs-ask { margin-top:12px; padding:14px; border-radius:16px; background:var(--panel); }
+#rs-q { margin:0; font-weight:600; font-size:17px; overflow-wrap:anywhere; }
+#rs-yes { background:var(--bad); }
+#rs-msg { margin-top:10px; font-weight:600; overflow-wrap:anywhere; }
+#adv-cancel { margin-top:24px; }   /* leaves Advanced: kept apart from the confirm step's own Cancel */
 </style>
 </head>
 <body>
@@ -123,7 +130,8 @@ button.tiny { width:auto; min-height:0; margin:40px auto 0; padding:8px 14px; ba
     <button type="button" class="ghost" id="type-cancel">Cancel</button>
   </section>
 
-  <!-- Advanced: how every player verifies, on every phone (the Switches "Verify with" row). Booth lead only. -->
+  <!-- Advanced: how every player verifies, on every phone (the Switches "Verify with" row), and resetting one Telegram
+       player by username so they can play and get merch again. Booth lead only. -->
   <section id="adv" hidden>
     <h1>How players verify</h1>
     <p class="danger">⚠️ Danger. This changes how every player verifies, on every phone, within a minute. Only the booth lead should change it.</p>
@@ -137,6 +145,15 @@ button.tiny { width:auto; min-height:0; margin:40px auto 0; padding:8px 14px; ba
     <label for="adv-confirm">Type CHANGE to confirm</label><input id="adv-confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12">
     <button type="button" id="adv-apply" disabled>Change for everyone</button>
     <p id="adv-msg" role="status"></p>
+    <h2>Reset a player</h2>
+    <label for="rs-name">Telegram username (without @)</label><input id="rs-name" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="40">
+    <button type="button" id="rs-go" disabled>Reset player</button>
+    <div id="rs-ask" hidden>
+      <p id="rs-q"></p>
+      <button type="button" id="rs-yes">Yes, reset</button>
+      <button type="button" class="ghost" id="rs-no">Cancel</button>
+    </div>
+    <p id="rs-msg" role="status"></p>
     <button type="button" class="ghost" id="adv-cancel">Cancel</button>
   </section>
 </div>
